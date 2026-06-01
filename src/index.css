@@ -1,75 +1,188 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.625rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --bg-primary: #0D0B09;
+    --bg-secondary: #161210;
+    --bg-card: rgba(255, 255, 255, 0.03);
+    --bg-card-hover: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.06);
+    --border-hover: rgba(255, 255, 255, 0.12);
+    --text-primary: #F0E6D8;
+    --text-secondary: rgba(240, 230, 216, 0.5);
+    --text-muted: rgba(240, 230, 216, 0.3);
+    --accent-caramel: #D4943A;
+    --accent-amber: #E8A94E;
+    --accent-bright: #F5C06A;
+    --accent-dim: rgba(212, 148, 58, 0.15);
+    --success: #5BA86C;
+    --warning: #D4943A;
+    --radius: 0.75rem;
+    --radius-sm: 0.5rem;
+    --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
   }
 
-  .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    word-break: keep-all;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+@layer components {
+  /* ---- Grid Background ---- */
+  .bg-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 48px 48px;
   }
-  body {
-    @apply bg-background text-foreground;
+
+  .bg-grid-dense {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* ---- Glass Panel ---- */
+  .glass-panel {
+    background: var(--bg-card);
+    backdrop-filter: blur(20px) saturate(130%);
+    -webkit-backdrop-filter: blur(20px) saturate(130%);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius);
+    transition: border-color 0.3s ease, background 0.3s ease;
+  }
+
+  .glass-panel:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-card-hover);
+  }
+
+  /* ---- Terminal Panel (for code blocks / logs) ---- */
+  .terminal-panel {
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius);
+  }
+
+  /* ---- Section Label ---- */
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-caramel);
+    opacity: 0.7;
+  }
+
+  /* ---- Status Dot ---- */
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .status-dot-online {
+    background-color: var(--success);
+    box-shadow: 0 0 6px var(--success);
+  }
+
+  .status-dot-busy {
+    background-color: var(--warning);
+    box-shadow: 0 0 6px var(--warning);
+  }
+
+  .status-dot-idle {
+    background-color: var(--text-muted);
+  }
+
+  /* ---- Scrollbar ---- */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+
+  /* ---- Ring Text 3D ---- */
+  .ring-scene {
+    perspective: 800px;
+    transform-style: preserve-3d;
+  }
+
+  .ring-container {
+    position: relative;
+    transform-style: preserve-3d;
+    animation: ringSpin 30s linear infinite;
+  }
+
+  .ring-container:hover {
+    animation-play-state: paused;
+  }
+
+  .ring-char {
+    position: absolute;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent-caramel);
+    text-shadow: 0 0 8px rgba(212, 148, 58, 0.4);
+    backface-visibility: hidden;
+    white-space: pre;
+  }
+
+  @keyframes ringSpin {
+    from { transform: rotateY(0deg); }
+    to { transform: rotateY(360deg); }
+  }
+
+  /* ---- Progress Bar ---- */
+  .progress-track {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent-caramel), var(--accent-amber));
+    transition: width 1s ease;
+  }
+
+  /* ---- Ambient Glow ---- */
+  .glow-amber {
+    position: relative;
+  }
+
+  .glow-amber::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(212, 148, 58, 0.15), transparent 50%);
+    pointer-events: none;
+    z-index: -1;
   }
 }

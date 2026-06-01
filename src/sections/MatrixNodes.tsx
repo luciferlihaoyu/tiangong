@@ -1,0 +1,125 @@
+import { useRef, useEffect } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+function Scene() {
+  const groupRef = useRef<THREE.Group>(null);
+  const instancedMeshRef = useRef<THREE.InstancedMesh>(null);
+  const positionsRef = useRef<THREE.Vector3[]>([]);
+
+  useEffect(() => {
+    if (!instancedMeshRef.current) return;
+    const dummy = new THREE.Object3D();
+    const sphere: THREE.Vector3[] = [];
+    for (let i = 0; i < 140; i++) {
+      const radius = 9 + Math.random() * 23;
+      const angle = Math.random() * Math.PI * 2;
+      const yPos = -6 + Math.random() * 12;
+      const x = Math.cos(angle) * radius;
+      const y = yPos;
+      const z = Math.sin(angle) * radius;
+      dummy.position.set(x, y, z);
+      const scale = 0.05 + Math.random() * 0.1;
+      dummy.scale.set(scale, scale, scale);
+      dummy.updateMatrix();
+      instancedMeshRef.current.setMatrixAt(i, dummy.matrix);
+      sphere.push(new THREE.Vector3(x, y, z));
+    }
+    instancedMeshRef.current.instanceMatrix.needsUpdate = true;
+    positionsRef.current = sphere;
+  }, []);
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const elapsedTime = state.clock.getElapsedTime() * 0.03;
+    groupRef.current.rotation.y = elapsedTime;
+    state.camera.lookAt(0, 0, 0);
+    groupRef.current.rotation.x = state.mouse.y * 0.1;
+  });
+
+  return (
+    <group ref={groupRef}>
+      <instancedMesh ref={instancedMeshRef} args={[null as any, null as any, 140]}>
+        <sphereGeometry args={[1, 16, 16]} />
+        <meshBasicMaterial color="#D4943A" transparent opacity={0.12} />
+      </instancedMesh>
+      <Connections positions={positionsRef.current} />
+    </group>
+  );
+}
+
+function Connections({ positions }: { positions: THREE.Vector3[] }) {
+  const maxDistance = 4.5;
+  const lines = useRef<{ start: THREE.Vector3; end: THREE.Vector3 }[]>([]);
+
+  useEffect(() => {
+    if (!positions || positions.length === 0) return;
+    const newLines: typeof lines.current = [];
+    for (let i = 0; i < positions.length; i++) {
+      const p1 = positions[i];
+      if (!p1) continue;
+      for (let j = i + 1; j < positions.length; j++) {
+        const p2 = positions[j];
+        if (!p2) continue;
+        const distance = p1.distanceTo(p2);
+        if (distance < maxDistance) {
+          newLines.push({ start: p1, end: p2 });
+        }
+      }
+    }
+    lines.current = newLines;
+  }, [positions]);
+
+  const lineGeo = useRef<THREE.BufferGeometry>(null);
+
+  useEffect(() => {
+    if (!lineGeo.current || lines.current.length === 0) return;
+    const positionsArr: number[] = [];
+    for (const line of lines.current) {
+      positionsArr.push(line.start.x, line.start.y, line.start.z);
+      positionsArr.push(line.end.x, line.end.y, line.end.z);
+    }
+    lineGeo.current.setAttribute('position', new THREE.Float32BufferAttribute(positionsArr, 3));
+  }, [lines.current]);
+
+  return (
+    <lineSegments geometry={lineGeo.current || undefined}>
+      <lineBasicMaterial color="#D4943A" transparent opacity={0.08} />
+    </lineSegments>
+  );
+}
+
+export default function MatrixNodes() {
+  return (
+    <section className="relative w-full py-4 px-4 md:px-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="max-w-7xl mx-auto">
+        <div className="glass-panel p-4 overflow-hidden">
+          <div className="flex items-center justify-between mb-3">
+            <div className="section-label">ARCHITECTURE VISUALIZATION</div>
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>140 nodes · 实时渲染</span>
+          </div>
+          <div className="w-full h-[280px] rounded-lg overflow-hidden" style={{ background: 'rgba(0,0,0,0.2)' }}>
+            <Canvas camera={{ position: [0, 0, 30], fov: 50 }} gl={{ antialias: true, alpha: true }}>
+              <Scene />
+            </Canvas>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+            {[
+              { title: '统一消息网关', desc: 'Slack、邮件、Webhook 消息流自动汇集' },
+              { title: '任务智能分派', desc: 'Agent 自动认领，支持优先级与负载均衡' },
+              { title: '全链路审计', desc: '思考过程与工具调用全记录，透明可控' },
+            ].map((f) => (
+              <div key={f.title} className="flex items-start gap-2 p-2 rounded-lg hover:bg-white/[0.02] transition-colors">
+                <span className="w-1 h-1 rounded-full bg-[var(--accent-caramel)] mt-1.5 flex-shrink-0" />
+                <div>
+                  <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{f.title}</div>
+                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{f.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}

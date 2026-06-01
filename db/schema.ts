@@ -85,4 +85,4 @@ export const systems = mysqlTable("systems", {
 });
 
 export type System = typeof systems.$inferSelect;
-export type InsertSystem = systems.$inferInsert;
+export type InsertSystem = typeof systems.$inferInsert;

@@ -1,14 +1,17 @@
 import { authRouter } from "./auth-router";
+import { agentRouter } from "./agent-router";
+import { taskRouter } from "./task-router";
+import { messageRouter } from "./message-router";
+import { systemRouter } from "./system-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
   auth: authRouter,
-
-  // TODO: add feature routers here, e.g.
-  // todo: createRouter({
-  //   list: publicQuery.query(() => findTodos()),
-  // }),
+  agent: agentRouter,
+  task: taskRouter,
+  message: messageRouter,
+  system: systemRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -155,36 +155,115 @@ function TaskTimeline({ tasks, agents, onProgress, onDelete }: {
 }
 
 // ─── Agent Card ───
-function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
-  agent: MockAgent; onStatusChange: (id: number, s: string) => void;
+function AgentCard({ agent, tasks, onStatusChange, onEdit, onDelete }: {
+  agent: MockAgent; tasks: { id: number; taskId: string; name: string; status: string; progress: number; agentId: number | null }[];
+  onStatusChange: (id: number, s: string) => void;
   onEdit: (a: MockAgent) => void; onDelete: (id: number) => void;
 }) {
   const cfg: Record<string, { dot: string; color: string }> = { online: { dot: 'status-dot-online', color: 'var(--success)' }, busy: { dot: 'status-dot-busy', color: 'var(--accent-red)' }, idle: { dot: 'status-dot-idle', color: 'var(--text-muted)' } };
   const sl: Record<string, string> = { online: '在线', busy: '忙碌', idle: '空闲' };
   const c = cfg[agent.status] || cfg.idle;
+  const [detailOpen, setDetailOpen] = useState(false);
+  const agentTasks = tasks.filter(t => t.agentId === agent.id);
+
   return (
-    <div className="glass-panel p-4 sci-border transition-all cursor-default group relative">
-      {/* Edit/Delete buttons */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={() => onEdit(agent)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
-        <button onClick={() => onDelete(agent.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors" style={{ color: 'var(--accent-red)' }}>删除</button>
-      </div>
-      <div className="flex items-center justify-between mb-3 pr-16">
-        <div className="flex items-center gap-2">
-          <span className={`status-dot ${c.dot}`} />
-          <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
+    <>
+      <div className="glass-panel p-4 sci-border transition-all cursor-pointer group relative" onClick={() => setDetailOpen(true)}>
+        {/* Edit/Delete buttons - stop propagation */}
+        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
+          <button onClick={() => onEdit(agent)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
+          <button onClick={() => onDelete(agent.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors" style={{ color: 'var(--accent-red)' }}>删除</button>
         </div>
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
+        <div className="flex items-center justify-between mb-3 pr-16">
+          <div className="flex items-center gap-2">
+            <span className={`status-dot ${c.dot}`} />
+            <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
+          </div>
+          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
+        </div>
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>{agent.system}</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" onClick={e => { e.stopPropagation(); const o = ['idle', 'online', 'busy']; onStatusChange(agent.id, o[(o.indexOf(agent.status) + 1) % o.length]); }} style={{ background: 'var(--accent-glow-gold)', color: c.color, cursor: 'pointer' }}>{sl[agent.status] || agent.status}</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agent.messagesCount} 消息</span>
+        </div>
+        <div className="text-xs mb-2 truncate" style={{ color: 'var(--text-secondary)' }}>{agent.task || '等待任务'}</div>
+        {agent.progress > 0 && <div className="progress-track"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
+        <div className="mt-2 text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>点击查看详情 →</div>
       </div>
-      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>{agent.system}</span>
-        <button onClick={() => { const o = ['idle', 'online', 'busy']; onStatusChange(agent.id, o[(o.indexOf(agent.status) + 1) % o.length]); }}
-          className="text-[10px] px-1.5 py-0.5 rounded hover:opacity-80 transition-opacity" style={{ color: c.color }}>{sl[agent.status] || agent.status}</button>
-        <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agent.messagesCount} 消息</span>
-      </div>
-      <div className="text-xs mb-2 truncate" style={{ color: 'var(--text-secondary)' }}>{agent.task || '等待任务'}</div>
-      {agent.progress > 0 && <div className="progress-track"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
-    </div>
+
+      {/* ── Agent Detail Dialog ── */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="border-0 max-w-lg" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <span className={`status-dot ${c.dot}`} style={{ width: '10px', height: '10px' }} />
+              <DialogTitle className="text-lg font-black tracking-wider" style={{ color: 'var(--text-primary)' }}>{agent.name}</DialogTitle>
+              <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
+            </div>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-4 mt-2">
+            {/* Basic Info */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
+                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>系统</div>
+                <div className="text-sm font-bold" style={{ color: 'var(--accent-cyan)' }}>{agent.system}</div>
+              </div>
+              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
+                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>状态</div>
+                <div className="text-sm font-bold" style={{ color: c.color }}>{sl[agent.status]}</div>
+              </div>
+              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
+                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>消息数</div>
+                <div className="text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>{agent.messagesCount}</div>
+              </div>
+            </div>
+
+            {/* Description */}
+            {agent.description && (
+              <div>
+                <div className="section-label mb-1">描述 · DESCRIPTION</div>
+                <div className="text-xs leading-relaxed p-2 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--bg-card)' }}>{agent.description}</div>
+              </div>
+            )}
+
+            {/* Current Task */}
+            <div>
+              <div className="section-label mb-1">当前任务 · CURRENT TASK</div>
+              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
+                <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{agent.task || '无'}</div>
+                {agent.progress > 0 && (
+                  <div className="mt-1">
+                    <div className="progress-track"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>
+                    <div className="text-[10px] font-mono mt-1" style={{ color: 'var(--text-muted)' }}>{agent.progress}%</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Task History */}
+            <div>
+              <div className="section-label mb-1">任务历史 · TASK HISTORY ({agentTasks.length})</div>
+              {agentTasks.length === 0 ? (
+                <div className="text-xs p-2 rounded" style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>暂无任务记录</div>
+              ) : (
+                <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto custom-scrollbar">
+                  {agentTasks.map(t => (
+                    <div key={t.id} className="flex items-center justify-between p-1.5 rounded text-xs" style={{ background: 'var(--bg-card)' }}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px]" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
+                      </div>
+                      <span className="font-mono text-[10px]" style={{ color: t.status === 'done' ? 'var(--success)' : t.status === 'running' ? 'var(--accent-red)' : 'var(--text-muted)' }}>{t.progress}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -291,7 +370,7 @@ export default function Dashboard() {
             {data.agents.length === 0 ? (
               <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>暂无 Agent，点击「新建 Agent」创建</div>
             ) : (data.agents as MockAgent[]).map(agent => (
-              <AgentCard key={agent.id} agent={agent} onStatusChange={data.updateAgentStatus}
+              <AgentCard key={agent.id} agent={agent} tasks={data.tasks} onStatusChange={data.updateAgentStatus}
                 onEdit={a => setEditAgent(a)} onDelete={data.deleteAgent} />
             ))}
           </div>

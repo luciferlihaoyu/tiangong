@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router'
 import Navigation from './sections/Navigation'
+import Starfield from './sections/Starfield'
 import Dashboard from './sections/Dashboard'
 import MatrixNodes from './sections/MatrixNodes'
 import Features from './sections/Features'
@@ -12,29 +13,27 @@ import NotFound from './pages/NotFound'
 export default function App() {
   return (
     <div className="relative min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <Starfield />
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route
-          path="*"
-          element={
-            <>
-              <Navigation />
-              <Routes>
-                <Route path="/" element={
-                  <>
-                    <Dashboard />
-                    <MatrixNodes />
-                    <Features />
-                    <ExecutionCore />
-                    <FAQ />
-                    <FooterTerminal />
-                  </>
-                } />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </>
-          }
-        />
+        <Route path="*" element={
+          <>
+            <Navigation />
+            <Routes>
+              <Route path="/" element={
+                <>
+                  <Dashboard />
+                  <MatrixNodes />
+                  <Features />
+                  <ExecutionCore />
+                  <FAQ />
+                  <FooterTerminal />
+                </>
+              } />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </>
+        } />
       </Routes>
     </div>
   )

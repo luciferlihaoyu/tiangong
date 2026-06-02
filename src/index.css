@@ -1,33 +1,63 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════
+   天宫 TIANGONG — 中国科幻风主题系统
+   深色: 深空黑 + 朱红 + 金色
+   浅色: 空间站银白 + 朱红 + 深蓝
+   ═══════════════════════════════════════ */
+
 @layer base {
+  /* ─── 深色模式 (默认) ─── */
   :root {
-    /* 冰蓝科技色系 */
-    --bg-primary: #080c14;
-    --bg-secondary: #0c1320;
-    --bg-card: rgba(100, 180, 255, 0.03);
-    --bg-card-hover: rgba(100, 180, 255, 0.06);
-    --bg-terminal: rgba(0, 10, 30, 0.5);
-    --border-default: rgba(100, 180, 255, 0.08);
-    --border-hover: rgba(100, 180, 255, 0.18);
-    --text-primary: #e8ecf1;
-    --text-secondary: rgba(200, 220, 255, 0.55);
-    --text-muted: rgba(150, 190, 255, 0.35);
-    --accent-ice: #64b5f6;
-    --accent-cyan: #42a5f5;
-    --accent-deep: #2196f3;
-    --accent-glow: rgba(100, 181, 246, 0.15);
-    --accent-bright: #90caf9;
+    --bg-primary: #050508;
+    --bg-secondary: #0a0a10;
+    --bg-card: rgba(180, 200, 255, 0.025);
+    --bg-card-hover: rgba(180, 200, 255, 0.04);
+    --bg-terminal: rgba(0, 0, 0, 0.45);
+    --border-default: rgba(180, 200, 255, 0.06);
+    --border-hover: rgba(180, 200, 255, 0.15);
+    --text-primary: #e6e9f0;
+    --text-secondary: rgba(180, 195, 230, 0.55);
+    --text-muted: rgba(140, 160, 210, 0.35);
+    --accent-red: #c23a30;
+    --accent-red-bright: #d44236;
+    --accent-gold: #c9a84c;
+    --accent-gold-bright: #dbc164;
+    --accent-cyan: #4a9eff;
+    --accent-glow-red: rgba(194, 58, 48, 0.15);
+    --accent-glow-gold: rgba(201, 168, 76, 0.1);
     --success: #4caf7d;
-    --warning: #ffa337;
-    --radius: 0.75rem;
-    --radius-sm: 0.5rem;
+    --warning: #c9a84c;
+    --radius: 0.5rem;
     --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+    --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  }
+
+  /* ─── 浅色模式 ─── */
+  [data-theme="light"] {
+    --bg-primary: #eceef3;
+    --bg-secondary: #e2e5ec;
+    --bg-card: rgba(255, 255, 255, 0.65);
+    --bg-card-hover: rgba(255, 255, 255, 0.85);
+    --bg-terminal: rgba(220, 225, 235, 0.6);
+    --border-default: rgba(100, 120, 160, 0.12);
+    --border-hover: rgba(100, 120, 160, 0.25);
+    --text-primary: #1a1d26;
+    --text-secondary: rgba(50, 60, 90, 0.65);
+    --text-muted: rgba(100, 115, 150, 0.45);
+    --accent-red: #b83028;
+    --accent-red-bright: #c23a30;
+    --accent-gold: #a68a38;
+    --accent-gold-bright: #c9a84c;
+    --accent-cyan: #2176d4;
+    --accent-glow-red: rgba(194, 58, 48, 0.08);
+    --accent-glow-gold: rgba(201, 168, 76, 0.08);
+    --success: #3a9b66;
+    --warning: #a68a38;
   }
 
   body {
@@ -38,148 +68,190 @@
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
     min-height: 100vh;
+    transition: background-color 0.5s ease, color 0.5s ease;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    word-break: keep-all;
-  }
+  h1, h2, h3, h4, h5, h6 { word-break: keep-all; }
 }
 
 @layer components {
-  /* ---- Grid Background (冰蓝调) ---- */
+  /* ── 星空网格背景 ── */
   .bg-grid {
     background-image:
-      linear-gradient(rgba(100, 180, 255, 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(100, 180, 255, 0.025) 1px, transparent 1px);
-    background-size: 48px 48px;
+      linear-gradient(rgba(180, 200, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(180, 200, 255, 0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
   }
-
-  .bg-grid-dense {
+  [data-theme="light"] .bg-grid {
     background-image:
-      linear-gradient(rgba(100, 180, 255, 0.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(100, 180, 255, 0.018) 1px, transparent 1px);
-    background-size: 24px 24px;
+      linear-gradient(rgba(80, 100, 140, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(80, 100, 140, 0.04) 1px, transparent 1px);
   }
 
-  /* ---- Glass Panel (冰蓝玻璃) ---- */
+  /* ── 科幻玻璃面板 ── */
   .glass-panel {
     background: var(--bg-card);
     backdrop-filter: blur(20px) saturate(130%);
     -webkit-backdrop-filter: blur(20px) saturate(130%);
     border: 1px solid var(--border-default);
     border-radius: var(--radius);
-    transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(100, 180, 255, 0.05);
+    transition: all 0.4s ease;
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(180, 200, 255, 0.04);
   }
-
+  [data-theme="light"] .glass-panel {
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.06),
+      0 1px 3px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
   .glass-panel:hover {
     border-color: var(--border-hover);
     background: var(--bg-card-hover);
-    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(100, 180, 255, 0.08), 0 0 20px rgba(100, 181, 246, 0.04);
+    box-shadow:
+      0 8px 40px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(180, 200, 255, 0.08),
+      0 0 30px rgba(194, 58, 48, 0.03);
+  }
+  [data-theme="light"] .glass-panel:hover {
+    box-shadow:
+      0 8px 40px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 0 20px rgba(194, 58, 48, 0.04);
   }
 
-  /* ---- Terminal Panel ---- */
+  /* ── 终端面板 ── */
   .terminal-panel {
     background: var(--bg-terminal);
     border: 1px solid var(--border-default);
     border-radius: var(--radius);
-    box-shadow: inset 0 1px 0 rgba(100, 180, 255, 0.05);
+    box-shadow: inset 0 1px 0 rgba(180, 200, 255, 0.04);
   }
 
-  /* ---- Section Label ---- */
+  /* ── 科幻标签 ── */
   .section-label {
     font-family: var(--font-mono);
     font-size: 0.65rem;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
-    color: var(--accent-ice);
+    color: var(--accent-gold);
     opacity: 0.7;
   }
 
-  /* ---- Status Dot ---- */
+  /* ── 状态点 ── */
   .status-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
     display: inline-block;
   }
-
   .status-dot-online {
     background-color: var(--success);
-    box-shadow: 0 0 6px var(--success);
+    box-shadow: 0 0 8px var(--success);
   }
-
   .status-dot-busy {
-    background-color: var(--warning);
-    box-shadow: 0 0 6px var(--warning);
+    background-color: var(--accent-red);
+    box-shadow: 0 0 8px var(--accent-red);
   }
-
   .status-dot-idle {
     background-color: var(--text-muted);
   }
 
-  /* ---- Scrollbar ---- */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
+  /* ── 滚动条 ── */
+  .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(100, 180, 255, 0.12);
+    background: rgba(180, 200, 255, 0.1);
     border-radius: 2px;
   }
+  [data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(80, 100, 140, 0.15);
+  }
 
-  /* ---- Ring Text 3D ---- */
+  /* ── 3D环形文字 ── */
   .ring-scene {
     perspective: 800px;
     transform-style: preserve-3d;
   }
-
   .ring-container {
     position: relative;
     transform-style: preserve-3d;
     animation: ringSpin 30s linear infinite;
   }
-
-  .ring-container:hover {
-    animation-play-state: paused;
-  }
-
+  .ring-container:hover { animation-play-state: paused; }
   .ring-char {
     position: absolute;
     font-family: var(--font-mono);
     font-weight: 700;
     font-size: 1.1rem;
-    color: var(--accent-ice);
-    text-shadow: 0 0 12px rgba(100, 181, 246, 0.5), 0 0 4px rgba(100, 181, 246, 0.3);
+    color: var(--accent-gold);
+    text-shadow: 0 0 10px rgba(201, 168, 76, 0.4), 0 0 3px rgba(201, 168, 76, 0.2);
     backface-visibility: hidden;
     white-space: pre;
   }
-
   @keyframes ringSpin {
     from { transform: rotateY(0deg); }
     to { transform: rotateY(360deg); }
   }
 
-  /* ---- Progress Bar (冰蓝渐变) ---- */
+  /* ── 进度条（科幻红→金渐变） ── */
   .progress-track {
     height: 3px;
-    background: rgba(100, 180, 255, 0.08);
+    background: rgba(180, 200, 255, 0.06);
     border-radius: 2px;
     overflow: hidden;
   }
-
   .progress-fill {
     height: 100%;
     border-radius: 2px;
-    background: linear-gradient(90deg, var(--accent-deep), var(--accent-cyan), var(--accent-ice));
-    box-shadow: 0 0 8px rgba(100, 181, 246, 0.3);
+    background: linear-gradient(90deg, var(--accent-red), var(--accent-gold));
+    box-shadow: 0 0 8px rgba(194, 58, 48, 0.3);
     transition: width 1s ease;
   }
 
-  /* ---- Glow ---- */
-  .glow-ice {
-    box-shadow: 0 0 40px rgba(100, 181, 246, 0.08);
+  /* ── 中式科幻装饰边框 ── */
+  .sci-border {
+    position: relative;
+  }
+  .sci-border::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 20px; height: 20px;
+    border-top: 2px solid var(--accent-red);
+    border-left: 2px solid var(--accent-red);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .sci-border::after {
+    content: '';
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 20px; height: 20px;
+    border-bottom: 2px solid var(--accent-red);
+    border-right: 2px solid var(--accent-red);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* ── 主题切换按钮 ── */
+  .theme-toggle {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    color: var(--accent-gold);
+  }
+  .theme-toggle:hover {
+    background: var(--accent-glow-gold);
+    border-color: var(--accent-gold);
+    box-shadow: 0 0 12px rgba(201, 168, 76, 0.15);
   }
 }

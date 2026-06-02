@@ -12,49 +12,44 @@ const FEATURES = [
 export default function Features() {
   const cardsRef = useRef<HTMLDivElement[]>([]);
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const el = entry.target as HTMLElement;
-            el.style.opacity = '1';
-            el.style.transform = 'translateY(0)';
-            observer.unobserve(el);
-          }
-        });
-      },
-      { threshold: 0.1 }
-    );
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const el = entry.target as HTMLElement;
+          el.style.opacity = '1';
+          el.style.transform = 'translateY(0)';
+          observer.unobserve(el);
+        }
+      });
+    }, { threshold: 0.1 });
     cardsRef.current.forEach((c) => c && observer.observe(c));
     return () => observer.disconnect();
   }, []);
 
   return (
-    <section className="relative w-full py-4 px-4 md:px-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <section className="relative z-10 w-full py-4 px-4 md:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="glass-panel p-5">
-          <div className="section-label mb-4">PLATFORM CAPABILITIES</div>
+        <div className="glass-panel p-5 sci-border">
+          <div className="section-label mb-4">PLATFORM CAPABILITIES · 平台能力</div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {FEATURES.map((f, i) => (
-              <div
-                key={i}
+              <div key={i}
                 ref={(el) => { if (el) cardsRef.current[i] = el; }}
-                className="p-4 rounded-lg transition-all duration-500 hover:bg-[rgba(100,180,255,0.03)]"
+                className="p-4 rounded transition-all duration-500 hover:bg-[rgba(180,200,255,0.02)]"
                 style={{
                   border: '1px solid var(--border-default)',
                   opacity: 0,
                   transform: 'translateY(16px)',
                   transitionDelay: `${i * 80}ms`,
-                }}
-              >
+                }}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded"
-                    style={{ background: 'rgba(100,181,246,0.08)', color: '#64b5f6', border: '1px solid rgba(100,181,246,0.12)' }}>
+                    style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>
                     {f.tag}
                   </span>
                   <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{f.metric}</span>
                 </div>
-                <h3 className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{f.title}</h3>
+                <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>{f.title}</h3>
                 <p className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>{f.desc}</p>
               </div>
             ))}

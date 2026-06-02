@@ -31,8 +31,7 @@ function Scene() {
 
   useFrame((state) => {
     if (!groupRef.current) return;
-    const elapsedTime = state.clock.getElapsedTime() * 0.03;
-    groupRef.current.rotation.y = elapsedTime;
+    groupRef.current.rotation.y = state.clock.getElapsedTime() * 0.03;
     state.camera.lookAt(0, 0, 0);
     groupRef.current.rotation.x = state.mouse.y * 0.1;
   });
@@ -41,7 +40,7 @@ function Scene() {
     <group ref={groupRef}>
       <instancedMesh ref={instancedMeshRef} args={[null as any, null as any, 140]}>
         <sphereGeometry args={[1, 16, 16]} />
-        <meshBasicMaterial color="#64b5f6" transparent opacity={0.12} />
+        <meshBasicMaterial color="#c9a84c" transparent opacity={0.12} />
       </instancedMesh>
       <Connections positions={positionsRef.current} />
     </group>
@@ -50,52 +49,47 @@ function Scene() {
 
 function Connections({ positions }: { positions: THREE.Vector3[] }) {
   const maxDistance = 4.5;
-  const lines = useRef<{ start: THREE.Vector3; end: THREE.Vector3 }[]>([]);
+  const linesRef = useRef<{ start: THREE.Vector3; end: THREE.Vector3 }[]>([]);
+  const lineGeo = useRef<THREE.BufferGeometry>(new THREE.BufferGeometry());
 
   useEffect(() => {
     if (!positions || positions.length === 0) return;
-    const newLines: typeof lines.current = [];
+    const newLines: typeof linesRef.current = [];
     for (let i = 0; i < positions.length; i++) {
       const p1 = positions[i];
       if (!p1) continue;
       for (let j = i + 1; j < positions.length; j++) {
         const p2 = positions[j];
         if (!p2) continue;
-        const distance = p1.distanceTo(p2);
-        if (distance < maxDistance) newLines.push({ start: p1, end: p2 });
+        if (p1.distanceTo(p2) < maxDistance) newLines.push({ start: p1, end: p2 });
       }
     }
-    lines.current = newLines;
+    linesRef.current = newLines;
+    const arr: number[] = [];
+    for (const line of newLines) {
+      arr.push(line.start.x, line.start.y, line.start.z);
+      arr.push(line.end.x, line.end.y, line.end.z);
+    }
+    lineGeo.current.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
   }, [positions]);
 
-  const lineGeo = useRef<THREE.BufferGeometry>(null);
-  useEffect(() => {
-    if (!lineGeo.current || lines.current.length === 0) return;
-    const positionsArr: number[] = [];
-    for (const line of lines.current) {
-      positionsArr.push(line.start.x, line.start.y, line.start.z);
-      positionsArr.push(line.end.x, line.end.y, line.end.z);
-    }
-    lineGeo.current.setAttribute('position', new THREE.Float32BufferAttribute(positionsArr, 3));
-  }, []);
-
   return (
-    <lineSegments geometry={lineGeo.current || undefined}>
-      <lineBasicMaterial color="#64b5f6" transparent opacity={0.06} />
+    <lineSegments ref={lineGeo}>
+      <lineBasicMaterial color="#c9a84c" transparent opacity={0.06} />
     </lineSegments>
   );
 }
 
 export default function MatrixNodes() {
   return (
-    <section className="relative w-full py-4 px-4 md:px-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <section className="relative z-10 w-full py-4 px-4 md:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="glass-panel p-4 overflow-hidden">
+        <div className="glass-panel p-4 overflow-hidden sci-border">
           <div className="flex items-center justify-between mb-3">
-            <div className="section-label">ARCHITECTURE VISUALIZATION</div>
+            <div className="section-label">ARCHITECTURE VISUALIZATION · 架构可视化</div>
             <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>140 nodes · 实时渲染</span>
           </div>
-          <div className="w-full h-[280px] rounded-lg overflow-hidden" style={{ background: 'rgba(0,5,15,0.3)' }}>
+          <div className="w-full h-[280px] rounded overflow-hidden" style={{ background: 'rgba(0,0,0,0.3)' }}>
             <Canvas camera={{ position: [0, 0, 30], fov: 50 }} gl={{ antialias: true, alpha: true }}>
               <Scene />
             </Canvas>
@@ -106,8 +100,8 @@ export default function MatrixNodes() {
               { title: '任务智能分派', desc: 'Agent 自动认领，支持优先级与负载均衡' },
               { title: '全链路审计', desc: '思考过程与工具调用全记录，透明可控' },
             ].map((f) => (
-              <div key={f.title} className="flex items-start gap-2 p-2 rounded-lg hover:bg-[rgba(100,180,255,0.02)] transition-colors">
-                <span className="w-1 h-1 rounded-full bg-[#64b5f6] mt-1.5 flex-shrink-0" />
+              <div key={f.title} className="flex items-start gap-2 p-2 rounded hover:bg-[rgba(180,200,255,0.02)] transition-colors">
+                <span className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'var(--accent-red)' }} />
                 <div>
                   <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{f.title}</div>
                   <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{f.desc}</div>

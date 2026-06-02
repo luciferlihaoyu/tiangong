@@ -37,18 +37,18 @@ export default function ExecutionCore() {
   }, []);
 
   const statusCfg: Record<string, { color: string; bg: string; label: string }> = {
-    EXECUTING: { color: '#4caf7d', bg: 'rgba(76,175,125,0.1)', label: '执行中' },
-    SYNCING: { color: '#64b5f6', bg: 'rgba(100,181,246,0.1)', label: '同步中' },
-    QUEUED: { color: 'var(--text-muted)', bg: 'rgba(100,180,255,0.04)', label: '队列中' },
-    REVIEWING: { color: '#42a5f5', bg: 'rgba(66,165,245,0.1)', label: '审核中' },
+    EXECUTING: { color: 'var(--accent-red)', bg: 'var(--accent-glow-red)', label: '执行中' },
+    SYNCING: { color: 'var(--accent-cyan)', bg: 'rgba(74,158,255,0.1)', label: '同步中' },
+    QUEUED: { color: 'var(--text-muted)', bg: 'rgba(180,200,255,0.03)', label: '队列中' },
+    REVIEWING: { color: 'var(--accent-gold)', bg: 'var(--accent-glow-gold)', label: '审核中' },
   };
 
   return (
-    <section ref={sectionRef} className="relative w-full py-4 px-4 md:px-6" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <section ref={sectionRef} className="relative z-10 w-full py-4 px-4 md:px-6">
       <div className="max-w-7xl mx-auto">
-        <div className="glass-panel p-5">
+        <div className="glass-panel p-5 sci-border">
           <div className="flex items-center justify-between mb-4">
-            <div className="section-label">EXECUTION ENGINE</div>
+            <div className="section-label">EXECUTION ENGINE · 执行引擎</div>
             <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>5 个活跃任务</span>
           </div>
           <div className="flex flex-col gap-3 max-w-2xl mx-auto">
@@ -56,17 +56,19 @@ export default function ExecutionCore() {
               const cfg = statusCfg[t.status] || statusCfg.QUEUED;
               return (
                 <div key={i} ref={(el) => { if (el) cardsRef.current[i] = el; }} className="w-full" style={{ transformOrigin: '0% 100%' }}>
-                  <div className="task-inner p-4 rounded-xl transition-all" style={{
-                    background: i % 2 === 0 ? 'linear-gradient(135deg, rgba(100,181,246,0.05), rgba(0,5,15,0.2))' : 'rgba(0,5,15,0.15)',
+                  <div className="task-inner p-4 rounded transition-all" style={{
+                    background: i % 2 === 0
+                      ? 'linear-gradient(135deg, rgba(194,58,48,0.04), rgba(0,0,0,0.2))'
+                      : 'rgba(0,0,0,0.15)',
                     border: '1px solid var(--border-default)',
                   }}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="font-mono text-sm font-bold" style={{ color: '#64b5f6' }}>#{t.number}</span>
+                          <span className="font-mono text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>#{t.number}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
                         </div>
-                        <h3 className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{t.title}</h3>
+                        <h3 className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>{t.title}</h3>
                         <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.agent}</span>
                       </div>
                       <div className="flex-shrink-0 w-20">

@@ -1,55 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { trpc } from '@/providers/trpc';
-import { useMockData } from '@/hooks/useMockData';
-
-/* ─── 检测是否有后端连接 ─── */
-function useDataSource() {
-  const mock = useMockData();
-  const [hasBackend, setHasBackend] = useState<boolean | null>(null);
-
-  const isEnabled = hasBackend !== false;
-  const agentQuery = trpc.agent.list.useQuery(undefined, {
-    enabled: isEnabled,
-    retry: 1,
-  });
-  const taskQuery = trpc.task.list.useQuery(undefined, { enabled: hasBackend === true });
-  const systemQuery = trpc.system.list.useQuery(undefined, { enabled: hasBackend === true });
-  const msgQuery = trpc.message.stats.useQuery(undefined, { enabled: hasBackend === true });
-
-  useEffect(() => {
-    if (agentQuery.isSuccess) setHasBackend(true);
-    if (agentQuery.isError) setHasBackend(false);
-  }, [agentQuery.isSuccess, agentQuery.isError]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (hasBackend === null) setHasBackend(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [hasBackend]);
-
-  if (hasBackend === true) {
-    return {
-      agents: agentQuery.data ?? [],
-      tasks: taskQuery.data ?? [],
-      systems: systemQuery.data ?? [],
-      msgStats: msgQuery.data ?? { total: 0 },
-      isLoading: agentQuery.isLoading,
-      hasBackend: true,
-      mock,
-    };
-  }
-
-  return {
-    agents: mock.agents,
-    tasks: mock.tasks,
-    systems: mock.systems,
-    msgStats: mock.msgStats,
-    isLoading: hasBackend === null,
-    hasBackend: false,
-    mock,
-  };
-}
+import { useEffect, useState, type ReactNode } from "react";
+import { useDataSource } from "@/hooks/useDataSource";
 
 /* ─── 3D Ring Text ─── */
 function RingText3D({ text, radius = 100 }: { text: string; radius?: number }) {
@@ -138,13 +88,13 @@ const statusLabel: Record<string, string> = { online: '在线', busy: '忙碌', 
 
 function AgentCard({ agent, onStatusChange }: {
   agent: { id: number; agentId: string; name: string; system: string; status: string; task: string | null; progress: number; messagesCount: number };
-  onStatusChange?: (id: number, status: 'idle' | 'online' | 'busy') => void;
+  onStatusChange?: (id: number, status: string) => void;
 }) {
   const cfg = statusConfig[agent.status] || statusConfig.idle;
   const cycleStatus = () => {
     const order = ['idle', 'online', 'busy'];
     const next = order[(order.indexOf(agent.status) + 1) % order.length];
-    onStatusChange?.(agent.id, next as 'idle' | 'online' | 'busy');
+    onStatusChange?.(agent.id, next);
   };
 
   return (
@@ -184,12 +134,10 @@ function AgentCard({ agent, onStatusChange }: {
 /* ─── Connection Panel ─── */
 function ConnectionPanel({ systems, onStatusChange }: {
   systems: { id: number; name: string; status: string }[];
-  onStatusChange?: (id: number, status: 'connected' | 'syncing' | 'disconnected') => void;
+  onStatusChange?: (id: number, status: string) => void;
 }) {
   const statusColor: Record<string, string> = {
-    connected: 'var(--success)',
-    syncing: 'var(--accent-gold)',
-    disconnected: 'var(--text-muted)',
+    connected: 'var(--success)', syncing: 'var(--accent-gold)', disconnected: 'var(--text-muted)',
   };
   const statusText: Record<string, string> = {
     connected: '已连接', syncing: '同步中', disconnected: '断开',
@@ -197,7 +145,7 @@ function ConnectionPanel({ systems, onStatusChange }: {
   const cycleStatus = (id: number, current: string) => {
     const order = ['disconnected', 'syncing', 'connected'];
     const next = order[(order.indexOf(current) + 1) % order.length];
-    onStatusChange?.(id, next as 'connected' | 'syncing' | 'disconnected');
+    onStatusChange?.(id, next);
   };
 
   return (
@@ -276,19 +224,18 @@ function TaskTimeline({ tasks, onProgress }: {
 }
 
 /* ─── Stats Row ─── */
-function StatsRow({ agents, tasks, msgStats }: {
+function StatsRow({ agents, tasks, totalMsgs }: {
   agents: { status: string }[];
   tasks: { status: string }[];
-  msgStats: { total: number };
+  totalMsgs: number;
 }) {
   const onlineCount = agents.filter((a) => a.status === 'online' || a.status === 'busy').length;
   const doneCount = tasks.filter((t) => t.status === 'done').length;
-  const totalTasks = tasks.length;
 
   const stats = [
     { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
-    { label: '今日任务', value: String(totalTasks), sub: `已完成 ${doneCount}` },
-    { label: '消息总量', value: `${(msgStats.total / 1000).toFixed(1)}K`, sub: '实时同步' },
+    { label: '今日任务', value: String(tasks.length), sub: `已完成 ${doneCount}` },
+    { label: '消息总量', value: totalMsgs >= 1000 ? `${(totalMsgs / 1000).toFixed(1)}K` : String(totalMsgs), sub: '实时同步' },
     { label: '系统延迟', value: '12ms', sub: '网络正常' },
   ];
 
@@ -333,7 +280,6 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto">
         {/* Top Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-          {/* Title Card */}
           <div className="lg:col-span-2 glass-panel p-6 sci-border flex items-center gap-6">
             <div className="flex-shrink-0 hidden sm:block">
               <RingText3D text="TIANGONG-AGENT-HUB-MESSAGING-PLATFORM-" radius={90} />
@@ -343,11 +289,6 @@ export default function Dashboard() {
                 <div className="section-label">TIANGONG DASHBOARD</div>
                 <div className="h-3 w-px" style={{ background: 'var(--border-default)' }} />
                 <div className="text-[10px] font-mono" style={{ color: 'var(--accent-red)' }}>中国空间站 · 核心舱</div>
-                {!data.hasBackend && data.isLoading === false && (
-                  <span className="text-[9px] px-1 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>
-                    DEMO
-                  </span>
-                )}
               </div>
               <h1 className="text-2xl md:text-3xl font-black tracking-wider mb-2" style={{ color: 'var(--text-primary)' }}>
                 天宫 Agent 消息平台
@@ -367,8 +308,6 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-
-          {/* Clock + Monitor */}
           <div className="flex flex-col gap-3">
             <LiveClock />
             <SystemMonitor />
@@ -377,13 +316,17 @@ export default function Dashboard() {
 
         {/* Stats */}
         <div className="mb-4">
-          <StatsRow agents={data.agents} tasks={data.tasks} msgStats={data.msgStats} />
+          <StatsRow
+            agents={data.agents}
+            tasks={data.tasks}
+            totalMsgs={data.msgStats.total}
+          />
         </div>
 
         {/* Agent Grid + Systems */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
           <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {data.isLoading ? (
+            {data.agents.length === 0 ? (
               <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>
                 正在连接核心舱...
               </div>
@@ -392,7 +335,7 @@ export default function Dashboard() {
                 <AgentCard
                   key={agent.id}
                   agent={agent}
-                  onStatusChange={data.hasBackend ? undefined : data.mock.updateAgentStatus}
+                  onStatusChange={data.updateAgentStatus}
                 />
               ))
             )}
@@ -400,7 +343,7 @@ export default function Dashboard() {
           <div className="lg:col-span-1">
             <ConnectionPanel
               systems={data.systems}
-              onStatusChange={data.hasBackend ? undefined : data.mock.updateSystemStatus}
+              onStatusChange={data.updateSystemStatus}
             />
           </div>
         </div>
@@ -409,7 +352,7 @@ export default function Dashboard() {
         <div className="mb-4">
           <TaskTimeline
             tasks={data.tasks}
-            onProgress={data.hasBackend ? undefined : data.mock.updateTaskProgress}
+            onProgress={data.updateTaskProgress}
           />
         </div>
 

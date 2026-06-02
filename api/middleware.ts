@@ -1,42 +1,48 @@
-import { ErrorMessages } from "@contracts/constants";
-import { initTRPC, TRPCError } from "@trpc/server";
-import superjson from "superjson";
-import type { TrpcContext } from "./context";
+import { initTRPC } from "@trpc/server";
+import { verifyToken } from "./local-auth-router";
 
-const t = initTRPC.context<TrpcContext>().create({
-  transformer: superjson,
-});
+// Context for each request
+export async function createContext(opts: { req: Request }) {
+  let user: { id: number; role: string } | null = null;
 
-export const createRouter = t.router;
-export const publicQuery = t.procedure;
-
-const requireAuth = t.middleware(async (opts) => {
-  const { ctx, next } = opts;
-
-  if (!ctx.user) {
-    throw new TRPCError({
-      code: "UNAUTHORIZED",
-      message: ErrorMessages.unauthenticated,
-    });
+  // Try to get user from Bearer token
+  const authHeader = opts.req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const payload = await verifyToken(authHeader.slice(7));
+    if (payload) {
+      user = { id: Number(payload.sub), role: payload.role };
+    }
   }
 
+  return { req: opts.req, user };
+}
+
+type Context = Awaited<ReturnType<typeof createContext>>;
+
+const t = initTRPC.context<Context>().create();
+
+export const router = t.router;
+export const createRouter = router;
+export const publicProcedure = t.procedure;
+
+// Public query - no auth required
+export const publicQuery = publicProcedure;
+
+// Authed query - requires login
+export const authedQuery = publicProcedure.use(async ({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new Error("请先登录");
+  }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
-function requireRole(role: string) {
-  return t.middleware(async (opts) => {
-    const { ctx, next } = opts;
-
-    if (!ctx.user || ctx.user.role !== role) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: ErrorMessages.insufficientRole,
-      });
-    }
-
-    return next({ ctx: { ...ctx, user: ctx.user } });
-  });
-}
-
-export const authedQuery = t.procedure.use(requireAuth);
-export const adminQuery = authedQuery.use(requireRole("admin"));
+// Admin query - requires admin role
+export const adminQuery = publicProcedure.use(async ({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new Error("请先登录");
+  }
+  if (ctx.user.role !== "admin") {
+    throw new Error("需要管理员权限");
+  }
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});

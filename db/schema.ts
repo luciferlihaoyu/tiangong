@@ -9,17 +9,17 @@ import {
   bigint,
 } from "drizzle-orm/mysql-core";
 
-// ─── Users (OAuth auth) ───
+// ─── Users (内置认证) ───
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
-  unionId: varchar("unionId", { length: 255 }).notNull().unique(),
+  username: varchar("username", { length: 50 }).notNull().unique(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   name: varchar("name", { length: 255 }),
   email: varchar("email", { length: 320 }),
-  avatar: text("avatar"),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().notNull().$onUpdate(() => new Date()),
-  lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  lastSignInAt: timestamp("last_sign_in_at").defaultNow().notNull(),
 });
 
 export type User = typeof users.$inferSelect;

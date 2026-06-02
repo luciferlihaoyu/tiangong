@@ -1,17 +1,35 @@
 import { getDb } from "../api/queries/connection";
-import { agents, tasks, systems } from "./schema";
+import { agents, tasks, systems, users } from "./schema";
+import { hashPassword } from "../api/lib/password";
+import { eq } from "drizzle-orm";
 
 async function seed() {
   const db = getDb();
 
+  // Seed admin user (env credentials or default admin/admin)
+  const adminUser = process.env.ADMIN_USER || "admin";
+  const adminPass = process.env.ADMIN_PASSWORD || "admin";
+  const existingAdmin = await db.select().from(users).where(eq(users.username, adminUser)).then(rows => rows[0]);
+
+  if (!existingAdmin) {
+    const hashed = await hashPassword(adminPass);
+    await db.insert(users).values({
+      username: adminUser,
+      passwordHash: hashed,
+      name: "管理员",
+      role: "admin",
+    });
+    console.log(`Admin user created: ${adminUser} / ${adminPass}`);
+  }
+
   // Seed Agents
   await db.insert(agents).values([
-    { agentId: "AG-01", name: "CEO-01", system: "Claude", status: "online", task: "策略规划与目标对齐", progress: 78, messagesCount: 142, description: "负责整体策略规划和目标对齐" },
-    { agentId: "AG-02", name: "CTO-02", system: "Codex", status: "busy", task: "代码审查与架构评审", progress: 45, messagesCount: 89, description: "负责技术架构和代码审查" },
-    { agentId: "AG-03", name: "CMO-03", system: "Cursor", status: "online", task: "用户增长数据分析", progress: 92, messagesCount: 203, description: "负责市场营销和用户增长" },
-    { agentId: "AG-04", name: "COO-04", system: "Claude", status: "idle", task: "资源调度与成本控制", progress: 0, messagesCount: 56, description: "负责运营管理和成本控制" },
-    { agentId: "AG-05", name: "DEV-05", system: "GPT-4", status: "busy", task: "API网关部署 v2.1.0", progress: 63, messagesCount: 178, description: "负责开发和部署" },
-    { agentId: "AG-06", name: "QA-06", system: "Claude", status: "online", task: "端到端自动化测试", progress: 34, messagesCount: 67, description: "负责质量保证和测试" },
+    { agentId: "AG-01", name: "CEO-01", system: "Claude", status: "online", task: "策略规划与目标对齐", progress: 78, messagesCount: 142, description: "负责整体策略规划" },
+    { agentId: "AG-02", name: "CTO-02", system: "Codex", status: "busy", task: "代码审查与架构评审", progress: 45, messagesCount: 89, description: "负责技术架构" },
+    { agentId: "AG-03", name: "CMO-03", system: "Cursor", status: "online", task: "用户增长数据分析", progress: 92, messagesCount: 203, description: "负责市场营销" },
+    { agentId: "AG-04", name: "COO-04", system: "Claude", status: "idle", task: "资源调度与成本控制", progress: 0, messagesCount: 56, description: "负责运营管理" },
+    { agentId: "AG-05", name: "DEV-05", system: "GPT-4", status: "busy", task: "API网关部署 v2.1.0", progress: 63, messagesCount: 178, description: "负责开发部署" },
+    { agentId: "AG-06", name: "QA-06", system: "Claude", status: "online", task: "端到端自动化测试", progress: 34, messagesCount: 67, description: "负责质量保证" },
   ]);
 
   // Seed Tasks

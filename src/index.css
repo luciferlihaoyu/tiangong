@@ -6,21 +6,24 @@
 
 @layer base {
   :root {
-    --bg-primary: #0D0B09;
-    --bg-secondary: #161210;
-    --bg-card: rgba(255, 255, 255, 0.03);
-    --bg-card-hover: rgba(255, 255, 255, 0.06);
-    --border-default: rgba(255, 255, 255, 0.06);
-    --border-hover: rgba(255, 255, 255, 0.12);
-    --text-primary: #F0E6D8;
-    --text-secondary: rgba(240, 230, 216, 0.5);
-    --text-muted: rgba(240, 230, 216, 0.3);
-    --accent-caramel: #D4943A;
-    --accent-amber: #E8A94E;
-    --accent-bright: #F5C06A;
-    --accent-dim: rgba(212, 148, 58, 0.15);
-    --success: #5BA86C;
-    --warning: #D4943A;
+    /* 冰蓝科技色系 */
+    --bg-primary: #080c14;
+    --bg-secondary: #0c1320;
+    --bg-card: rgba(100, 180, 255, 0.03);
+    --bg-card-hover: rgba(100, 180, 255, 0.06);
+    --bg-terminal: rgba(0, 10, 30, 0.5);
+    --border-default: rgba(100, 180, 255, 0.08);
+    --border-hover: rgba(100, 180, 255, 0.18);
+    --text-primary: #e8ecf1;
+    --text-secondary: rgba(200, 220, 255, 0.55);
+    --text-muted: rgba(150, 190, 255, 0.35);
+    --accent-ice: #64b5f6;
+    --accent-cyan: #42a5f5;
+    --accent-deep: #2196f3;
+    --accent-glow: rgba(100, 181, 246, 0.15);
+    --accent-bright: #90caf9;
+    --success: #4caf7d;
+    --warning: #ffa337;
     --radius: 0.75rem;
     --radius-sm: 0.5rem;
     --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
@@ -43,41 +46,44 @@
 }
 
 @layer components {
-  /* ---- Grid Background ---- */
+  /* ---- Grid Background (冰蓝调) ---- */
   .bg-grid {
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(100, 180, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100, 180, 255, 0.025) 1px, transparent 1px);
     background-size: 48px 48px;
   }
 
   .bg-grid-dense {
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      linear-gradient(rgba(100, 180, 255, 0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100, 180, 255, 0.018) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 
-  /* ---- Glass Panel ---- */
+  /* ---- Glass Panel (冰蓝玻璃) ---- */
   .glass-panel {
     background: var(--bg-card);
     backdrop-filter: blur(20px) saturate(130%);
     -webkit-backdrop-filter: blur(20px) saturate(130%);
     border: 1px solid var(--border-default);
     border-radius: var(--radius);
-    transition: border-color 0.3s ease, background 0.3s ease;
+    transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(100, 180, 255, 0.05);
   }
 
   .glass-panel:hover {
     border-color: var(--border-hover);
     background: var(--bg-card-hover);
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(100, 180, 255, 0.08), 0 0 20px rgba(100, 181, 246, 0.04);
   }
 
-  /* ---- Terminal Panel (for code blocks / logs) ---- */
+  /* ---- Terminal Panel ---- */
   .terminal-panel {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-terminal);
     border: 1px solid var(--border-default);
     border-radius: var(--radius);
+    box-shadow: inset 0 1px 0 rgba(100, 180, 255, 0.05);
   }
 
   /* ---- Section Label ---- */
@@ -86,7 +92,7 @@
     font-size: 0.65rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: var(--accent-caramel);
+    color: var(--accent-ice);
     opacity: 0.7;
   }
 
@@ -120,7 +126,7 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(100, 180, 255, 0.12);
     border-radius: 2px;
   }
 
@@ -145,8 +151,8 @@
     font-family: var(--font-mono);
     font-weight: 700;
     font-size: 1.1rem;
-    color: var(--accent-caramel);
-    text-shadow: 0 0 8px rgba(212, 148, 58, 0.4);
+    color: var(--accent-ice);
+    text-shadow: 0 0 12px rgba(100, 181, 246, 0.5), 0 0 4px rgba(100, 181, 246, 0.3);
     backface-visibility: hidden;
     white-space: pre;
   }
@@ -156,10 +162,10 @@
     to { transform: rotateY(360deg); }
   }
 
-  /* ---- Progress Bar ---- */
+  /* ---- Progress Bar (冰蓝渐变) ---- */
   .progress-track {
     height: 3px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(100, 180, 255, 0.08);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -167,22 +173,13 @@
   .progress-fill {
     height: 100%;
     border-radius: 2px;
-    background: linear-gradient(90deg, var(--accent-caramel), var(--accent-amber));
+    background: linear-gradient(90deg, var(--accent-deep), var(--accent-cyan), var(--accent-ice));
+    box-shadow: 0 0 8px rgba(100, 181, 246, 0.3);
     transition: width 1s ease;
   }
 
-  /* ---- Ambient Glow ---- */
-  .glow-amber {
-    position: relative;
-  }
-
-  .glow-amber::after {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    background: linear-gradient(135deg, rgba(212, 148, 58, 0.15), transparent 50%);
-    pointer-events: none;
-    z-index: -1;
+  /* ---- Glow ---- */
+  .glow-ice {
+    box-shadow: 0 0 40px rgba(100, 181, 246, 0.08);
   }
 }

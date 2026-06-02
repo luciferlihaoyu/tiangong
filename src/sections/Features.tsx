@@ -11,7 +11,6 @@ const FEATURES = [
 
 export default function Features() {
   const cardsRef = useRef<HTMLDivElement[]>([]);
-
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -40,7 +39,7 @@ export default function Features() {
               <div
                 key={i}
                 ref={(el) => { if (el) cardsRef.current[i] = el; }}
-                className="p-4 rounded-lg transition-all duration-500 hover:bg-white/[0.03]"
+                className="p-4 rounded-lg transition-all duration-500 hover:bg-[rgba(100,180,255,0.03)]"
                 style={{
                   border: '1px solid var(--border-default)',
                   opacity: 0,
@@ -50,7 +49,7 @@ export default function Features() {
               >
                 <div className="flex items-center gap-2 mb-2">
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded"
-                    style={{ background: 'var(--accent-dim)', color: 'var(--accent-caramel)' }}>
+                    style={{ background: 'rgba(100,181,246,0.08)', color: '#64b5f6', border: '1px solid rgba(100,181,246,0.12)' }}>
                     {f.tag}
                   </span>
                   <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{f.metric}</span>

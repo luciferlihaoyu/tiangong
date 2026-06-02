@@ -37,10 +37,10 @@ export default function ExecutionCore() {
   }, []);
 
   const statusCfg: Record<string, { color: string; bg: string; label: string }> = {
-    EXECUTING: { color: '#5BA86C', bg: 'rgba(91,168,108,0.12)', label: '执行中' },
-    SYNCING: { color: '#D4943A', bg: 'rgba(212,148,58,0.12)', label: '同步中' },
-    QUEUED: { color: 'var(--text-muted)', bg: 'rgba(255,255,255,0.04)', label: '队列中' },
-    REVIEWING: { color: '#6B9ECF', bg: 'rgba(107,158,207,0.12)', label: '审核中' },
+    EXECUTING: { color: '#4caf7d', bg: 'rgba(76,175,125,0.1)', label: '执行中' },
+    SYNCING: { color: '#64b5f6', bg: 'rgba(100,181,246,0.1)', label: '同步中' },
+    QUEUED: { color: 'var(--text-muted)', bg: 'rgba(100,180,255,0.04)', label: '队列中' },
+    REVIEWING: { color: '#42a5f5', bg: 'rgba(66,165,245,0.1)', label: '审核中' },
   };
 
   return (
@@ -57,13 +57,13 @@ export default function ExecutionCore() {
               return (
                 <div key={i} ref={(el) => { if (el) cardsRef.current[i] = el; }} className="w-full" style={{ transformOrigin: '0% 100%' }}>
                   <div className="task-inner p-4 rounded-xl transition-all" style={{
-                    background: i % 2 === 0 ? 'linear-gradient(135deg, rgba(212,148,58,0.06), rgba(0,0,0,0.2))' : 'rgba(0,0,0,0.15)',
+                    background: i % 2 === 0 ? 'linear-gradient(135deg, rgba(100,181,246,0.05), rgba(0,5,15,0.2))' : 'rgba(0,5,15,0.15)',
                     border: '1px solid var(--border-default)',
                   }}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="font-mono text-sm font-bold" style={{ color: 'var(--accent-caramel)' }}>#{t.number}</span>
+                          <span className="font-mono text-sm font-bold" style={{ color: '#64b5f6' }}>#{t.number}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
                         </div>
                         <h3 className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{t.title}</h3>

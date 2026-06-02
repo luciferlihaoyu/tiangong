@@ -20,8 +20,8 @@ export default function FooterTerminal() {
     if (!container || !canvas) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0D0B09);
-    scene.fog = new THREE.Fog(0x0D0B09, 10, 60);
+    scene.background = new THREE.Color(0x080c14);
+    scene.fog = new THREE.Fog(0x080c14, 10, 60);
 
     const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 2000);
     camera.position.y = 8;
@@ -32,7 +32,7 @@ export default function FooterTerminal() {
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 
-    const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0xD4943A, 0x1A1612);
+    const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_DIVISIONS, 0x64b5f6, 0x0d1520);
     gridHelper.position.y = -2;
     scene.add(gridHelper);
 
@@ -48,14 +48,14 @@ export default function FooterTerminal() {
 
     function addFloatingText(content: string) {
       textCtx.clearRect(0, 0, 512, 128);
-      textCtx.fillStyle = 'rgba(212, 148, 58, 0.9)';
+      textCtx.fillStyle = 'rgba(100, 181, 246, 0.9)';
       textCtx.font = 'bold 36px "Courier New", monospace';
       textCtx.textAlign = 'center';
       textCtx.textBaseline = 'middle';
       textCtx.fillText(content, 256, 64);
       const texture = new THREE.CanvasTexture(textCanvas);
       texture.needsUpdate = true;
-      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.35 });
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.3 });
       const geometry = new THREE.PlaneGeometry(4, 1);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.x = (Math.random() - 0.5) * 30;
@@ -75,7 +75,7 @@ export default function FooterTerminal() {
       particlePositions[i * 3 + 2] = -Math.random() * 60;
     }
     particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-    const particleMat = new THREE.PointsMaterial({ color: 0xD4943A, size: 0.05, transparent: true, opacity: 0.35 });
+    const particleMat = new THREE.PointsMaterial({ color: 0x64b5f6, size: 0.05, transparent: true, opacity: 0.3 });
     const particles = new THREE.Points(particleGeo, particleMat);
     scene.add(particles);
 
@@ -97,7 +97,7 @@ export default function FooterTerminal() {
         const ft = floatingTexts[i];
         ft.mesh.position.y += ft.speed;
         ft.life -= 0.002;
-        (ft.mesh.material as THREE.MeshBasicMaterial).opacity = ft.life * 0.35;
+        (ft.mesh.material as THREE.MeshBasicMaterial).opacity = ft.life * 0.3;
         if (ft.life <= 0) {
           textGroup.remove(ft.mesh);
           ft.mesh.geometry.dispose();
@@ -149,22 +149,22 @@ export default function FooterTerminal() {
           </p>
           <div className="terminal-panel p-4 max-w-sm mx-auto mb-6">
             <div className="flex items-center gap-2 mb-2">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--accent-caramel)', opacity: 0.6 }} />
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--accent-amber)', opacity: 0.4 }} />
-              <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--accent-bright)', opacity: 0.3 }} />
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#64b5f6', opacity: 0.6 }} />
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#42a5f5', opacity: 0.4 }} />
+              <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#90caf9', opacity: 0.3 }} />
               <span className="text-[10px] ml-1 font-mono" style={{ color: 'var(--text-muted)' }}>bash</span>
             </div>
-            <code className="font-mono text-xs block text-left" style={{ color: 'var(--accent-amber)' }}>
+            <code className="font-mono text-xs block text-left" style={{ color: '#90caf9' }}>
               $ npx tiangong onboard --yes
             </code>
           </div>
           <div className="flex items-center justify-center gap-3">
-            <button className="px-5 py-2 rounded-lg text-xs font-medium transition-all"
-              style={{ background: 'var(--accent-dim)', color: 'var(--accent-caramel)', border: '1px solid rgba(212,148,58,0.25)' }}>
+            <button className="px-5 py-2 rounded-lg text-xs font-medium transition-all hover:brightness-110"
+              style={{ background: 'linear-gradient(135deg, rgba(33,150,243,0.18), rgba(100,181,246,0.1))', color: '#64b5f6', border: '1px solid rgba(100, 181, 246, 0.22)', boxShadow: '0 0 16px rgba(100,181,246,0.1)' }}>
               立即开始
             </button>
-            <button className="px-5 py-2 rounded-lg text-xs transition-all hover:bg-white/5"
-              style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)' }}>
+            <button className="px-5 py-2 rounded-lg text-xs transition-all hover:bg-[rgba(100,180,255,0.04)]"
+              style={{ color: 'var(--text-secondary)', border: '1px solid rgba(100,180,255,0.08)' }}>
               阅读文档
             </button>
           </div>
@@ -178,7 +178,7 @@ export default function FooterTerminal() {
             </div>
             <div className="flex items-center gap-4">
               {['GitHub', '文档', 'Discord', 'Twitter'].map((l) => (
-                <a key={l} href="#" className="hover:text-[var(--accent-caramel)] transition-colors">{l}</a>
+                <a key={l} href="#" className="hover:text-[#64b5f6] transition-colors">{l}</a>
               ))}
             </div>
           </div>

@@ -34,7 +34,7 @@ function LiveClock() {
   return (
     <div className="glass-panel p-4">
       <div className="section-label mb-2">系统时间</div>
-      <div className="font-mono text-2xl font-bold tracking-wider" style={{ color: 'var(--accent-amber)' }}>
+      <div className="font-mono text-2xl font-bold tracking-wider" style={{ color: '#90caf9' }}>
         {pad(time.getHours())}:{pad(time.getMinutes())}:{pad(time.getSeconds())}
       </div>
       <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
@@ -58,9 +58,9 @@ function SystemMonitor() {
     return () => clearInterval(timer);
   }, []);
   const bars = [
-    { label: 'CPU', value: metrics.cpu, color: '#5BA86C' },
-    { label: 'RAM', value: metrics.ram, color: '#D4943A' },
-    { label: 'NET', value: metrics.net, color: '#6B9ECF' },
+    { label: 'CPU', value: metrics.cpu, color: '#4caf7d' },
+    { label: 'RAM', value: metrics.ram, color: '#64b5f6' },
+    { label: 'NET', value: metrics.net, color: '#42a5f5' },
   ];
   return (
     <div className="glass-panel p-4">
@@ -84,11 +84,10 @@ function SystemMonitor() {
 
 /* ─── Agent Card ─── */
 const statusConfig: Record<string, { dot: string; color: string }> = {
-  online: { dot: 'status-dot-online', color: '#5BA86C' },
-  busy: { dot: 'status-dot-busy', color: '#D4943A' },
+  online: { dot: 'status-dot-online', color: '#4caf7d' },
+  busy: { dot: 'status-dot-busy', color: '#ffa337' },
   idle: { dot: 'status-dot-idle', color: 'var(--text-muted)' },
 };
-
 const statusLabel: Record<string, string> = { online: '在线', busy: '忙碌', idle: '空闲' };
 
 function AgentCard({ agent }: { agent: { id: number; agentId: string; name: string; system: string; status: string; task: string | null; progress: number; messagesCount: number } }) {
@@ -97,7 +96,6 @@ function AgentCard({ agent }: { agent: { id: number; agentId: string; name: stri
   const updateMutation = trpc.agent.updateStatus.useMutation({
     onSuccess: () => utils.agent.list.invalidate(),
   });
-
   const cycleStatus = () => {
     const order = ['idle', 'online', 'busy'];
     const next = order[(order.indexOf(agent.status) + 1) % order.length];
@@ -111,12 +109,13 @@ function AgentCard({ agent }: { agent: { id: number; agentId: string; name: stri
           <span className={`status-dot ${cfg.dot}`} />
           <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
         </div>
-        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)' }}>
+        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(100,180,255,0.05)', color: 'var(--text-muted)' }}>
           {agent.agentId}
         </span>
       </div>
       <div className="flex items-center gap-1.5 mb-2">
-        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-dim)', color: 'var(--accent-caramel)' }}>
+        <span className="text-[10px] px-1.5 py-0.5 rounded"
+          style={{ background: 'rgba(100,181,246,0.1)', color: '#64b5f6', border: '1px solid rgba(100,181,246,0.15)' }}>
           {agent.system}
         </span>
         <button onClick={cycleStatus} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors" style={{ color: cfg.color }}>
@@ -143,18 +142,8 @@ function ConnectionPanel() {
   const updateMutation = trpc.system.updateStatus.useMutation({
     onSuccess: () => utils.system.list.invalidate(),
   });
-
-  const statusColor: Record<string, string> = {
-    connected: 'var(--success)',
-    syncing: 'var(--warning)',
-    disconnected: 'var(--text-muted)',
-  };
-  const statusText: Record<string, string> = {
-    connected: '已连接',
-    syncing: '同步中',
-    disconnected: '断开',
-  };
-
+  const statusColor: Record<string, string> = { connected: '#4caf7d', syncing: '#ffa337', disconnected: 'var(--text-muted)' };
+  const statusText: Record<string, string> = { connected: '已连接', syncing: '同步中', disconnected: '断开' };
   const cycleStatus = (id: number, current: string) => {
     const order = ['disconnected', 'syncing', 'connected'];
     const next = order[(order.indexOf(current) + 1) % order.length];
@@ -169,7 +158,7 @@ function ConnectionPanel() {
           <div key={s.id} className="flex items-center justify-between py-1">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold"
-                style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                style={{ background: 'rgba(100,180,255,0.06)', color: '#64b5f6' }}>
                 {s.name[0]}
               </span>
               <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.name}</span>
@@ -192,14 +181,12 @@ function TaskTimeline() {
   const updateMutation = trpc.task.updateProgress.useMutation({
     onSuccess: () => utils.task.list.invalidate(),
   });
-
   const statusIcon: Record<string, ReactNode> = {
     running: <span className="status-dot status-dot-busy" />,
     pending: <span className="status-dot status-dot-idle" />,
     done: <span className="status-dot status-dot-online" />,
     failed: <span className="w-1.5 h-1.5 rounded-full bg-red-500" />,
   };
-
 
   return (
     <div className="glass-panel p-4">
@@ -212,11 +199,12 @@ function TaskTimeline() {
       <div className="flex flex-col gap-0 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
         {tasks?.map((t) => (
           <div key={t.id}
-            className="flex items-center gap-3 py-2 border-t border-white/5 first:border-t-0 transition-colors hover:bg-white/[0.02] rounded px-1">
+            className="flex items-center gap-3 py-2 border-t rounded px-1 transition-colors hover:bg-[rgba(100,180,255,0.02)]"
+            style={{ borderColor: 'rgba(100,180,255,0.05)' }}>
             <div className="flex-shrink-0">{statusIcon[t.status]}</div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px]" style={{ color: 'var(--accent-caramel)' }}>{t.taskId}</span>
+                <span className="font-mono text-[10px]" style={{ color: '#64b5f6' }}>{t.taskId}</span>
                 <span className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
               </div>
             </div>
@@ -244,11 +232,9 @@ function StatsRow() {
   const { data: agents } = trpc.agent.list.useQuery();
   const { data: tasks } = trpc.task.list.useQuery();
   const { data: msgStats } = trpc.message.stats.useQuery();
-
   const onlineCount = agents?.filter((a) => a.status === 'online' || a.status === 'busy').length ?? 0;
   const doneCount = tasks?.filter((t) => t.status === 'done').length ?? 0;
   const totalTasks = tasks?.length ?? 0;
-
   const stats = [
     { label: '活跃 Agent', value: String(onlineCount), sub: `${agents?.length ?? 0} 个总计` },
     { label: '今日任务', value: String(totalTasks), sub: `已完成 ${doneCount}` },
@@ -261,7 +247,7 @@ function StatsRow() {
       {stats.map((s) => (
         <div key={s.label} className="glass-panel p-3">
           <div className="text-[10px] mb-1" style={{ color: 'var(--text-muted)' }}>{s.label}</div>
-          <div className="font-mono text-lg font-bold" style={{ color: 'var(--accent-amber)' }}>{s.value}</div>
+          <div className="font-mono text-lg font-bold" style={{ color: '#90caf9' }}>{s.value}</div>
           <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{s.sub}</div>
         </div>
       ))}
@@ -275,12 +261,12 @@ function FooterLinks() {
     <div className="flex items-center justify-between py-2">
       <div className="flex items-center gap-4">
         {['GitHub', '文档', 'Discord', 'Twitter'].map((l) => (
-          <a key={l} href="#" className="text-xs transition-colors hover:text-[var(--accent-caramel)]" style={{ color: 'var(--text-muted)' }}>{l}</a>
+          <a key={l} href="#" className="text-xs transition-colors hover:text-[#64b5f6]" style={{ color: 'var(--text-muted)' }}>{l}</a>
         ))}
       </div>
       <div className="flex items-center gap-3">
         <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span className="w-1 h-1 rounded-full bg-[var(--success)]" />所有系统运行正常
+          <span className="w-1 h-1 rounded-full bg-[#4caf7d]" />所有系统运行正常
         </span>
         <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>MIT License</span>
       </div>
@@ -310,12 +296,17 @@ export default function Dashboard() {
                 多 Agent、多系统共用的统一消息中枢。像指挥交响乐团一样调度你的 AI 代理网络。
               </p>
               <div className="flex items-center gap-3 mt-4">
-                <button className="px-4 py-2 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: 'var(--accent-dim)', color: 'var(--accent-caramel)', border: '1px solid rgba(212,148,58,0.25)' }}>
+                <button className="px-4 py-2 rounded-lg text-xs font-medium transition-all hover:brightness-110"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(33,150,243,0.18), rgba(100,181,246,0.1))',
+                    color: '#64b5f6',
+                    border: '1px solid rgba(100, 181, 246, 0.22)',
+                    boxShadow: '0 0 16px rgba(100,181,246,0.1)',
+                  }}>
                   部署平台
                 </button>
-                <button className="px-4 py-2 rounded-lg text-xs transition-all hover:bg-white/5"
-                  style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)' }}>
+                <button className="px-4 py-2 rounded-lg text-xs transition-all hover:bg-[rgba(100,180,255,0.04)]"
+                  style={{ color: 'var(--text-secondary)', border: '1px solid rgba(100,180,255,0.08)' }}>
                   查看文档 →
                 </button>
               </div>

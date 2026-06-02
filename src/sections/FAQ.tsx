@@ -23,12 +23,12 @@ export default function FAQ() {
                 className="rounded-lg overflow-hidden transition-all"
                 style={{ border: '1px solid', borderColor: openIndex === idx ? 'var(--border-hover)' : 'var(--border-default)' }}>
                 <button onClick={() => setOpenIndex(openIndex === idx ? null : idx)}
-                  className="w-full flex items-center justify-between p-3.5 text-left hover:bg-white/[0.02] transition-colors">
+                  className="w-full flex items-center justify-between p-3.5 text-left hover:bg-[rgba(100,180,255,0.02)] transition-colors">
                   <span className="text-sm pr-4" style={{ color: 'var(--text-primary)' }}>{faq.q}</span>
                   <span className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs transition-transform duration-300"
                     style={{
-                      background: openIndex === idx ? 'var(--accent-dim)' : 'rgba(255,255,255,0.04)',
-                      color: openIndex === idx ? 'var(--accent-caramel)' : 'var(--text-muted)',
+                      background: openIndex === idx ? 'rgba(100,181,246,0.1)' : 'rgba(100,180,255,0.04)',
+                      color: openIndex === idx ? '#64b5f6' : 'var(--text-muted)',
                       transform: openIndex === idx ? 'rotate(45deg)' : 'rotate(0deg)',
                     }}>+</span>
                 </button>

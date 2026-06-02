@@ -8,12 +8,26 @@ function required(name: string): string {
   return value ?? "";
 }
 
+function optional(name: string, defaultValue: string = ""): string {
+  return process.env[name] ?? defaultValue;
+}
+
 export const env = {
-  appId: required("APP_ID"),
-  appSecret: required("APP_SECRET"),
-  isProduction: process.env.NODE_ENV === "production",
+  // 必需：数据库连接
   databaseUrl: required("DATABASE_URL"),
-  kimiAuthUrl: required("KIMI_AUTH_URL"),
-  kimiOpenUrl: required("KIMI_OPEN_URL"),
-  ownerUnionId: process.env.OWNER_UNION_ID ?? "",
+
+  // 必需：JWT 密钥（用于认证令牌签名）
+  appSecret: optional("APP_SECRET", "tiangong-default-secret-change-me"),
+
+  // 可选：管理员账号
+  adminUser: optional("ADMIN_USER", "admin"),
+  adminPassword: optional("ADMIN_PASSWORD", "admin"),
+
+  // 可选：OAuth 配置（仅在使用外部认证时需要）
+  appId: optional("APP_ID"),
+  kimiAuthUrl: optional("KIMI_AUTH_URL"),
+  kimiOpenUrl: optional("KIMI_OPEN_URL"),
+  ownerUnionId: optional("OWNER_UNION_ID"),
+
+  isProduction: process.env.NODE_ENV === "production",
 };

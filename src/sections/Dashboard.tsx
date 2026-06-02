@@ -1,5 +1,55 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { trpc } from '@/providers/trpc';
+import { useMockData } from '@/hooks/useMockData';
+
+/* ─── 检测是否有后端连接 ─── */
+function useDataSource() {
+  const mock = useMockData();
+  const [hasBackend, setHasBackend] = useState<boolean | null>(null);
+
+  const isEnabled = hasBackend !== false;
+  const agentQuery = trpc.agent.list.useQuery(undefined, {
+    enabled: isEnabled,
+    retry: 1,
+  });
+  const taskQuery = trpc.task.list.useQuery(undefined, { enabled: hasBackend === true });
+  const systemQuery = trpc.system.list.useQuery(undefined, { enabled: hasBackend === true });
+  const msgQuery = trpc.message.stats.useQuery(undefined, { enabled: hasBackend === true });
+
+  useEffect(() => {
+    if (agentQuery.isSuccess) setHasBackend(true);
+    if (agentQuery.isError) setHasBackend(false);
+  }, [agentQuery.isSuccess, agentQuery.isError]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (hasBackend === null) setHasBackend(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [hasBackend]);
+
+  if (hasBackend === true) {
+    return {
+      agents: agentQuery.data ?? [],
+      tasks: taskQuery.data ?? [],
+      systems: systemQuery.data ?? [],
+      msgStats: msgQuery.data ?? { total: 0 },
+      isLoading: agentQuery.isLoading,
+      hasBackend: true,
+      mock,
+    };
+  }
+
+  return {
+    agents: mock.agents,
+    tasks: mock.tasks,
+    systems: mock.systems,
+    msgStats: mock.msgStats,
+    isLoading: hasBackend === null,
+    hasBackend: false,
+    mock,
+  };
+}
 
 /* ─── 3D Ring Text ─── */
 function RingText3D({ text, radius = 100 }: { text: string; radius?: number }) {
@@ -86,16 +136,15 @@ const statusConfig: Record<string, { dot: string; color: string }> = {
 };
 const statusLabel: Record<string, string> = { online: '在线', busy: '忙碌', idle: '空闲' };
 
-function AgentCard({ agent }: { agent: { id: number; agentId: string; name: string; system: string; status: string; task: string | null; progress: number; messagesCount: number } }) {
+function AgentCard({ agent, onStatusChange }: {
+  agent: { id: number; agentId: string; name: string; system: string; status: string; task: string | null; progress: number; messagesCount: number };
+  onStatusChange?: (id: number, status: 'idle' | 'online' | 'busy') => void;
+}) {
   const cfg = statusConfig[agent.status] || statusConfig.idle;
-  const utils = trpc.useUtils();
-  const updateMutation = trpc.agent.updateStatus.useMutation({
-    onSuccess: () => utils.agent.list.invalidate(),
-  });
   const cycleStatus = () => {
     const order = ['idle', 'online', 'busy'];
     const next = order[(order.indexOf(agent.status) + 1) % order.length];
-    updateMutation.mutate({ id: agent.id, status: next as 'idle' | 'online' | 'busy' });
+    onStatusChange?.(agent.id, next as 'idle' | 'online' | 'busy');
   };
 
   return (
@@ -110,7 +159,7 @@ function AgentCard({ agent }: { agent: { id: number; agentId: string; name: stri
           {agent.agentId}
         </span>
       </div>
-      <div className="flex items-center gap-1.5 mb-2">
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         <span className="text-[10px] px-1.5 py-0.5 rounded font-mono"
           style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>
           {agent.system}
@@ -133,33 +182,29 @@ function AgentCard({ agent }: { agent: { id: number; agentId: string; name: stri
 }
 
 /* ─── Connection Panel ─── */
-function ConnectionPanel() {
-  const { data: systems } = trpc.system.list.useQuery();
-  const utils = trpc.useUtils();
-  const updateMutation = trpc.system.updateStatus.useMutation({
-    onSuccess: () => utils.system.list.invalidate(),
-  });
+function ConnectionPanel({ systems, onStatusChange }: {
+  systems: { id: number; name: string; status: string }[];
+  onStatusChange?: (id: number, status: 'connected' | 'syncing' | 'disconnected') => void;
+}) {
   const statusColor: Record<string, string> = {
     connected: 'var(--success)',
     syncing: 'var(--accent-gold)',
     disconnected: 'var(--text-muted)',
   };
   const statusText: Record<string, string> = {
-    connected: '已连接',
-    syncing: '同步中',
-    disconnected: '断开',
+    connected: '已连接', syncing: '同步中', disconnected: '断开',
   };
   const cycleStatus = (id: number, current: string) => {
     const order = ['disconnected', 'syncing', 'connected'];
     const next = order[(order.indexOf(current) + 1) % order.length];
-    updateMutation.mutate({ id, status: next as 'connected' | 'syncing' | 'disconnected' });
+    onStatusChange?.(id, next as 'connected' | 'syncing' | 'disconnected');
   };
 
   return (
     <div className="glass-panel p-4 sci-border">
       <div className="section-label mb-3">系统接入 · SYS_CONN</div>
       <div className="flex flex-col gap-2">
-        {systems?.map((s) => (
+        {systems.map((s) => (
           <div key={s.id} className="flex items-center justify-between py-1">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-bold"
@@ -180,12 +225,10 @@ function ConnectionPanel() {
 }
 
 /* ─── Task Timeline ─── */
-function TaskTimeline() {
-  const { data: tasks } = trpc.task.list.useQuery();
-  const utils = trpc.useUtils();
-  const updateMutation = trpc.task.updateProgress.useMutation({
-    onSuccess: () => utils.task.list.invalidate(),
-  });
+function TaskTimeline({ tasks, onProgress }: {
+  tasks: { id: number; taskId: string; name: string; status: string; progress: number }[];
+  onProgress?: (id: number, progress: number, status: string) => void;
+}) {
   const statusIcon: Record<string, ReactNode> = {
     running: <span className="status-dot status-dot-busy" />,
     pending: <span className="status-dot status-dot-idle" />,
@@ -198,15 +241,15 @@ function TaskTimeline() {
       <div className="flex items-center justify-between mb-3">
         <div className="section-label">任务时间线 · TASK_LOG</div>
         <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
-          {tasks?.length ?? 0} 个任务
+          {tasks.length} 个任务
         </span>
       </div>
       <div className="flex flex-col gap-0 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
-        {tasks?.map((t) => (
+        {tasks.map((t) => (
           <div key={t.id}
             className="flex items-center gap-3 py-2 border-t first:border-t-0 transition-colors hover:bg-[rgba(180,200,255,0.02)] rounded px-1"
             style={{ borderColor: 'var(--border-default)' }}>
-            <div className="flex-shrink-0">{statusIcon[t.status]}</div>
+            <div className="flex-shrink-0">{statusIcon[t.status] || statusIcon.pending}</div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-bold" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
@@ -218,7 +261,7 @@ function TaskTimeline() {
                 onClick={() => {
                   const next = Math.min(100, t.progress + 10);
                   const st = next >= 100 ? 'done' : 'running';
-                  updateMutation.mutate({ id: t.id, progress: next, status: st as 'running' | 'done' | 'pending' | 'failed' });
+                  onProgress?.(t.id, next, st);
                 }}
                 className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors"
                 style={{ color: 'var(--text-muted)' }}>
@@ -233,18 +276,19 @@ function TaskTimeline() {
 }
 
 /* ─── Stats Row ─── */
-function StatsRow() {
-  const { data: agents } = trpc.agent.list.useQuery();
-  const { data: tasks } = trpc.task.list.useQuery();
-  const { data: msgStats } = trpc.message.stats.useQuery();
-  const onlineCount = agents?.filter((a) => a.status === 'online' || a.status === 'busy').length ?? 0;
-  const doneCount = tasks?.filter((t) => t.status === 'done').length ?? 0;
-  const totalTasks = tasks?.length ?? 0;
+function StatsRow({ agents, tasks, msgStats }: {
+  agents: { status: string }[];
+  tasks: { status: string }[];
+  msgStats: { total: number };
+}) {
+  const onlineCount = agents.filter((a) => a.status === 'online' || a.status === 'busy').length;
+  const doneCount = tasks.filter((t) => t.status === 'done').length;
+  const totalTasks = tasks.length;
 
   const stats = [
-    { label: '活跃 Agent', value: String(onlineCount), sub: `${agents?.length ?? 0} 个总计` },
+    { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
     { label: '今日任务', value: String(totalTasks), sub: `已完成 ${doneCount}` },
-    { label: '消息总量', value: msgStats ? `${(msgStats.total / 1000).toFixed(1)}K` : '0', sub: '实时同步' },
+    { label: '消息总量', value: `${(msgStats.total / 1000).toFixed(1)}K`, sub: '实时同步' },
     { label: '系统延迟', value: '12ms', sub: '网络正常' },
   ];
 
@@ -282,7 +326,7 @@ function FooterLinks() {
 
 /* ─── Main Dashboard ─── */
 export default function Dashboard() {
-  const { data: agents, isLoading: agentsLoading } = trpc.agent.list.useQuery();
+  const data = useDataSource();
 
   return (
     <div className="relative z-10 min-h-screen pt-14 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>
@@ -295,13 +339,17 @@ export default function Dashboard() {
               <RingText3D text="TIANGONG-AGENT-HUB-MESSAGING-PLATFORM-" radius={90} />
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <div className="section-label">TIANGONG DASHBOARD</div>
                 <div className="h-3 w-px" style={{ background: 'var(--border-default)' }} />
                 <div className="text-[10px] font-mono" style={{ color: 'var(--accent-red)' }}>中国空间站 · 核心舱</div>
+                {!data.hasBackend && data.isLoading === false && (
+                  <span className="text-[9px] px-1 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>
+                    DEMO
+                  </span>
+                )}
               </div>
-              <h1 className="text-2xl md:text-3xl font-black tracking-wider mb-2"
-                style={{ color: 'var(--text-primary)' }}>
+              <h1 className="text-2xl md:text-3xl font-black tracking-wider mb-2" style={{ color: 'var(--text-primary)' }}>
                 天宫 Agent 消息平台
               </h1>
               <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
@@ -309,11 +357,7 @@ export default function Dashboard() {
               </p>
               <div className="flex items-center gap-3 mt-4">
                 <button className="px-4 py-2 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110"
-                  style={{
-                    background: 'var(--accent-red)',
-                    color: '#fff',
-                    boxShadow: '0 0 16px rgba(194, 58, 48, 0.25)',
-                  }}>
+                  style={{ background: 'var(--accent-red)', color: '#fff', boxShadow: '0 0 16px rgba(194, 58, 48, 0.25)' }}>
                   部署平台
                 </button>
                 <button className="px-4 py-2 rounded text-xs font-mono transition-all hover:bg-[rgba(180,200,255,0.04)]"
@@ -332,27 +376,41 @@ export default function Dashboard() {
         </div>
 
         {/* Stats */}
-        <div className="mb-4"><StatsRow /></div>
+        <div className="mb-4">
+          <StatsRow agents={data.agents} tasks={data.tasks} msgStats={data.msgStats} />
+        </div>
 
         {/* Agent Grid + Systems */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
           <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {agentsLoading ? (
+            {data.isLoading ? (
               <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>
                 正在连接核心舱...
               </div>
             ) : (
-              agents?.map((agent) => <AgentCard key={agent.id} agent={agent} />)
+              data.agents.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onStatusChange={data.hasBackend ? undefined : data.mock.updateAgentStatus}
+                />
+              ))
             )}
           </div>
           <div className="lg:col-span-1">
-            <ConnectionPanel />
+            <ConnectionPanel
+              systems={data.systems}
+              onStatusChange={data.hasBackend ? undefined : data.mock.updateSystemStatus}
+            />
           </div>
         </div>
 
         {/* Task Timeline */}
         <div className="mb-4">
-          <TaskTimeline />
+          <TaskTimeline
+            tasks={data.tasks}
+            onProgress={data.hasBackend ? undefined : data.mock.updateTaskProgress}
+          />
         </div>
 
         {/* Footer */}

@@ -1,0 +1,271 @@
+{
+  "alerts": [
+    {
+      "time": "2026-06-03T22:48:27.203005+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 11 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 101.126.13.31:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.20.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 3.173.21.63:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-03T22:48:27.211259+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-03T23:18:14.982928+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 3.173.21.63:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.20.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-03T23:18:14.990745+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-03T23:48:00.525275+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 11 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.20.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 101.126.7.76:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-03T23:48:00.533896+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T00:18:00.559336+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T00:18:00.575554+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T00:48:00.622802+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T00:48:00.631275+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T01:18:00.570228+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T01:18:00.579645+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T01:48:16.543710+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T01:48:16.554619+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T02:18:01.004057+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T02:18:01.012696+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T02:48:00.678606+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T02:48:00.692419+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T03:18:15.730970+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T03:18:15.751449+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T03:48:01.001720+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T03:48:01.011698+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T04:18:00.709201+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T04:18:00.720050+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T04:48:00.632541+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T04:48:00.645404+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T05:18:00.714807+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 104.18.21.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T05:18:00.727648+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T05:48:00.461400+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T05:48:00.471797+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T06:18:13.945019+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T06:18:13.956015+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T06:48:16.245748+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 11 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.42.0.1:53536 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T06:48:16.257032+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T07:18:15.759203+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 10 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T07:18:15.770792+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    },
+    {
+      "time": "2026-06-04T07:48:25.211684+08:00",
+      "level": "warning",
+      "category": "network",
+      "message": "🔍 发现 13 个可疑出站连接",
+      "detail": "  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)\n  • 47.79.117.67:443 (未知主机)\n  • 34.120.84.45:443 (45.84.120.34.bc.googleusercontent.com)\n  • 10.43.42.146:9222 (service-69fc89208e7cc21f9f506ce1.environment-69fc6ae4e5ed304c1d8452b1.svc.cluster.local)\n  • 104.18.20.246:443 (未知主机)\n  • 10.42.0.1:32080 (未知主机)\n  • 35.244.241.247:443 (247.241.244.35.bc.googleusercontent.com)"
+    },
+    {
+      "time": "2026-06-04T07:48:25.222930+08:00",
+      "level": "critical",
+      "category": "config",
+      "message": "🔴 发现硬编码 API Key: zeabur-ai",
+      "detail": "应使用环境变量引用"
+    }
+  ],
+  "last_check": "2026-06-04T07:48:25.223277+08:00"
+}

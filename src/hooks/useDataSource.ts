@@ -12,11 +12,11 @@ export interface MockTask {
 }
 export interface MockSystem {
   id: number; name: string; slug: string; status: string;
+  config?: string | null;
 }
 export interface MockOrg {
   id: number; name: string; description: string | null;
-  agents: number;
-  createdAt: string;
+  agents: number; createdAt: string;
 }
 
 const INITIAL_AGENTS: MockAgent[] = [
@@ -39,16 +39,16 @@ const INITIAL_TASKS: MockTask[] = [
 ];
 
 const INITIAL_SYSTEMS: MockSystem[] = [
-  { id: 1, name: "Slack", slug: "slack", status: "connected" },
-  { id: 2, name: "Email", slug: "email", status: "connected" },
-  { id: 3, name: "Webhook", slug: "webhook", status: "connected" },
-  { id: 4, name: "GitHub", slug: "github", status: "syncing" },
-  { id: 5, name: "Jira", slug: "jira", status: "connected" },
-  { id: 6, name: "Notion", slug: "notion", status: "disconnected" },
+  { id: 1, name: "Slack", slug: "slack", status: "connected", config: '{"webhookUrl":"https://hooks.slack.com/xxx","channel":"#agent-alerts"}' },
+  { id: 2, name: "Email", slug: "email", status: "connected", config: '{"smtpHost":"smtp.gmail.com","port":"587"}' },
+  { id: 3, name: "Webhook", slug: "webhook", status: "connected", config: '{"webhookUrl":"https://api.example.com/webhook"}' },
+  { id: 4, name: "GitHub", slug: "github", status: "syncing", config: '{"repo":"luciferlihaoyu/tiangong","token":"ghp_xxx"}' },
+  { id: 5, name: "Jira", slug: "jira", status: "connected", config: '{"project":"TIAN","url":"https://tiangong.atlassian.net"}' },
+  { id: 6, name: "Notion", slug: "notion", status: "disconnected", config: null },
 ];
 
 const INITIAL_ORGS: MockOrg[] = [
-  { id: 1, name: "天宫科技", description: "主公司", agents: 6, createdAt: "2026-01-15" },
+  { id: 1, name: "天宫科技", description: "主公司 - AI Agent调度平台", agents: 6, createdAt: "2026-01-15" },
 ];
 
 const LS_KEY = "tiangong_data";
@@ -61,105 +61,85 @@ interface StoredData {
 }
 
 function loadFromStorage(): StoredData | null {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw) as StoredData;
-  } catch { /* ignore */ }
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw); } catch { /* ignore */ }
   return null;
 }
+function saveToStorage(data: StoredData) { localStorage.setItem(LS_KEY, JSON.stringify(data)); }
 
-function saveToStorage(data: StoredData) {
-  localStorage.setItem(LS_KEY, JSON.stringify(data));
-}
-
-let nextId = 100;
+let nextId = 200;
 
 export function useDataSource() {
+  // All hooks must be called unconditionally at the top level
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 0, staleTime: Infinity });
+  const taskQuery = trpc.task.list.useQuery(undefined, { retry: 0, staleTime: Infinity, enabled: agentQuery.isSuccess });
+  const systemQuery = trpc.system.list.useQuery(undefined, { retry: 0, staleTime: Infinity, enabled: agentQuery.isSuccess });
+  const msgStatsQuery = trpc.message.stats.useQuery(undefined, { retry: 0, staleTime: Infinity, enabled: agentQuery.isSuccess });
+
   const hasBackend = agentQuery.isSuccess;
 
   const [mockData, setMockData] = useState<StoredData>(() => {
     const saved = loadFromStorage();
     return saved || { agents: INITIAL_AGENTS, tasks: INITIAL_TASKS, systems: INITIAL_SYSTEMS, orgs: INITIAL_ORGS };
   });
-
   useEffect(() => { saveToStorage(mockData); }, [mockData]);
 
   const agents = hasBackend ? (agentQuery.data || []) : mockData.agents;
-  const tasks = hasBackend ? (trpc.task.list.useQuery(undefined, { enabled: hasBackend }).data || []) : mockData.tasks;
-  const systems = hasBackend ? (trpc.system.list.useQuery(undefined, { enabled: hasBackend }).data || []) : mockData.systems;
+  const tasks = hasBackend ? (taskQuery.data || []) : mockData.tasks;
+  const systems = hasBackend ? (systemQuery.data || []) : mockData.systems;
   const orgs = mockData.orgs;
   const msgStats = hasBackend
-    ? (trpc.message.stats.useQuery(undefined, { enabled: hasBackend }).data || { total: 0 })
+    ? (msgStatsQuery.data || { total: 0 })
     : { total: mockData.agents.reduce((s: number, a: MockAgent) => s + a.messagesCount, 0) };
 
-  // ─── Agent CRUD ───
+  // Agent CRUD
   const addAgent = useCallback((data: { name: string; system: string; task: string; description: string }) => {
     const id = ++nextId;
-    const newAgent: MockAgent = {
-      id, agentId: `AG-${String(id).padStart(2, '0')}`,
-      name: data.name, system: data.system, status: "idle",
-      task: data.task || null, progress: 0, messagesCount: 0,
-      description: data.description || null,
-    };
+    const newAgent: MockAgent = { id, agentId: `AG-${String(id).padStart(2, '0')}`, name: data.name, system: data.system, status: "idle", task: data.task || null, progress: 0, messagesCount: 0, description: data.description || null };
     setMockData(prev => ({ ...prev, agents: [...prev.agents, newAgent] }));
   }, []);
-
   const updateAgent = useCallback((id: number, data: Partial<MockAgent>) => {
-    setMockData(prev => ({
-      ...prev,
-      agents: prev.agents.map(a => a.id === id ? { ...a, ...data } : a),
-    }));
+    setMockData(prev => ({ ...prev, agents: prev.agents.map(a => a.id === id ? { ...a, ...data } : a) }));
   }, []);
-
   const deleteAgent = useCallback((id: number) => {
-    setMockData(prev => ({
-      ...prev,
-      agents: prev.agents.filter(a => a.id !== id),
-      tasks: prev.tasks.filter(t => t.agentId !== id),
-    }));
+    setMockData(prev => ({ ...prev, agents: prev.agents.filter(a => a.id !== id), tasks: prev.tasks.filter(t => t.agentId !== id) }));
   }, []);
 
-  // ─── Task CRUD ───
+  // Task CRUD
   const addTask = useCallback((data: { name: string; agentId: number | null; description: string }) => {
     const id = ++nextId;
     const taskCount = mockData.tasks.length + 149;
-    const newTask: MockTask = {
-      id, taskId: `#${taskCount}`,
-      name: data.name, agentId: data.agentId,
-      status: "pending", progress: 0,
-      description: data.description || null,
-    };
+    const newTask: MockTask = { id, taskId: `#${taskCount}`, name: data.name, agentId: data.agentId, status: "pending", progress: 0, description: data.description || null };
     setMockData(prev => ({ ...prev, tasks: [newTask, ...prev.tasks] }));
   }, [mockData.tasks.length]);
-
   const deleteTask = useCallback((id: number) => {
     setMockData(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }));
   }, []);
 
-  // ─── Org CRUD ───
-  const addOrg = useCallback((data: { name: string; description: string }) => {
-    const id = ++nextId;
-    const newOrg: MockOrg = {
-      id, name: data.name, description: data.description || null,
-      agents: 0, createdAt: new Date().toISOString().slice(0, 10),
-    };
-    setMockData(prev => ({ ...prev, orgs: [...prev.orgs, newOrg] }));
+  // System config
+  const updateSystemConfig = useCallback((id: number, config: string) => {
+    setMockData(prev => ({ ...prev, systems: prev.systems.map(s => s.id === id ? { ...s, config } : s) }));
   }, []);
 
+  // Org CRUD
+  const addOrg = useCallback((data: { name: string; description: string }) => {
+    const id = ++nextId;
+    const newOrg: MockOrg = { id, name: data.name, description: data.description || null, agents: 0, createdAt: new Date().toISOString().slice(0, 10) };
+    setMockData(prev => ({ ...prev, orgs: [...prev.orgs, newOrg] }));
+  }, []);
+  const updateOrg = useCallback((id: number, data: Partial<MockOrg>) => {
+    setMockData(prev => ({ ...prev, orgs: prev.orgs.map(o => o.id === id ? { ...o, ...data } : o) }));
+  }, []);
   const deleteOrg = useCallback((id: number) => {
     setMockData(prev => ({ ...prev, orgs: prev.orgs.filter(o => o.id !== id) }));
   }, []);
 
-  // ─── Status toggles ───
+  // Status toggles
   const updateAgentStatus = useCallback((id: number, status: string) => {
     setMockData(prev => ({ ...prev, agents: prev.agents.map(a => a.id === id ? { ...a, status } : a) }));
   }, []);
-
   const updateSystemStatus = useCallback((id: number, status: string) => {
     setMockData(prev => ({ ...prev, systems: prev.systems.map(s => s.id === id ? { ...s, status } : s) }));
   }, []);
-
   const updateTaskProgress = useCallback((id: number, progress: number, status: string) => {
     setMockData(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, progress, status } : t) }));
   }, []);
@@ -170,7 +150,8 @@ export function useDataSource() {
     hasBackend,
     addAgent, updateAgent, deleteAgent,
     addTask, deleteTask,
-    addOrg, deleteOrg,
+    updateSystemConfig,
+    addOrg, updateOrg, deleteOrg,
     updateAgentStatus, updateSystemStatus, updateTaskProgress,
   };
 }

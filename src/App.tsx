@@ -16,22 +16,21 @@ export default function App() {
       <Starfield />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/" element={
+          <>
+            <Navigation />
+            <Dashboard />
+            <MatrixNodes />
+            <Features />
+            <ExecutionCore />
+            <FAQ />
+            <FooterTerminal />
+          </>
+        } />
         <Route path="*" element={
           <>
             <Navigation />
-            <Routes>
-              <Route path="/" element={
-                <>
-                  <Dashboard />
-                  <MatrixNodes />
-                  <Features />
-                  <ExecutionCore />
-                  <FAQ />
-                  <FooterTerminal />
-                </>
-              } />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <NotFound />
           </>
         } />
       </Routes>

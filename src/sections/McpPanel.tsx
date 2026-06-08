@@ -1,7 +1,5 @@
 /**
  * 天宫 MCP 接入管理 Tab
- * Task 6: MCP API Key management + audit log viewing
- *
  * 中国科幻风 UI — 与 Dashboard 风格统一
  */
 
@@ -10,6 +8,30 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+/* ═══════════════════════════════════════════
+   MCP Tools & Resources 定义
+   ═══════════════════════════════════════════ */
+
+const MCP_TOOLS = [
+  { id: "create_task", label: "创建任务", desc: "创建新任务，支持依赖" },
+  { id: "update_task_status", label: "更新任务状态", desc: "状态机检查 + 自动触发下游" },
+  { id: "send_message", label: "发送消息", desc: "Agent 间互发消息" },
+  { id: "update_agent_status", label: "更新 Agent 状态", desc: "更新在线状态和当前任务" },
+  { id: "heartbeat", label: "心跳上报", desc: "Agent 心跳保活" },
+  { id: "list_agents", label: "查询 Agent 列表", desc: "获取所有 Agent" },
+  { id: "list_tasks", label: "查询任务列表", desc: "获取所有任务" },
+  { id: "list_messages", label: "查询消息记录", desc: "获取消息历史" },
+];
+
+const MCP_RESOURCES = [
+  { id: "agents", label: "Agent 列表", desc: "tiangong://agents" },
+  { id: "tasks", label: "任务列表", desc: "tiangong://tasks" },
+  { id: "organization", label: "组织架构", desc: "tiangong://organization" },
+  { id: "agent-detail", label: "Agent 详情", desc: "tiangong://agents/{id}" },
+  { id: "task-dag", label: "任务 DAG", desc: "tiangong://tasks/dag" },
+  { id: "agent-hierarchy", label: "层级树", desc: "tiangong://agents/hierarchy" },
+];
 
 /* ═══════════════════════════════════════════
    Types
@@ -48,6 +70,26 @@ interface AuditStats {
 }
 
 /* ═══════════════════════════════════════════
+   Helper: parse/serialize permissions
+   ═══════════════════════════════════════════ */
+
+function parsePermissions(perms: string | null): { tools: string[]; resources: string[] } {
+  try {
+    const p = perms ? JSON.parse(perms) : {};
+    return {
+      tools: Array.isArray(p.tools) ? p.tools : [],
+      resources: Array.isArray(p.resources) ? p.resources : [],
+    };
+  } catch {
+    return { tools: [], resources: [] };
+  }
+}
+
+function serializePermissions(tools: string[], resources: string[]): string {
+  return JSON.stringify({ tools, resources });
+}
+
+/* ═══════════════════════════════════════════
    Helper: call tRPC via fetch
    ═══════════════════════════════════════════ */
 
@@ -72,6 +114,99 @@ async function trpcCall(path: string, input?: any): Promise<any> {
 }
 
 /* ═══════════════════════════════════════════
+   Permission Checkbox Group (复用组件)
+   ═══════════════════════════════════════════ */
+
+function PermissionGroup({
+  title,
+  items,
+  selected,
+  onChange,
+}: {
+  title: string;
+  items: { id: string; label: string; desc: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const allIds = items.map(i => i.id);
+  const allSelected = allIds.every(id => selected.includes(id));
+  const someSelected = allIds.some(id => selected.includes(id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      onChange(selected.filter(id => !allIds.includes(id)));
+    } else {
+      const toAdd = allIds.filter(id => !selected.includes(id));
+      onChange([...selected, ...toAdd]);
+    }
+  };
+
+  const toggleOne = (id: string) => {
+    if (selected.includes(id)) {
+      onChange(selected.filter(s => s !== id));
+    } else {
+      onChange([...selected, id]);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-mono font-bold" style={{ color: "var(--text-secondary)" }}>
+          {title} ({selected.filter(id => allIds.includes(id)).length}/{items.length})
+        </span>
+        <label className="flex items-center gap-1 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+            onChange={toggleAll}
+            className="w-3 h-3 rounded"
+            style={{ accentColor: "var(--accent-gold)" }}
+          />
+          <span className="text-[9px] font-mono" style={{ color: "var(--accent-gold)" }}>全选</span>
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {items.map(item => (
+          <label
+            key={item.id}
+            className="flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer select-none transition-all hover:bg-[rgba(255,255,255,0.03)]"
+            style={{
+              border: selected.includes(item.id)
+                ? "1px solid rgba(194,168,50,0.2)"
+                : "1px solid transparent",
+              background: selected.includes(item.id)
+                ? "rgba(194,168,50,0.05)"
+                : "transparent",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(item.id)}
+              onChange={() => toggleOne(item.id)}
+              className="w-3 h-3 rounded flex-shrink-0"
+              style={{ accentColor: "var(--accent-gold)" }}
+            />
+            <div className="flex flex-col min-w-0">
+              <span
+                className="text-[11px] leading-tight truncate"
+                style={{ color: selected.includes(item.id) ? "var(--accent-gold)" : "var(--text-muted)" }}
+              >
+                {item.label}
+              </span>
+              <span className="text-[9px] font-mono truncate" style={{ color: "var(--text-muted)", opacity: 0.5 }}>
+                {item.desc}
+              </span>
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    API Key Row
    ═══════════════════════════════════════════ */
 
@@ -89,10 +224,8 @@ function ApiKeyRow({
   onEdit: () => void;
 }) {
   const isActive = item.active === "true";
-  let perms: string[] = [];
-  try {
-    perms = item.permissions ? JSON.parse(item.permissions)?.tools || [] : [];
-  } catch {}
+  const { tools, resources } = parsePermissions(item.permissions);
+  const allPerms = [...tools.map(t => MCP_TOOLS.find(m => m.id === t)?.label || t), ...resources.map(r => MCP_RESOURCES.find(m => m.id === r)?.label || r)];
 
   return (
     <div
@@ -162,9 +295,9 @@ function ApiKeyRow({
           className="font-mono py-0.5 px-1 rounded"
           style={{ background: "rgba(100,181,246,0.08)", color: "var(--accent-cyan)" }}
         >
-          {item.rateLimit}/s
+          {item.rateLimit} QPS
         </span>
-        {perms.map(p => (
+        {allPerms.length > 0 ? allPerms.slice(0, 4).map(p => (
           <span
             key={p}
             className="py-0.5 px-1 rounded font-mono"
@@ -172,7 +305,14 @@ function ApiKeyRow({
           >
             {p}
           </span>
-        ))}
+        )) : (
+          <span className="py-0.5 px-1 rounded font-mono" style={{ color: "var(--accent-red)", opacity: 0.6 }}>
+            无权限
+          </span>
+        )}
+        {allPerms.length > 4 && (
+          <span className="font-mono" style={{ color: "var(--text-muted)" }}>+{allPerms.length - 4}</span>
+        )}
       </div>
 
       {item.lastUsedAt && (
@@ -218,7 +358,6 @@ function AuditLogPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
@@ -242,7 +381,6 @@ function AuditLogPanel() {
         </div>
       )}
 
-      {/* Log list */}
       <div className="glass-panel p-4 sci-border">
         <div className="section-label mb-3">
           调用日志 · AUDIT_LOG ({logs.length})
@@ -333,36 +471,59 @@ function AuditLogPanel() {
 }
 
 /* ═══════════════════════════════════════════
-   Key Edit/View Dialog
+   Permission Edit Dialog (新建/编辑共用)
    ═══════════════════════════════════════════ */
 
-function EditKeyDialog({
+function PermissionEditDialog({
+  open,
   item,
+  agents,
   onClose,
   onSaved,
 }: {
+  open: boolean;
   item: McpKeyItem | null;
+  agents: { id: number; name: string }[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (fullKey?: string) => void;
 }) {
-  if (!item) return null;
+  const isEdit = !!item;
+  const parsed = parsePermissions(item?.permissions ?? null);
 
-  const [name, setName] = useState(item.name);
-  const [permissions, setPermissions] = useState(item.permissions || "");
-  const [rateLimit, setRateLimit] = useState(String(item.rateLimit || 10));
+  const [name, setName] = useState(item?.name || "");
+  const [agentId, setAgentId] = useState(item?.agentId ? String(item.agentId) : "");
+  const [selectedTools, setSelectedTools] = useState<string[]>(parsed.tools);
+  const [selectedResources, setSelectedResources] = useState<string[]>(parsed.resources);
+  const [rateLimit, setRateLimit] = useState(String(item?.rateLimit || 10));
   const [saving, setSaving] = useState(false);
+  const [newKey, setNewKey] = useState("");
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await trpcCall("mcp.updateKey", {
-        id: item.id,
-        name,
-        permissions: permissions || null,
-        rateLimit: parseInt(rateLimit) || 10,
-      });
-      onSaved();
-      onClose();
+      const perms = serializePermissions(selectedTools, selectedResources);
+      if (isEdit) {
+        await trpcCall("mcp.updateKey", {
+          id: item!.id,
+          name,
+          permissions: perms,
+          rateLimit: parseInt(rateLimit) || 10,
+        });
+        onSaved();
+        onClose();
+      } else {
+        const res = await trpcCall("mcp.createKey", {
+          name,
+          agentId: agentId ? parseInt(agentId) : undefined,
+          permissions: perms,
+          rateLimit: parseInt(rateLimit) || 10,
+        });
+        const data = res?.result?.data?.json || res;
+        if (data?.key) {
+          setNewKey(data.key);
+          onSaved(data.key);
+        }
+      }
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -370,184 +531,26 @@ function EditKeyDialog({
     }
   };
 
-  return (
-    <Dialog open={!!item} onOpenChange={() => onClose()}>
-      <DialogContent
-        className="border-0 max-w-md"
-        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border-default)" }}
-      >
-        <DialogHeader>
-          <DialogTitle
-            className="section-label"
-          >
-            编辑 API Key · EDIT
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3 mt-2">
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Key
-            </Label>
-            <Input
-              value={item.keyPreview}
-              disabled
-              className="font-mono text-xs opacity-50"
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-muted)",
-              }}
-            />
-          </div>
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              用途说明 · NAME
-            </Label>
-            <Input
-              value={name}
-              onChange={e => setName(e.target.value)}
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              权限 JSON · PERMISSIONS
-            </Label>
-            <Input
-              value={permissions}
-              onChange={e => setPermissions(e.target.value)}
-              placeholder='{"tools":["create_task"],"resources":["agents"]}'
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              速率限制 /s · RATE LIMIT
-            </Label>
-            <Input
-              value={rateLimit}
-              onChange={e => setRateLimit(e.target.value)}
-              type="number"
-              min={1}
-              max={100}
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          <div className="flex gap-2 mt-2">
-            <Button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex-1 text-xs font-bold"
-              style={{ background: "var(--accent-gold)", color: "#000" }}
-            >
-              {saving ? "保存中..." : "保存"}
-            </Button>
-            <Button
-              onClick={onClose}
-              className="text-xs"
-              variant="outline"
-              style={{ border: "1px solid var(--border-default)", color: "var(--text-muted)" }}
-            >
-              取消
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   Create Key Dialog
-   ═══════════════════════════════════════════ */
-
-function CreateKeyDialog({
-  open,
-  onOpenChange,
-  onCreated,
-  agents,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onCreated: (fullKey: string) => void;
-  agents: { id: number; name: string }[];
-}) {
-  const [name, setName] = useState("");
-  const [agentId, setAgentId] = useState("");
-  const [permissions, setPermissions] = useState("");
-  const [rateLimit, setRateLimit] = useState("10");
-  const [creating, setCreating] = useState(false);
-  const [newKey, setNewKey] = useState("");
-
-  const handleCreate = async () => {
-    setCreating(true);
-    try {
-      const res = await trpcCall("mcp.createKey", {
-        name,
-        agentId: agentId ? parseInt(agentId) : undefined,
-        permissions: permissions || null,
-        rateLimit: parseInt(rateLimit) || 10,
-      });
-
-      const data = res?.result?.data?.json || res;
-      if (data?.key) {
-        setNewKey(data.key);
-        onCreated(data.key);
-      }
-    } catch (e: any) {
-      alert(e.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleClose = () => {
     setName("");
     setAgentId("");
-    setPermissions("");
+    setSelectedTools([]);
+    setSelectedResources([]);
     setRateLimit("10");
     setNewKey("");
-    onOpenChange(false);
+    onClose();
   };
 
+  // 显示新创建的 Key
   if (newKey) {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent
           className="border-0 max-w-md"
-          style={{
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border-default)",
-          }}
+          style={{ background: "var(--bg-secondary)", border: "1px solid var(--border-default)" }}
         >
           <DialogHeader>
-            <DialogTitle className="section-label">
-              ✅ API Key 已创建
-            </DialogTitle>
+            <DialogTitle className="section-label">✅ API Key 已创建</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div
@@ -574,10 +577,7 @@ function CreateKeyDialog({
               onClick={handleClose}
               className="text-xs"
               variant="outline"
-              style={{
-                border: "1px solid var(--border-default)",
-                color: "var(--text-muted)",
-              }}
+              style={{ border: "1px solid var(--border-default)", color: "var(--text-muted)" }}
             >
               关闭
             </Button>
@@ -590,29 +590,21 @@ function CreateKeyDialog({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
-        className="border-0 max-w-md"
-        style={{
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border-default)",
-        }}
+        className="border-0 max-w-lg max-h-[85vh] overflow-y-auto custom-scrollbar"
+        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border-default)" }}
       >
         <DialogHeader>
           <DialogTitle className="section-label">
-            创建 MCP API Key · NEW KEY
+            {isEdit ? "编辑 API Key · EDIT" : "创建 MCP API Key · NEW KEY"}
           </DialogTitle>
         </DialogHeader>
         <form
-          onSubmit={e => {
-            e.preventDefault();
-            handleCreate();
-          }}
-          className="flex flex-col gap-3 mt-2"
+          onSubmit={e => { e.preventDefault(); handleSave(); }}
+          className="flex flex-col gap-4 mt-2"
         >
+          {/* 用途说明 */}
           <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
               用途说明 · NAME
             </Label>
             <Input
@@ -627,91 +619,92 @@ function CreateKeyDialog({
               }}
             />
           </div>
+
+          {/* 关联 Agent（仅新建时显示） */}
+          {!isEdit && (
+            <div>
+              <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
+                关联 Agent · AGENT
+              </Label>
+              <select
+                value={agentId}
+                onChange={e => setAgentId(e.target.value)}
+                className="w-full px-2 py-1.5 rounded text-xs"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                <option value="">不关联</option>
+                {agents.map(a => (
+                  <option key={a.id} value={String(a.id)}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Tools 权限 */}
+          <PermissionGroup
+            title="Tools · 可执行操作"
+            items={MCP_TOOLS}
+            selected={selectedTools}
+            onChange={setSelectedTools}
+          />
+
+          {/* Resources 权限 */}
+          <PermissionGroup
+            title="Resources · 可读取数据"
+            items={MCP_RESOURCES}
+            selected={selectedResources}
+            onChange={setSelectedResources}
+          />
+
+          {/* 速率限制 */}
           <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              关联 Agent · AGENT
+            <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
+              速率限制 (QPS) · RATE LIMIT
             </Label>
-            <select
-              value={agentId}
-              onChange={e => setAgentId(e.target.value)}
-              className="w-full px-2 py-1.5 rounded text-xs"
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            >
-              <option value="">不关联</option>
-              {agents.map(a => (
-                <option key={a.id} value={String(a.id)}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <Input
+                value={rateLimit}
+                onChange={e => setRateLimit(e.target.value)}
+                type="number"
+                min={1}
+                max={1000}
+                className="w-24"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                }}
+              />
+              <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                次/秒 — 每秒允许的最大请求数
+              </span>
+            </div>
           </div>
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              权限 JSON · PERMISSIONS (可选)
-            </Label>
-            <Input
-              value={permissions}
-              onChange={e => setPermissions(e.target.value)}
-              placeholder='{"tools":["create_task"],"resources":["agents"]}'
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          <div>
-            <Label
-              className="text-[10px] font-mono mb-1 block"
-              style={{ color: "var(--text-muted)" }}
-            >
-              速率限制 /s · RATE LIMIT
-            </Label>
-            <Input
-              value={rateLimit}
-              onChange={e => setRateLimit(e.target.value)}
-              type="number"
-              min={1}
-              max={100}
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-          </div>
-          <div className="flex gap-2 mt-2">
+
+          {/* 按钮 */}
+          <div className="flex gap-2 mt-1">
             <Button
               type="submit"
-              disabled={creating}
+              disabled={saving}
               className="flex-1 text-xs font-bold"
               style={{
-                background: "var(--accent-red)",
-                color: "#fff",
-                boxShadow: "0 0 12px rgba(194,58,48,0.2)",
+                background: isEdit ? "var(--accent-gold)" : "var(--accent-red)",
+                color: isEdit ? "#000" : "#fff",
+                boxShadow: isEdit ? "none" : "0 0 12px rgba(194,58,48,0.2)",
               }}
             >
-              {creating ? "创建中..." : "创建 Key"}
+              {saving ? "保存中..." : isEdit ? "保存修改" : "创建 Key"}
             </Button>
             <Button
               type="button"
               onClick={handleClose}
               className="text-xs"
               variant="outline"
-              style={{
-                border: "1px solid var(--border-default)",
-                color: "var(--text-muted)",
-              }}
+              style={{ border: "1px solid var(--border-default)", color: "var(--text-muted)" }}
             >
               取消
             </Button>
@@ -805,16 +798,9 @@ export default function McpPanel() {
             onClick={() => setTab(t.key)}
             className="flex items-center gap-1.5 px-4 py-2 rounded text-sm font-bold transition-all"
             style={{
-              background:
-                tab === t.key ? "var(--accent-glow-red)" : "transparent",
-              color:
-                tab === t.key
-                  ? "var(--accent-red-bright)"
-                  : "var(--text-muted)",
-              border:
-                tab === t.key
-                  ? "1px solid rgba(194,58,48,0.2)"
-                  : "1px solid transparent",
+              background: tab === t.key ? "var(--accent-glow-red)" : "transparent",
+              color: tab === t.key ? "var(--accent-red-bright)" : "var(--text-muted)",
+              border: tab === t.key ? "1px solid rgba(194,58,48,0.2)" : "1px solid transparent",
             }}
           >
             <span>{t.icon}</span> {t.label}
@@ -840,21 +826,13 @@ export default function McpPanel() {
       {tab === "keys" && (
         <>
           {loading && (
-            <div
-              className="text-center py-4 text-xs font-mono"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <div className="text-center py-4 text-xs font-mono" style={{ color: "var(--text-muted)" }}>
               加载中...
             </div>
           )}
           {!loading && keys.length === 0 && (
-            <div
-              className="glass-panel p-8 text-center"
-            >
-              <div
-                className="text-sm font-mono mb-2"
-                style={{ color: "var(--text-muted)" }}
-              >
+            <div className="glass-panel p-8 text-center">
+              <div className="text-sm font-mono mb-2" style={{ color: "var(--text-muted)" }}>
                 暂无 MCP API Key
               </div>
               <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
@@ -880,17 +858,20 @@ export default function McpPanel() {
       {/* Audit Log Tab */}
       {tab === "audit" && <AuditLogPanel />}
 
-      {/* Dialogs */}
-      <EditKeyDialog
-        item={editItem}
-        onClose={() => setEditItem(null)}
-        onSaved={fetchKeys}
-      />
-      <CreateKeyDialog
+      {/* Dialogs — 新建和编辑共用一个组件 */}
+      <PermissionEditDialog
         open={showCreate}
-        onOpenChange={setShowCreate}
-        onCreated={() => fetchKeys()}
+        item={null}
         agents={agents}
+        onClose={() => setShowCreate(false)}
+        onSaved={() => { setShowCreate(false); fetchKeys(); }}
+      />
+      <PermissionEditDialog
+        open={!!editItem}
+        item={editItem}
+        agents={agents}
+        onClose={() => setEditItem(null)}
+        onSaved={() => { setEditItem(null); fetchKeys(); }}
       />
     </div>
   );

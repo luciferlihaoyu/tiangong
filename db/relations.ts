@@ -1,15 +1,38 @@
 import { relations } from "drizzle-orm";
-import { agents, tasks, messages } from "./schema";
+import { agents, tasks, messages, organizations, departments, taskDependencies } from "./schema";
 
-export const agentRelations = relations(agents, ({ many }) => ({
+export const agentRelations = relations(agents, ({ many, one }) => ({
   tasks: many(tasks),
+  reportTo: one(agents, { fields: [agents.reportsTo], references: [agents.id] }),
+  subordinates: many(agents, { relationName: "subordinates" }),
+  org: one(organizations, { fields: [agents.orgId], references: [organizations.id] }),
+  department: one(departments, { fields: [agents.departmentId], references: [departments.id] }),
 }));
 
-export const taskRelations = relations(tasks, ({ one }) => ({
+export const taskRelations = relations(tasks, ({ one, many }) => ({
   agent: one(agents, { fields: [tasks.agentId], references: [agents.id] }),
+  parentTask: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id] }),
+  childTasks: many(tasks, { relationName: "childTasks" }),
+  dependencies: many(taskDependencies),
 }));
 
 export const messageRelations = relations(messages, ({ one }) => ({
   fromAgentRef: one(agents, { fields: [messages.fromAgent], references: [agents.id] }),
   toAgentRef: one(agents, { fields: [messages.toAgent], references: [agents.id] }),
+}));
+
+export const organizationRelations = relations(organizations, ({ many }) => ({
+  departments: many(departments),
+  agents: many(agents),
+}));
+
+export const departmentRelations = relations(departments, ({ one, many }) => ({
+  org: one(organizations, { fields: [departments.orgId], references: [organizations.id] }),
+  leadAgent: one(agents, { fields: [departments.leadAgentId], references: [agents.id] }),
+  agents: many(agents),
+}));
+
+export const taskDependencyRelations = relations(taskDependencies, ({ one }) => ({
+  task: one(tasks, { fields: [taskDependencies.taskId], references: [tasks.id] }),
+  dependsOn: one(tasks, { fields: [taskDependencies.dependsOnTaskId], references: [tasks.id] }),
 }));

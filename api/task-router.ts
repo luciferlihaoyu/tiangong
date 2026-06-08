@@ -25,6 +25,11 @@ export const taskRouter = createRouter({
         name: z.string().min(1).max(255),
         agentId: z.number().optional(),
         description: z.string().optional(),
+        priority: z.number().optional(),
+        input: z.string().optional(),
+        maxRetries: z.number().optional(),
+        timeoutMs: z.number().optional(),
+        parentTaskId: z.number().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -34,6 +39,11 @@ export const taskRouter = createRouter({
         name: input.name,
         agentId: input.agentId ?? null,
         description: input.description ?? null,
+        priority: input.priority ?? 0,
+        input: input.input ?? null,
+        maxRetries: input.maxRetries ?? 3,
+        timeoutMs: input.timeoutMs ?? 300000,
+        parentTaskId: input.parentTaskId ?? null,
       });
       return { success: true };
     }),
@@ -43,13 +53,17 @@ export const taskRouter = createRouter({
       z.object({
         id: z.number(),
         progress: z.number().min(0).max(100),
-        status: z.enum(["running", "pending", "done", "failed"]).optional(),
+        status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
+        output: z.string().optional(),
+        error: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
       const db = getDb();
       const update: Record<string, unknown> = { progress: input.progress };
       if (input.status) update.status = input.status;
+      if (input.output !== undefined) update.output = input.output;
+      if (input.error !== undefined) update.error = input.error;
       await db.update(tasks).set(update).where(eq(tasks.id, input.id));
       return { success: true };
     }),

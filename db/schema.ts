@@ -37,6 +37,21 @@ export const agents = mysqlTable("agents", {
   messagesCount: int("messages_count").default(0).notNull(),
   description: text("description"),
   createdBy: bigint("created_by", { mode: "number", unsigned: true }),
+  // New fields for multi-agent collaboration
+  source: varchar("source", { length: 50 }).default("custom"),
+  model: varchar("model", { length: 100 }),
+  role: varchar("role", { length: 100 }),
+  manages: text("manages"),
+  reportsTo: bigint("reports_to", { mode: "number" }),
+  orgId: bigint("org_id", { mode: "number" }),
+  departmentId: bigint("department_id", { mode: "number" }),
+  currentTask: text("current_task"),
+  capabilities: text("capabilities"),
+  budgetCents: int("budget_cents").default(0),
+  spentCents: int("spent_cents").default(0),
+  lastHeartbeat: timestamp("last_heartbeat"),
+  sourceApiKey: varchar("source_api_key", { length: 255 }),
+  sourceEndpoint: varchar("source_endpoint", { length: 500 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });
@@ -50,9 +65,18 @@ export const tasks = mysqlTable("tasks", {
   taskId: varchar("task_id", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
   agentId: bigint("agent_id", { mode: "number", unsigned: true }),
-  status: mysqlEnum("status", ["running", "pending", "done", "failed"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["running", "pending", "done", "failed", "queued"]).default("pending").notNull(),
   progress: int("progress").default(0).notNull(),
   description: text("description"),
+  // New orchestration fields
+  priority: int("priority").default(0),
+  input: text("input"),
+  output: text("output"),
+  error: text("error"),
+  retryCount: int("retry_count").default(0),
+  maxRetries: int("max_retries").default(3),
+  timeoutMs: int("timeout_ms").default(300000),
+  parentTaskId: bigint("parent_task_id", { mode: "number" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });
@@ -86,3 +110,41 @@ export const systems = mysqlTable("systems", {
 
 export type System = typeof systems.$inferSelect;
 export type InsertSystem = typeof systems.$inferInsert;
+
+// ─── Organizations ───
+export const organizations = mysqlTable("organizations", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  goals: text("goals"),
+  budget: int("budget_cents").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Organization = typeof organizations.$inferSelect;
+export type InsertOrganization = typeof organizations.$inferInsert;
+
+// ─── Departments ───
+export const departments = mysqlTable("departments", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  orgId: bigint("org_id", { mode: "number" }).notNull(),
+  leadAgentId: bigint("lead_agent_id", { mode: "number" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Department = typeof departments.$inferSelect;
+export type InsertDepartment = typeof departments.$inferInsert;
+
+// ─── Task Dependencies (DAG edges) ───
+export const taskDependencies = mysqlTable("task_dependencies", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number" }).notNull(),
+  dependsOnTaskId: bigint("depends_on_task_id", { mode: "number" }).notNull(),
+});
+
+export type TaskDependency = typeof taskDependencies.$inferSelect;
+export type InsertTaskDependency = typeof taskDependencies.$inferInsert;

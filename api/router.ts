@@ -3,6 +3,8 @@ import { agentRouter } from "./agent-router";
 import { taskRouter } from "./task-router";
 import { messageRouter } from "./message-router";
 import { systemRouter } from "./system-router";
+import { orgRouter } from "./org-router";
+import { orchestrationRouter } from "./orchestration-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -12,6 +14,8 @@ export const appRouter = createRouter({
   task: taskRouter,
   message: messageRouter,
   system: systemRouter,
+  org: orgRouter,
+  orch: orchestrationRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
-import { useDataSource, type MockAgent } from "@/hooks/useDataSource";
+import { useDataSource, type MockAgent, type MockOrg } from "@/hooks/useDataSource";
 import { useAuth } from "@/hooks/useAuth";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -67,341 +67,323 @@ function SystemMonitor() {
   );
 }
 
-/* ═══════════════════════════════════════════
-   Agent 卡片 + 详情弹窗
-   ═══════════════════════════════════════════ */
-
 const statusCfg: Record<string, { dot: string; color: string; label: string }> = {
   online: { dot: 'status-dot-online', color: 'var(--success)', label: '在线' },
   busy: { dot: 'status-dot-busy', color: 'var(--accent-red)', label: '忙碌' },
   idle: { dot: 'status-dot-idle', color: 'var(--text-muted)', label: '空闲' },
 };
 
-function AgentCard({ agent, tasks, onStatusChange, onEdit, onDelete }: {
-  agent: MockAgent; tasks: { id: number; taskId: string; name: string; status: string; progress: number; agentId: number | null }[];
-  onStatusChange: (id: number, s: string) => void; onEdit: (a: MockAgent) => void; onDelete: (id: number) => void;
+function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
+  agent: MockAgent;
+  onStatusChange: (id: number, s: string) => void;
+  onEdit: (a: MockAgent) => void; onDelete: (id: number) => void;
 }) {
   const c = statusCfg[agent.status] || statusCfg.idle;
-  const [open, setOpen] = useState(false);
-  const agentTasks = tasks.filter(t => t.agentId === agent.id);
+  const caps = useMemo(() => { try { return agent.capabilities ? JSON.parse(agent.capabilities) as string[] : []; } catch { return []; } }, [agent.capabilities]);
 
   return (
-    <>
-      <div className="glass-panel p-4 sci-border transition-all cursor-pointer group relative" onClick={() => setOpen(true)}>
-        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10" onClick={e => e.stopPropagation()}>
-          <button onClick={() => onEdit(agent)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
-          <button onClick={() => onDelete(agent.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors" style={{ color: 'var(--accent-red)' }}>删除</button>
-        </div>
-        <div className="flex items-center justify-between mb-3 pr-16">
-          <div className="flex items-center gap-2">
-            <span className={`status-dot ${c.dot}`} />
-            <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
-          </div>
-          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
-        </div>
-        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>{agent.system}</span>
-          <button onClick={e => { e.stopPropagation(); const o = ['idle', 'online', 'busy']; onStatusChange(agent.id, o[(o.indexOf(agent.status) + 1) % o.length]); }} className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-gold)', color: c.color }}>{c.label}</button>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agent.messagesCount} 消息</span>
-        </div>
-        <div className="text-xs mb-2 truncate" style={{ color: 'var(--text-secondary)' }}>{agent.task || '等待任务'}</div>
-        {agent.progress > 0 && <div className="progress-track"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
-        <div className="mt-2 text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>点击查看详情 →</div>
+    <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-gold)]/30">
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button onClick={() => onEdit(agent)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)]" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
+        <button onClick={() => onDelete(agent.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)]" style={{ color: 'var(--accent-red)' }}>删除</button>
       </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="border-0 max-w-lg" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <span className={`status-dot ${c.dot}`} style={{ width: '10px', height: '10px' }} />
-              <DialogTitle className="text-lg font-black tracking-wider" style={{ color: 'var(--text-primary)' }}>{agent.name}</DialogTitle>
-              <span className="font-mono text-xs px-2 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 mt-2">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
-                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>系统</div>
-                <div className="text-sm font-bold" style={{ color: 'var(--accent-cyan)' }}>{agent.system}</div>
-              </div>
-              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
-                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>状态</div>
-                <div className="text-sm font-bold" style={{ color: c.color }}>{c.label}</div>
-              </div>
-              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
-                <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>消息数</div>
-                <div className="text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>{agent.messagesCount}</div>
-              </div>
-            </div>
-            {agent.description && (
-              <div>
-                <div className="section-label mb-1">描述 · DESCRIPTION</div>
-                <div className="text-xs leading-relaxed p-2 rounded" style={{ color: 'var(--text-secondary)', background: 'var(--bg-card)' }}>{agent.description}</div>
-              </div>
-            )}
-            <div>
-              <div className="section-label mb-1">当前任务 · CURRENT TASK</div>
-              <div className="p-2 rounded" style={{ background: 'var(--bg-card)' }}>
-                <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{agent.task || '无'}</div>
-                {agent.progress > 0 && <><div className="progress-track mt-1"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div><div className="text-[10px] font-mono mt-1" style={{ color: 'var(--text-muted)' }}>{agent.progress}%</div></>}
-              </div>
-            </div>
-            <div>
-              <div className="section-label mb-1">任务历史 · TASK HISTORY ({agentTasks.length})</div>
-              {agentTasks.length === 0 ? (
-                <div className="text-xs p-2 rounded" style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>暂无任务记录</div>
-              ) : (
-                <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto custom-scrollbar">
-                  {agentTasks.map(t => (
-                    <div key={t.id} className="flex items-center justify-between p-1.5 rounded text-xs" style={{ background: 'var(--bg-card)' }}>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px]" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
-                      </div>
-                      <span className="font-mono text-[10px]" style={{ color: t.status === 'done' ? 'var(--success)' : t.status === 'running' ? 'var(--accent-red)' : 'var(--text-muted)' }}>{t.progress}%</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-/* ═══════════════════════════════════════════
-   系统连接面板 + 配置弹窗
-   ═══════════════════════════════════════════ */
-
-function ConnectionPanel({ systems, onStatusChange, onConfig }: {
-  systems: { id: number; name: string; status: string; config?: string | null }[];
-  onStatusChange: (id: number, s: string) => void;
-  onConfig: (id: number, config: string) => void;
-}) {
-  const sc: Record<string, string> = { connected: 'var(--success)', syncing: 'var(--accent-gold)', disconnected: 'var(--text-muted)' };
-  const st: Record<string, string> = { connected: '已连接', syncing: '同步中', disconnected: '断开' };
-  const [configId, setConfigId] = useState<number | null>(null);
-  const sys = systems.find(s => s.id === configId);
-  const sysSlug = sys?.name.toLowerCase() || '';
-
-  const parseConfig = (c?: string | null) => {
-    try { return c ? JSON.parse(c) : {}; } catch { return {}; }
-  };
-
-  return (
-    <>
-      <div className="glass-panel p-4 sci-border">
-        <div className="section-label mb-3">系统接入 · SYS_CONN</div>
-        <div className="flex flex-col gap-2">
-          {systems.map(s => (
-            <div key={s.id} className="flex items-center justify-between py-1 group">
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-bold"
-                  style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red)' }}>{s.name[0]}</span>
-                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.name}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setConfigId(s.id)} className="text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[rgba(100,181,246,0.1)]" style={{ color: 'var(--accent-cyan)' }}>配置</button>
-                <button onClick={() => { const o = ['disconnected', 'syncing', 'connected']; onStatusChange(s.id, o[(o.indexOf(s.status) + 1) % o.length]); }}
-                  className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc[s.status] }} />
-                  <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{st[s.status]}</span>
-                </button>
-              </div>
-            </div>
+      <div className="flex items-center justify-between mb-3 pr-16">
+        <div className="flex items-center gap-2">
+          <span className={`status-dot ${c.dot}`} />
+          <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
+        </div>
+        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{agent.agentId}</span>
+      </div>
+      {/* Source / Model / Role badges */}
+      <div className="flex flex-wrap gap-1 mb-2">
+        {agent.source && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'rgba(100,181,246,0.1)', color: 'var(--accent-cyan)' }}>{agent.source}</span>}
+        {agent.model && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate max-w-[120px]" style={{ background: 'rgba(201,168,76,0.1)', color: 'var(--accent-gold)' }}>{agent.model.split('/').pop()}</span>}
+        {agent.role && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>{agent.role}</span>}
+        <button onClick={e => { e.stopPropagation(); const o = ['idle', 'online', 'busy']; onStatusChange(agent.id, o[(o.indexOf(agent.status) + 1) % o.length]); }} className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-gold)', color: c.color }}>{c.label}</button>
+      </div>
+      {/* Capabilities */}
+      {caps.length > 0 && (
+        <div className="flex flex-wrap gap-0.5 mb-2">
+          {caps.map((cap: string) => (
+            <span key={cap} className="text-[9px] px-1 py-0 rounded font-mono" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>{cap}</span>
           ))}
         </div>
-      </div>
-
-      {/* Config Dialog */}
-      {sys && (
-        <Dialog open={!!configId} onOpenChange={() => setConfigId(null)}>
-          <DialogContent className="border-0 max-w-md" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-            <DialogHeader>
-              <DialogTitle className="section-label">配置 {sys.name} · CONFIG</DialogTitle>
-            </DialogHeader>
-            <SystemConfigForm slug={sysSlug} parsed={parseConfig(sys.config)} onSave={(cfg) => { onConfig(sys.id, cfg); setConfigId(null); }} onCancel={() => setConfigId(null)} />
-          </DialogContent>
-        </Dialog>
       )}
-    </>
-  );
-}
-
-function SystemConfigForm({ slug, parsed, onSave, onCancel }: { slug: string; parsed: Record<string, string>; onSave: (cfg: string) => void; onCancel: () => void }) {
-  const [webhookUrl, setWebhookUrl] = useState(parsed.webhookUrl || parsed.url || '');
-  const [token, setToken] = useState(parsed.token || '');
-  const [channel, setChannel] = useState(parsed.channel || '');
-  const [smtpHost, setSmtpHost] = useState(parsed.smtpHost || '');
-  const [port, setPort] = useState(String(parsed.port || ''));
-  const [repo, setRepo] = useState(parsed.repo || '');
-  const [jiraUrl, setJiraUrl] = useState(parsed.url || '');
-  const [project, setProject] = useState(parsed.project || '');
-
-  const handleSave = () => {
-    const cfg: Record<string, string> = {};
-    if (webhookUrl) cfg.webhookUrl = webhookUrl;
-    if (token) cfg.token = token;
-    if (channel) cfg.channel = channel;
-    if (smtpHost) cfg.smtpHost = smtpHost;
-    if (port) cfg.port = port;
-    if (repo) cfg.repo = repo;
-    if (jiraUrl) cfg.url = jiraUrl;
-    if (project) cfg.project = project;
-    onSave(JSON.stringify(cfg));
-  };
-
-  return (
-    <div className="flex flex-col gap-3 mt-2">
-      {(slug === 'slack' || slug === 'webhook') && (
-        <>
-          <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>Webhook URL</Label>
-            <Input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)} placeholder="https://hooks.slack.com/..."
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-          {slug === 'slack' && <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>频道</Label>
-            <Input value={channel} onChange={e => setChannel(e.target.value)} placeholder="#general"
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>}
-        </>
+      <div className="text-xs mb-2 truncate" style={{ color: 'var(--text-secondary)' }}>{agent.currentTask || agent.task || '等待任务'}</div>
+      {agent.budgetCents !== undefined && agent.budgetCents > 0 && (
+        <div className="text-[10px] font-mono mb-1" style={{ color: 'var(--text-muted)' }}>
+          预算: ¥{(agent.budgetCents / 100).toFixed(0)} | 消耗: ¥{((agent.spentCents || 0) / 100).toFixed(0)}
+        </div>
       )}
-      {slug === 'email' && (
-        <>
-          <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>SMTP 服务器</Label>
-            <Input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com"
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-          <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>端口</Label>
-            <Input value={port} onChange={e => setPort(e.target.value)} placeholder="587"
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-        </>
+      {agent.lastHeartbeat && (
+        <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+          💓 {new Date(agent.lastHeartbeat).toLocaleTimeString()}
+        </div>
       )}
-      {slug === 'github' && (
-        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>仓库</Label>
-          <Input value={repo} onChange={e => setRepo(e.target.value)} placeholder="owner/repo"
-            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      )}
-      {slug === 'jira' && (
-        <>
-          <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>Jira URL</Label>
-            <Input value={jiraUrl} onChange={e => setJiraUrl(e.target.value)} placeholder="https://xxx.atlassian.net"
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-          <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>项目 Key</Label>
-            <Input value={project} onChange={e => setProject(e.target.value)} placeholder="TIAN"
-              style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-        </>
-      )}
-      {(slug === 'slack' || slug === 'github' || slug === 'notion') && (
-        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>Token / API Key</Label>
-          <Input value={token} onChange={e => setToken(e.target.value)} type="password" placeholder="xoxb-xxx 或 ghp_xxx"
-            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      )}
-      <div className="flex gap-2 mt-2">
-        <Button onClick={handleSave} className="flex-1 text-xs font-bold" style={{ background: 'var(--accent-red)', color: '#fff' }}>保存配置</Button>
-        <Button onClick={onCancel} className="text-xs" variant="outline" style={{ border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>取消</Button>
-      </div>
+      {agent.progress > 0 && <div className="progress-track mt-2"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════
-   组织面板 + 编辑弹窗
+   组织架构 Tab
    ═══════════════════════════════════════════ */
 
-function OrgPanel({ orgs, onEdit, onDelete }: {
-  orgs: { id: number; name: string; description: string | null; agents: number; createdAt: string }[];
-  onEdit: (id: number, data: { name: string; description: string }) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [editId, setEditId] = useState<number | null>(null);
-  const org = orgs.find(o => o.id === editId);
-
+function OrgTab() {
+  const treeQuery = (window as any).__trpc ? null : null; // will use existing data
   return (
-    <>
-      <div className="glass-panel p-4 sci-border">
-        <div className="section-label mb-3">组织架构 · ORG</div>
-        <div className="flex flex-col gap-2">
-          {orgs.map(o => (
-            <div key={o.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[rgba(180,200,255,0.02)] transition-colors group">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{o.name}</div>
-                <div className="text-[10px] font-mono truncate" style={{ color: 'var(--text-muted)' }}>{o.description || '-'} · {o.agents} Agent · {o.createdAt}</div>
-              </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => setEditId(o.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
-                <button onClick={() => onDelete(o.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors" style={{ color: 'var(--accent-red)' }}>删除</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {org && (
-        <Dialog open={!!editId} onOpenChange={() => setEditId(null)}>
-          <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-            <DialogHeader><DialogTitle className="section-label">编辑组织 · EDIT {org.name}</DialogTitle></DialogHeader>
-            <OrgEditForm org={org} onSave={(data) => { onEdit(org.id, data); setEditId(null); }} onCancel={() => setEditId(null)} />
-          </DialogContent>
-        </Dialog>
-      )}
-    </>
-  );
-}
-
-function OrgEditForm({ org, onSave, onCancel }: { org: { name: string; description: string | null }; onSave: (data: { name: string; description: string }) => void; onCancel: () => void }) {
-  const [name, setName] = useState(org.name);
-  const [description, setDescription] = useState(org.description || '');
-  return (
-    <div className="flex flex-col gap-3 mt-2">
-      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>名称 · NAME</Label>
-        <Input value={name} onChange={e => setName(e.target.value)} required
-          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>描述 · DESCRIPTION</Label>
-        <Input value={description} onChange={e => setDescription(e.target.value)}
-          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div className="flex gap-2 mt-2">
-        <Button onClick={() => onSave({ name, description })} className="flex-1 text-xs font-bold" style={{ background: 'var(--accent-cyan)', color: '#fff' }}>保存</Button>
-        <Button onClick={onCancel} className="text-xs" variant="outline" style={{ border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>取消</Button>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <OrgTreePanel />
+      <div className="lg:col-span-2 flex flex-col gap-4">
+        <DeptDetailPanel />
+        <AgentAssignPanel />
       </div>
     </div>
   );
 }
-/* ═══════════════════════════════════════════
-   任务时间线
-   ═══════════════════════════════════════════ */
 
-function TaskTimeline({ tasks, agents, onProgress, onDelete }: {
-  tasks: { id: number; taskId: string; name: string; status: string; progress: number; agentId: number | null }[];
-  agents: MockAgent[]; onProgress?: (id: number, p: number, s: string) => void; onDelete?: (id: number) => void;
-}) {
-  const si: Record<string, React.ReactNode> = {
-    running: <span className="status-dot status-dot-busy" />,
-    pending: <span className="status-dot status-dot-idle" />,
-    done: <span className="status-dot status-dot-online" />,
-    failed: <span className="w-1.5 h-1.5 rounded-full bg-red-500" />,
+function OrgTreePanel() {
+  const data = useDataSource();
+  const orgs = data.orgs;
+
+  // We build org hierarchy from agents' orgId and reportsTo
+  const hierarchy = useMemo(() => {
+    const roots = (data.agents as MockAgent[]).filter(a => !a.reportsTo);
+    const children = new Map<number, MockAgent[]>();
+    for (const a of (data.agents as MockAgent[])) {
+      if (a.reportsTo) {
+        const list = children.get(a.reportsTo) || [];
+        list.push(a);
+        children.set(a.reportsTo, list);
+      }
+    }
+    return { roots, children };
+  }, [data.agents]);
+
+  const renderNode = (agent: MockAgent, depth: number = 0) => {
+    const kids = hierarchy.children.get(agent.id) || [];
+    return (
+      <div key={agent.id} className="ml-4">
+        <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[rgba(180,200,255,0.03)] transition-colors" style={{ marginLeft: `${depth * 16}px` }}>
+          <span className="w-2 h-2 rounded-full" style={{ background: statusCfg[agent.status]?.color || 'var(--text-muted)' }} />
+          <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agent.role || agent.agentId}</span>
+        </div>
+        {kids.map(k => renderNode(k, depth + 1))}
+      </div>
+    );
   };
 
   return (
     <div className="glass-panel p-4 sci-border">
-      <div className="flex items-center justify-between mb-3">
-        <div className="section-label">任务时间线 · TASK_LOG</div>
-        <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{tasks.length} 个任务</span>
-      </div>
-      <div className="flex flex-col gap-0 max-h-[240px] overflow-y-auto custom-scrollbar pr-1">
-        {tasks.map(t => (
-          <div key={t.id} className="flex items-center gap-3 py-2 border-t first:border-t-0 transition-colors hover:bg-[rgba(180,200,255,0.02)] rounded px-1 group" style={{ borderColor: 'var(--border-default)' }}>
-            <div className="flex-shrink-0">{si[t.status] || si.pending}</div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-bold" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
-                <span className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
+      <div className="section-label mb-3">组织架构 · ORG_HIERARCHY</div>
+      {orgs.length === 0 ? (
+        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>暂无组织数据</div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {orgs.map(org => (
+            <div key={org.id}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>🏢 {org.name}</span>
+                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{org.description}</span>
               </div>
-              {t.agentId && <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agents.find(a => a.id === t.agentId)?.name || `Agent-${t.agentId}`}</span>}
+              <div className="border-l pl-2" style={{ borderColor: 'var(--border-default)' }}>
+                {hierarchy.roots.filter(r => r.orgId === org.id || !r.orgId).map(r => renderNode(r))}
+              </div>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeptDetailPanel() {
+  return (
+    <div className="glass-panel p-4 sci-border">
+      <div className="section-label mb-3">部门概览 · DEPARTMENTS</div>
+      <div className="text-xs font-mono text-center py-8" style={{ color: 'var(--text-muted)' }}>
+        💡 请先部署后端并运行 `npm run db:seed` 以获取部门数据<br/>
+        部门管理功能将通过 tRPC org 路由提供
+      </div>
+    </div>
+  );
+}
+
+function AgentAssignPanel() {
+  return (
+    <div className="glass-panel p-4 sci-border">
+      <div className="section-label mb-3">Agent 分配 · ASSIGN</div>
+      <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>
+        💡 部门分配功能：拖拽 Agent 到部门 / 通过 tRPC org.deptAssignAgent
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   任务编排 Tab — DAG 可视化
+   ═══════════════════════════════════════════ */
+
+function OrchTab() {
+  const data = useDataSource();
+  const tasks = data.tasks;
+  const agents = data.agents as MockAgent[];
+
+  // Build simple DAG from parentTaskId
+  const dagNodes = useMemo(() => {
+    return tasks.map(t => ({
+      ...t,
+      agentName: agents.find(a => a.id === t.agentId)?.name || null,
+    }));
+  }, [tasks, agents]);
+
+  // Compute layers via BFS
+  const layers = useMemo(() => {
+    const parentMap = new Map<number, number[]>(); // parent -> children
+    const hasParent = new Set<number>();
+    for (const t of tasks) {
+      if (t.parentTaskId) {
+        const kids = parentMap.get(t.parentTaskId) || [];
+        kids.push(t.id);
+        parentMap.set(t.parentTaskId, kids);
+        hasParent.add(t.id);
+      }
+    }
+    // Find roots
+    const queue: { id: number; layer: number }[] = [];
+    const layermap = new Map<number, number>();
+    for (const t of tasks) {
+      if (!hasParent.has(t.id)) {
+        queue.push({ id: t.id, layer: 0 });
+        layermap.set(t.id, 0);
+      }
+    }
+    while (queue.length > 0) {
+      const { id, layer } = queue.shift()!;
+      const kids = parentMap.get(id) || [];
+      for (const kid of kids) {
+        if (!layermap.has(kid) || layermap.get(kid)! < layer + 1) {
+          layermap.set(kid, layer + 1);
+          queue.push({ id: kid, layer: layer + 1 });
+        }
+      }
+    }
+    return layermap;
+  }, [tasks]);
+
+  const maxLayer = Math.max(0, ...layers.values());
+
+  const statusColor: Record<string, string> = {
+    pending: 'var(--text-muted)',
+    queued: 'var(--accent-cyan)',
+    running: 'var(--accent-gold)',
+    done: 'var(--success)',
+    failed: 'var(--accent-red)',
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* DAG Visual */}
+      <div className="glass-panel p-4 sci-border overflow-x-auto">
+        <div className="section-label mb-4">任务编排 DAG · TASK_DAG</div>
+        {dagNodes.length === 0 ? (
+          <div className="text-xs font-mono text-center py-8" style={{ color: 'var(--text-muted)' }}>暂无任务数据</div>
+        ) : (
+          <div className="relative" style={{ minHeight: `${(maxLayer + 1) * 100}px` }}>
+            {Array.from({ length: maxLayer + 1 }).map((_, layer) => {
+              const layerNodes = dagNodes.filter(n => layers.get(n.id) === layer);
+              return (
+                <div key={layer} className="flex justify-center gap-4 mb-4" style={{ position: 'relative', top: `${layer * 100}px` }}>
+                  {layerNodes.map(node => (
+                    <div key={node.id} className="flex flex-col items-center">
+                      {/* Arrow from parents */}
+                      {node.parentTaskId && (
+                        <svg className="absolute" style={{ width: '100%', height: '40px', top: '-40px', left: 0, pointerEvents: 'none' }}>
+                          <line x1="50%" y1="40" x2="50%" y2="0" stroke="var(--border-default)" strokeWidth="1" strokeDasharray="4 2" />
+                        </svg>
+                      )}
+                      <div className="p-2 rounded text-center min-w-[100px] transition-all cursor-pointer"
+                        style={{
+                          background: 'var(--bg-card)',
+                          border: `1px solid ${statusColor[node.status] || 'var(--border-default)'}`,
+                          boxShadow: `0 0 8px ${statusColor[node.status] || 'rgba(255,255,255,0.02)'}`,
+                        }}>
+                        <div className="font-mono text-[10px]" style={{ color: 'var(--accent-gold)' }}>{node.taskId}</div>
+                        <div className="text-xs mt-1 truncate max-w-[90px]" style={{ color: 'var(--text-primary)' }}>{node.name}</div>
+                        <div className="flex items-center gap-1 mt-1 justify-center">
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor[node.status] }} />
+                          <span className="text-[10px] font-mono" style={{ color: statusColor[node.status] }}>{node.status}</span>
+                        </div>
+                        {node.agentName && <div className="text-[9px] font-mono mt-1" style={{ color: 'var(--text-muted)' }}>@{node.agentName}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Task Table */}
+      <div className="glass-panel p-4 sci-border">
+        <div className="section-label mb-3">任务列表 · ALL TASKS</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                {['ID', '名称', '状态', '进度', 'Agent', '优先级', '重试'].map(h => (
+                  <th key={h} className="text-left py-1.5 px-2 font-mono" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dagNodes.map(t => (
+                <tr key={t.id} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <td className="py-1.5 px-2 font-mono" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</td>
+                  <td className="py-1.5 px-2" style={{ color: 'var(--text-secondary)' }}>{t.name}</td>
+                  <td className="py-1.5 px-2"><span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor[t.status] }} /><span style={{ color: statusColor[t.status] }}>{t.status}</span></span></td>
+                  <td className="py-1.5 px-2 font-mono" style={{ color: 'var(--text-muted)' }}>{t.progress}%</td>
+                  <td className="py-1.5 px-2" style={{ color: 'var(--text-secondary)' }}>{t.agentName || '-'}</td>
+                  <td className="py-1.5 px-2 font-mono" style={{ color: 'var(--text-muted)' }}>{t.priority || 0}</td>
+                  <td className="py-1.5 px-2 font-mono" style={{ color: 'var(--text-muted)' }}>{t.retryCount || 0}/{t.maxRetries || 3}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   连接面板
+   ═══════════════════════════════════════════ */
+
+function ConnectionPanel({ systems, onStatusChange }: {
+  systems: { id: number; name: string; slug: string; status: string }[];
+  onStatusChange: (id: number, s: string) => void;
+}) {
+  const sc: Record<string, string> = { connected: 'var(--success)', syncing: 'var(--accent-gold)', disconnected: 'var(--text-muted)' };
+  const st: Record<string, string> = { connected: '已连接', syncing: '同步中', disconnected: '断开' };
+  return (
+    <div className="glass-panel p-4 sci-border">
+      <div className="section-label mb-3">系统接入 · SYS_CONN</div>
+      <div className="flex flex-col gap-2">
+        {systems.map(s => (
+          <div key={s.id} className="flex items-center justify-between py-1 group">
             <div className="flex items-center gap-2">
-              <button onClick={() => { const n = Math.min(100, t.progress + 10); onProgress?.(t.id, n, n >= 100 ? 'done' : 'running'); }}
-                className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)' }}>{t.progress}%</button>
-              <button onClick={() => onDelete?.(t.id)} className="opacity-0 group-hover:opacity-100 text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)] transition-all" style={{ color: 'var(--accent-red)' }}>✕</button>
+              <span className="w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-bold"
+                style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red)' }}>{s.name[0]}</span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{s.name}</span>
             </div>
+            <button onClick={() => { const o = ['disconnected', 'syncing', 'connected']; onStatusChange(s.id, o[(o.indexOf(s.status) + 1) % o.length]); }}
+              className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: sc[s.status] }} />
+              <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{st[s.status]}</span>
+            </button>
           </div>
         ))}
       </div>
@@ -418,13 +400,15 @@ function StatsRow({ agents, tasks, totalMsgs, orgs }: {
 }) {
   const onlineCount = agents.filter(a => a.status === 'online' || a.status === 'busy').length;
   const doneCount = tasks.filter(t => t.status === 'done').length;
+  const failedCount = tasks.filter(t => t.status === 'failed').length;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
       {[
         { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
-        { label: '今日任务', value: String(tasks.length), sub: `已完成 ${doneCount}` },
+        { label: '总任务', value: String(tasks.length), sub: `完成 ${doneCount}` },
+        { label: '失败', value: String(failedCount), sub: '个任务' },
         { label: '消息总量', value: totalMsgs >= 1000 ? `${(totalMsgs / 1000).toFixed(1)}K` : String(totalMsgs), sub: '实时同步' },
-        { label: '组织架构', value: String(orgs), sub: '个公司' },
+        { label: '组织', value: String(orgs), sub: '个公司' },
       ].map(s => (
         <div key={s.label} className="glass-panel p-3 sci-border">
           <div className="text-[10px] mb-1 font-mono" style={{ color: 'var(--text-muted)' }}>{s.label}</div>
@@ -442,22 +426,34 @@ function StatsRow({ agents, tasks, totalMsgs, orgs }: {
 
 function AgentForm({ agent, onSubmit, onCancel }: { agent?: MockAgent; onSubmit: (v: Record<string, string>) => void; onCancel: () => void }) {
   const [name, setName] = useState(agent?.name || '');
-  const [system, setSystem] = useState(agent?.system || '');
-  const [task, setTask] = useState(agent?.task || '');
+  const [source, setSource] = useState(agent?.source || 'custom');
+  const [model, setModel] = useState(agent?.model || '');
+  const [role, setRole] = useState(agent?.role || '');
   const [description, setDescription] = useState(agent?.description || '');
+  const [capabilities, setCapabilities] = useState(agent?.capabilities || '');
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, system, task, description }); }} className="flex flex-col gap-3 mt-2">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, system: source, source, model, role, description, capabilities }); }} className="flex flex-col gap-3 mt-2">
       <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>名称 · NAME</Label>
-        <Input value={name} onChange={e => setName(e.target.value)} placeholder="如: CEO-01" required
+        <Input value={name} onChange={e => setName(e.target.value)} placeholder="如: 美智子" required
           style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>系统 · SYSTEM</Label>
-        <Input value={system} onChange={e => setSystem(e.target.value)} placeholder="如: Claude, GPT-4" required
-          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>当前任务 · TASK</Label>
-        <Input value={task} onChange={e => setTask(e.target.value)} placeholder="任务描述"
-          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
+      <div className="grid grid-cols-3 gap-2">
+        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>来源 · SOURCE</Label>
+          <select value={source} onChange={e => setSource(e.target.value)} className="w-full px-2 py-1.5 rounded text-xs"
+            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
+            <option value="openclaw">OpenClaw</option><option value="dify">Dify</option><option value="custom">Custom</option>
+          </select></div>
+        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>模型 · MODEL</Label>
+          <Input value={model} onChange={e => setModel(e.target.value)} placeholder="deepseek-v4-pro"
+            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
+        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>角色 · ROLE</Label>
+          <Input value={role} onChange={e => setRole(e.target.value)} placeholder="如: CTO"
+            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
+      </div>
       <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>描述 · DESCRIPTION</Label>
         <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Agent 职责描述"
+          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
+      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>能力 · CAPABILITIES (逗号分隔)</Label>
+        <Input value={capabilities} onChange={e => setCapabilities(e.target.value)} placeholder="code, review, debug"
           style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
       <div className="flex gap-2 mt-2">
         <Button type="submit" className="flex-1 text-xs font-bold" style={{ background: 'var(--accent-red)', color: '#fff' }}>{agent ? '保存修改' : '创建 Agent'}</Button>
@@ -471,18 +467,23 @@ function TaskForm({ agents, onSubmit, onCancel }: { agents: MockAgent[]; onSubmi
   const [name, setName] = useState('');
   const [agentId, setAgentId] = useState('');
   const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState('0');
   return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, agentId, description }); }} className="flex flex-col gap-3 mt-2">
+    <form onSubmit={e => { e.preventDefault(); onSubmit({ name, agentId, description, priority }); }} className="flex flex-col gap-3 mt-2">
       <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>任务名称 · NAME</Label>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder="如: 数据清洗" required
           style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>分配 Agent · ASSIGN</Label>
-        <select value={agentId} onChange={e => setAgentId(e.target.value)}
-          className="w-full px-3 py-2 rounded text-sm outline-none"
-          style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
-          <option value="">不分配</option>
-          {agents.map(a => <option key={a.id} value={String(a.id)}>{a.name} ({a.system})</option>)}
-        </select></div>
+      <div className="grid grid-cols-2 gap-2">
+        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>分配 Agent · ASSIGN</Label>
+          <select value={agentId} onChange={e => setAgentId(e.target.value)} className="w-full px-2 py-1.5 rounded text-xs"
+            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
+            <option value="">不分配</option>
+            {agents.map(a => <option key={a.id} value={String(a.id)}>{a.name} ({a.source})</option>)}
+          </select></div>
+        <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>优先级 · PRIORITY</Label>
+          <Input value={priority} onChange={e => setPriority(e.target.value)} type="number" min="0" max="100"
+            style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
+      </div>
       <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>描述 · DESCRIPTION</Label>
         <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="任务描述"
           style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
@@ -514,51 +515,55 @@ function OrgForm({ onSubmit, onCancel }: { onSubmit: (v: Record<string, string>)
 }
 
 /* ═══════════════════════════════════════════
-   主 DASHBOARD
+   主 DASHBOARD — v2 多 Tab
    ═══════════════════════════════════════════ */
 
-type FilterTab = 'all' | 'running' | 'review' | 'archived';
+type MainTab = 'dashboard' | 'org' | 'orch';
 
 export default function Dashboard() {
   const data = useDataSource();
   const auth = useAuth();
   const navigate = useNavigate();
 
-  // 导航过滤器状态
-  const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [mainTab, setMainTab] = useState<MainTab>('dashboard');
+  const [filterTab, setFilterTab] = useState('all');
 
-  // 对话框状态
+  // Dialogs
   const [showAgentForm, setShowAgentForm] = useState(false);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [editAgent, setEditAgent] = useState<MockAgent | null>(null);
 
-  // 根据标签过滤任务
   const filteredTasks = (() => {
-    switch (activeTab) {
+    switch (filterTab) {
       case 'running': return data.tasks.filter(t => t.status === 'running');
-      case 'review': return data.tasks.filter(t => t.status === 'pending');
-      case 'archived': return data.tasks.filter(t => t.status === 'done');
+      case 'review': return data.tasks.filter(t => t.status === 'pending' || t.status === 'queued');
+      case 'archived': return data.tasks.filter(t => t.status === 'done' || t.status === 'failed');
       default: return data.tasks;
     }
   })();
 
-  // 根据标签过滤Agent（仅运行中时显示忙碌/在线的Agent）
-  const filteredAgents = activeTab === 'running'
+  const filteredAgents = filterTab === 'running'
     ? (data.agents as MockAgent[]).filter(a => a.status === 'online' || a.status === 'busy')
-    : data.agents as MockAgent[];
+    : (data.agents as MockAgent[]);
 
-  const tabs: { key: FilterTab; label: string }[] = [
+  const mainTabs: { key: MainTab; label: string; icon: string }[] = [
+    { key: 'dashboard', label: '仪表盘', icon: '📊' },
+    { key: 'org', label: '组织架构', icon: '🏢' },
+    { key: 'orch', label: '任务编排', icon: '🔗' },
+  ];
+
+  const filterTabs = [
     { key: 'all', label: '全部' },
     { key: 'running', label: '运行中' },
     { key: 'review', label: '审核中' },
     { key: 'archived', label: '已归档' },
   ];
 
-  const handleAddAgent = (v: Record<string, string>) => data.addAgent({ name: v.name, system: v.system, task: v.task, description: v.description });
-  const handleEditAgent = (v: Record<string, string>) => { if (editAgent) { data.updateAgent(editAgent.id, { name: v.name, system: v.system, task: v.task, description: v.description }); setEditAgent(null); } };
-  const handleAddTask = (v: Record<string, string>) => data.addTask({ name: v.name, agentId: v.agentId ? Number(v.agentId) : null, description: v.description });
-  const handleAddOrg = (v: Record<string, string>) => data.addOrg({ name: v.name, description: v.description });
+  const handleAddAgent = (v: Record<string, string>) => data.addAgent(v);
+  const handleEditAgent = (v: Record<string, string>) => { if (editAgent) { data.updateAgent(editAgent.id, { name: v.name, system: v.system, source: v.source, model: v.model, role: v.role, description: v.description, capabilities: v.capabilities }); setEditAgent(null); } };
+  const handleAddTask = (v: Record<string, string>) => data.addTask(v);
+  const handleAddOrg = (v: Record<string, string>) => data.addOrg(v);
 
   return (
     <div className="relative z-10 min-h-screen pt-14 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>
@@ -570,12 +575,12 @@ export default function Dashboard() {
             <div className="flex-shrink-0 hidden sm:block"><RingText3D text="TIANGONG-AGENT-HUB-MESSAGING-PLATFORM-" radius={90} /></div>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <div className="section-label">TIANGONG DASHBOARD</div>
+                <div className="section-label">TIANGONG DASHBOARD v2</div>
                 <div className="h-3 w-px" style={{ background: 'var(--border-default)' }} />
                 <div className="text-[10px] font-mono" style={{ color: 'var(--accent-red)' }}>中国空间站 · 核心舱</div>
               </div>
               <h1 className="text-2xl md:text-3xl font-black tracking-wider mb-2" style={{ color: 'var(--text-primary)' }}>天宫 Agent 消息平台</h1>
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>多 Agent、多系统共用的统一消息中枢。像指挥空间站一样调度你的 AI 代理网络。</p>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>多 Agent 协作 · 任务编排 · 组织管理 — 像指挥空间站一样调度 AI 网络。</p>
             </div>
           </div>
           <div className="flex flex-col gap-3">
@@ -584,99 +589,128 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── 统计 ── */}
-        <div className="mb-4"><StatsRow agents={data.agents as MockAgent[]} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} /></div>
-
-        {/* ── 导航过滤器 + 操作按钮 ── */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-1">
-            {tabs.map(tab => (
-              <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs transition-all"
-                style={{
-                  background: activeTab === tab.key ? 'var(--accent-glow-red)' : 'transparent',
-                  color: activeTab === tab.key ? 'var(--accent-red-bright)' : 'var(--text-muted)',
-                  border: activeTab === tab.key ? '1px solid rgba(194, 58, 48, 0.2)' : '1px solid transparent',
-                }}>
-                {tab.label}
-              </button>
-            ))}
-          </div>
+        {/* ── 主 Tab 导航 ── */}
+        <div className="flex items-center gap-1 mb-4">
+          {mainTabs.map(tab => (
+            <button key={tab.key} onClick={() => setMainTab(tab.key)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded text-sm font-bold transition-all"
+              style={{
+                background: mainTab === tab.key ? 'var(--accent-glow-red)' : 'transparent',
+                color: mainTab === tab.key ? 'var(--accent-red-bright)' : 'var(--text-muted)',
+                border: mainTab === tab.key ? '1px solid rgba(194,58,48,0.2)' : '1px solid transparent',
+              }}>
+              <span>{tab.icon}</span> {tab.label}
+            </button>
+          ))}
+          <div className="flex-1" />
           <div className="flex items-center gap-2">
             {auth.isAuthenticated && <span className="text-[10px] font-mono px-2 py-1 rounded" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>{auth.user?.name || '管理员'}</span>}
             {!auth.isAuthenticated && <button onClick={() => navigate('/login')} className="text-[10px] font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}>登录</button>}
-            <Dialog open={showAgentForm} onOpenChange={setShowAgentForm}>
-              <DialogTrigger asChild>
-                <button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110" style={{ background: 'var(--accent-red)', color: '#fff', boxShadow: '0 0 12px rgba(194,58,48,0.2)' }}>+ 新建 Agent</button>
-              </DialogTrigger>
-              <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-                <DialogHeader><DialogTitle className="section-label">新建 Agent · NEW AGENT</DialogTitle></DialogHeader>
-                <AgentForm onSubmit={handleAddAgent} onCancel={() => setShowAgentForm(false)} />
-              </DialogContent>
-            </Dialog>
-            <Dialog open={showTaskForm} onOpenChange={setShowTaskForm}>
-              <DialogTrigger asChild>
-                <button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110" style={{ background: 'var(--accent-gold)', color: '#000', boxShadow: '0 0 12px rgba(201,168,76,0.15)' }}>+ 新建任务</button>
-              </DialogTrigger>
-              <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-                <DialogHeader><DialogTitle className="section-label">新建任务 · NEW TASK</DialogTitle></DialogHeader>
-                <TaskForm agents={data.agents as MockAgent[]} onSubmit={handleAddTask} onCancel={() => setShowTaskForm(false)} />
-              </DialogContent>
-            </Dialog>
-            <Dialog open={showOrgForm} onOpenChange={setShowOrgForm}>
-              <DialogTrigger asChild>
-                <button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:bg-[rgba(180,200,255,0.06)]" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)' }}>+ 新建组织</button>
-              </DialogTrigger>
-              <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
-                <DialogHeader><DialogTitle className="section-label">新建组织 · NEW ORG</DialogTitle></DialogHeader>
-                <OrgForm onSubmit={handleAddOrg} onCancel={() => setShowOrgForm(false)} />
-              </DialogContent>
-            </Dialog>
           </div>
         </div>
 
-        {/* ── Agent 网格 + 系统连接 ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
-          <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredAgents.length === 0 ? (
-              <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>暂无 Agent</div>
-            ) : filteredAgents.map(agent => (
-              <AgentCard key={agent.id} agent={agent} tasks={data.tasks} onStatusChange={data.updateAgentStatus}
-                onEdit={a => setEditAgent(a)} onDelete={data.deleteAgent} />
-            ))}
-          </div>
-          <div className="lg:col-span-1 flex flex-col gap-3">
-            <ConnectionPanel systems={data.systems} onStatusChange={data.updateSystemStatus} onConfig={data.updateSystemConfig} />
-            <OrgPanel orgs={data.orgs} onEdit={data.updateOrg} onDelete={data.deleteOrg} />
-          </div>
-        </div>
+        {/* ── 仪表盘 Tab ── */}
+        {mainTab === 'dashboard' && (
+          <>
+            <div className="mb-4"><StatsRow agents={data.agents as MockAgent[]} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} /></div>
+            {/* Filter + Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-1">
+                {filterTabs.map(tab => (
+                  <button key={tab.key} onClick={() => setFilterTab(tab.key)}
+                    className="px-3 py-1.5 rounded text-xs transition-all"
+                    style={{
+                      background: filterTab === tab.key ? 'var(--accent-glow-red)' : 'transparent',
+                      color: filterTab === tab.key ? 'var(--accent-red-bright)' : 'var(--text-muted)',
+                      border: filterTab === tab.key ? '1px solid rgba(194,58,48,0.2)' : '1px solid transparent',
+                    }}>{tab.label}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Dialog open={showAgentForm} onOpenChange={setShowAgentForm}>
+                  <DialogTrigger asChild><button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110" style={{ background: 'var(--accent-red)', color: '#fff', boxShadow: '0 0 12px rgba(194,58,48,0.2)' }}>+ Agent</button></DialogTrigger>
+                  <DialogContent className="border-0 max-w-lg" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
+                    <DialogHeader><DialogTitle className="section-label">新建 Agent · NEW AGENT</DialogTitle></DialogHeader>
+                    <AgentForm onSubmit={handleAddAgent} onCancel={() => setShowAgentForm(false)} />
+                  </DialogContent>
+                </Dialog>
+                <Dialog open={showTaskForm} onOpenChange={setShowTaskForm}>
+                  <DialogTrigger asChild><button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110" style={{ background: 'var(--accent-gold)', color: '#000', boxShadow: '0 0 12px rgba(201,168,76,0.15)' }}>+ 任务</button></DialogTrigger>
+                  <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
+                    <DialogHeader><DialogTitle className="section-label">新建任务 · NEW TASK</DialogTitle></DialogHeader>
+                    <TaskForm agents={data.agents as MockAgent[]} onSubmit={handleAddTask} onCancel={() => setShowTaskForm(false)} />
+                  </DialogContent>
+                </Dialog>
+                <Dialog open={showOrgForm} onOpenChange={setShowOrgForm}>
+                  <DialogTrigger asChild><button className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:bg-[rgba(180,200,255,0.06)]" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)' }}>+ 组织</button></DialogTrigger>
+                  <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
+                    <DialogHeader><DialogTitle className="section-label">新建组织 · NEW ORG</DialogTitle></DialogHeader>
+                    <OrgForm onSubmit={handleAddOrg} onCancel={() => setShowOrgForm(false)} />
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+            {/* Agent Grid + Systems */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+              <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredAgents.length === 0 ? (
+                  <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>暂无 Agent · 请点击「+ Agent」创建</div>
+                ) : filteredAgents.map(agent => (
+                  <AgentCard key={agent.id} agent={agent}
+                    onStatusChange={data.updateAgentStatus}
+                    onEdit={a => setEditAgent(a)}
+                    onDelete={data.deleteAgent} />
+                ))}
+              </div>
+              <div className="lg:col-span-1">
+                <ConnectionPanel systems={data.systems} onStatusChange={data.updateSystemStatus} />
+              </div>
+            </div>
+            {/* Task list */}
+            <div className="glass-panel p-4 sci-border">
+              <div className="section-label mb-3">任务列表 · TASKS ({filteredTasks.length})</div>
+              <div className="flex flex-col gap-1 max-h-[300px] overflow-y-auto custom-scrollbar">
+                {filteredTasks.map(t => (
+                  <div key={t.id} className="flex items-center gap-3 py-2 px-2 rounded hover:bg-[rgba(180,200,255,0.02)]">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: t.status === 'done' ? 'var(--success)' : t.status === 'running' ? 'var(--accent-red)' : t.status === 'failed' ? 'var(--accent-red)' : 'var(--text-muted)' }} />
+                    <span className="font-mono text-[10px]" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
+                    <span className="text-xs flex-1 truncate" style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
+                    <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.progress}%</span>
+                    <button onClick={() => data.updateTaskProgress(t.id, Math.min(100, t.progress + 10), t.progress + 10 >= 100 ? 'done' : 'running')} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(180,200,255,0.04)]" style={{ color: 'var(--text-muted)' }}>+10%</button>
+                    <button onClick={() => data.deleteTask(t.id)} className="text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)]" style={{ color: 'var(--accent-red)' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
-        {/* ── 任务时间线 ── */}
-        <div className="mb-4">
-          <TaskTimeline tasks={filteredTasks} agents={data.agents as MockAgent[]}
-            onProgress={data.updateTaskProgress} onDelete={data.deleteTask} />
-        </div>
+        {/* ── 组织架构 Tab ── */}
+        {mainTab === 'org' && <OrgTab />}
+
+        {/* ── 任务编排 Tab ── */}
+        {mainTab === 'orch' && <OrchTab />}
 
         {/* ── 底部 ── */}
-        <div className="glass-panel px-4">
+        <div className="mt-6 glass-panel px-4">
           <div className="flex items-center justify-between py-2">
             <div className="flex items-center gap-4">
-              {['GitHub', '文档', 'Discord', 'Twitter'].map(l => (
+              {['GitHub', '文档', 'Discord'].map(l => (
                 <a key={l} href="#" className="text-xs transition-colors hover:text-[var(--accent-red)]" style={{ color: 'var(--text-muted)' }}>{l}</a>
               ))}
             </div>
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}><span className="w-1 h-1 rounded-full" style={{ background: 'var(--success)' }} />所有系统运行正常</span>
+              <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}><span className="w-1 h-1 rounded-full" style={{ background: data.hasBackend ? 'var(--success)' : 'var(--accent-red)' }} />{data.hasBackend ? 'API 已连接' : '离线模式'}</span>
               <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>MIT License</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── 编辑 Agent 弹窗 ── */}
+      {/* ── Edit Agent Dialog ── */}
       {editAgent && (
         <Dialog open={!!editAgent} onOpenChange={() => setEditAgent(null)}>
-          <DialogContent className="border-0" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
+          <DialogContent className="border-0 max-w-lg" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-default)' }}>
             <DialogHeader><DialogTitle className="section-label">编辑 Agent · EDIT {editAgent.agentId}</DialogTitle></DialogHeader>
             <AgentForm agent={editAgent} onSubmit={handleEditAgent} onCancel={() => setEditAgent(null)} />
           </DialogContent>

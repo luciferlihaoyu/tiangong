@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router'
+import { Routes, Route, Navigate } from 'react-router'
 import Navigation from './sections/Navigation'
 import Starfield from './sections/Starfield'
 import Dashboard from './sections/Dashboard'
@@ -9,6 +9,26 @@ import FAQ from './sections/FAQ'
 import FooterTerminal from './sections/FooterTerminal'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
+import { useAuth } from './hooks/useAuth'
+
+function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="relative min-h-screen flex items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <Starfield />
+        <div className="text-sm font-mono" style={{ color: 'var(--text-muted)' }}>加载中...</div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <>{children}</>
+}
 
 export default function App() {
   return (
@@ -17,7 +37,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={
-          <>
+          <ProtectedLayout>
             <Navigation />
             <Dashboard />
             <MatrixNodes />
@@ -25,7 +45,7 @@ export default function App() {
             <ExecutionCore />
             <FAQ />
             <FooterTerminal />
-          </>
+          </ProtectedLayout>
         } />
         <Route path="*" element={
           <>

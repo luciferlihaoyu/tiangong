@@ -23,11 +23,5 @@ export const env = {
   adminUser: optional("ADMIN_USER", "admin"),
   adminPassword: optional("ADMIN_PASSWORD", "admin"),
 
-  // 可选：OAuth 配置（仅在使用外部认证时需要）
-  appId: optional("APP_ID"),
-  kimiAuthUrl: optional("KIMI_AUTH_URL"),
-  kimiOpenUrl: optional("KIMI_OPEN_URL"),
-  ownerUnionId: optional("OWNER_UNION_ID"),
-
   isProduction: process.env.NODE_ENV === "production",
 };

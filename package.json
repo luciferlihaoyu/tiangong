@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
-    "start": "(drizzle-kit push || true) && NODE_ENV=production node dist/boot.js",
+    "start": "sh scripts/start.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc -b",

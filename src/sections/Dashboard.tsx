@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import McpPanel from "./McpPanel";
 
 /* ═══════════════════════════════════════════
    辅助组件
@@ -518,7 +519,7 @@ function OrgForm({ onSubmit, onCancel }: { onSubmit: (v: Record<string, string>)
    主 DASHBOARD — v2 多 Tab
    ═══════════════════════════════════════════ */
 
-type MainTab = 'dashboard' | 'org' | 'orch';
+type MainTab = 'dashboard' | 'org' | 'orch' | 'mcp';
 
 export default function Dashboard() {
   const data = useDataSource();
@@ -551,6 +552,7 @@ export default function Dashboard() {
     { key: 'dashboard', label: '仪表盘', icon: '📊' },
     { key: 'org', label: '组织架构', icon: '🏢' },
     { key: 'orch', label: '任务编排', icon: '🔗' },
+    { key: 'mcp', label: 'MCP接入', icon: '🔌' },
   ];
 
   const filterTabs = [
@@ -690,6 +692,9 @@ export default function Dashboard() {
 
         {/* ── 任务编排 Tab ── */}
         {mainTab === 'orch' && <OrchTab />}
+
+        {/* ── MCP 接入 Tab ── */}
+        {mainTab === 'mcp' && <McpPanel />}
 
         {/* ── 底部 ── */}
         <div className="mt-6 glass-panel px-4">

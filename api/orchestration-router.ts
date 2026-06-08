@@ -206,15 +206,17 @@ export const orchestrationRouter = createRouter({
       if (!allowed.includes(input.status)) {
         // Check auto-retry: failed → queued
         if (task.status === "failed" && input.status === "queued") {
-          if (task.retryCount >= task.maxRetries) {
-            return { success: false, error: `已达最大重试次数 (${task.maxRetries})` };
+          const retryCount = task.retryCount ?? 0;
+          const maxRetries = task.maxRetries ?? 3;
+          if (retryCount >= maxRetries) {
+            return { success: false, error: `已达最大重试次数 (${maxRetries})` };
           }
           await db.update(tasks).set({
             status: "queued",
-            retryCount: task.retryCount + 1,
+            retryCount: retryCount + 1,
             error: null,
           }).where(eq(tasks.id, input.id));
-          return { success: true, retryCount: task.retryCount + 1 };
+          return { success: true, retryCount: retryCount + 1 };
         }
 
         return { success: false, error: `状态转移无效: ${task.status} → ${input.status}` };

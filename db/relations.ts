@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { agents, tasks, messages, organizations, departments, taskDependencies } from "./schema";
+import { agents, tasks, messages, organizations, departments, taskDependencies, mcpApiKeys, mcpAuditLog } from "./schema";
 
 export const agentRelations = relations(agents, ({ many, one }) => ({
   tasks: many(tasks),
@@ -35,4 +35,13 @@ export const departmentRelations = relations(departments, ({ one, many }) => ({
 export const taskDependencyRelations = relations(taskDependencies, ({ one }) => ({
   task: one(tasks, { fields: [taskDependencies.taskId], references: [tasks.id] }),
   dependsOn: one(tasks, { fields: [taskDependencies.dependsOnTaskId], references: [tasks.id] }),
+}));
+
+export const mcpApiKeyRelations = relations(mcpApiKeys, ({ one, many }) => ({
+  agent: one(agents, { fields: [mcpApiKeys.agentId], references: [agents.id] }),
+  auditLogs: many(mcpAuditLog),
+}));
+
+export const mcpAuditLogRelations = relations(mcpAuditLog, ({ one }) => ({
+  apiKey: one(mcpApiKeys, { fields: [mcpAuditLog.keyId], references: [mcpApiKeys.id] }),
 }));

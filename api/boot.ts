@@ -4,11 +4,15 @@ import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./middleware";
+import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
+
+// MCP HTTP Routes (before tRPC to avoid wildcard conflicts)
+app.route("/mcp", createMcpApp());
 
 // tRPC handler
 app.use("/api/trpc/*", async (c) => {

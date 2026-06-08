@@ -148,3 +148,34 @@ export const taskDependencies = mysqlTable("task_dependencies", {
 
 export type TaskDependency = typeof taskDependencies.$inferSelect;
 export type InsertTaskDependency = typeof taskDependencies.$inferInsert;
+
+// ─── MCP API Keys ───
+export const mcpApiKeys = mysqlTable("mcp_api_keys", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 64 }).notNull().unique(),
+  agentId: bigint("agent_id", { mode: "number" }),
+  name: varchar("name", { length: 100 }),
+  permissions: text("permissions"),
+  rateLimit: int("rate_limit").default(10),
+  active: mysqlEnum("active", ["true", "false"]).default("true"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type McpApiKey = typeof mcpApiKeys.$inferSelect;
+export type InsertMcpApiKey = typeof mcpApiKeys.$inferInsert;
+
+// ─── MCP Audit Log ───
+export const mcpAuditLog = mysqlTable("mcp_audit_log", {
+  id: serial("id").primaryKey(),
+  keyId: bigint("key_id", { mode: "number" }),
+  tool: varchar("tool", { length: 100 }),
+  params: text("params"),
+  result: varchar("result", { length: 20 }),
+  error: text("error"),
+  durationMs: int("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type McpAuditLogEntry = typeof mcpAuditLog.$inferSelect;
+export type InsertMcpAuditLogEntry = typeof mcpAuditLog.$inferInsert;

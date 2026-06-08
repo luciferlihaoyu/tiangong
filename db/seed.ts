@@ -1,7 +1,8 @@
 import { getDb } from "../api/queries/connection";
-import { agents, tasks, systems, users, organizations, departments } from "./schema";
+import { agents, tasks, systems, users, organizations, departments, mcpApiKeys } from "./schema";
 import { hashPassword } from "../api/lib/password";
 import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
 async function seed() {
   const db = getDb();
@@ -140,6 +141,27 @@ async function seed() {
   for (const s of sysSeeds) {
     if (!existingSystems.includes(s.slug)) {
       await db.insert(systems).values(s);
+    }
+  }
+
+  // ─── Seed MCP API Keys (one per agent) ───
+  const existingKeys = await db.select({ key: mcpApiKeys.key }).from(mcpApiKeys).then(rows => new Set(rows.map(r => r.key)));
+
+  for (const ag of agentRecords) {
+    const keyValue = `tg-${ag.agentId}-${nanoid(32)}`;
+    if (!existingKeys.has(keyValue)) {
+      await db.insert(mcpApiKeys).values({
+        key: keyValue,
+        agentId: ag.id,
+        name: `${ag.agentId} MCP 接入`,
+        permissions: JSON.stringify({
+          tools: ["create_task", "update_task_status", "send_message", "update_agent_status", "heartbeat", "list_agents", "list_tasks", "list_messages"],
+          resources: ["agents", "tasks", "organization", "agent-detail", "task-dag", "agent-hierarchy"],
+        }),
+        rateLimit: 10,
+        active: "true",
+      });
+      console.log(`  MCP Key created for ${ag.agentId}: ${keyValue.slice(0, 20)}...`);
     }
   }
 

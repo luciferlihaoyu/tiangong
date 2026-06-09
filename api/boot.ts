@@ -6,6 +6,8 @@ import { appRouter } from "./router";
 import { createContext } from "./middleware";
 import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
+import { autoMigrate } from "./lib/auto-migrate";
+import { migrateV2 } from "./lib/migrate-v2";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -35,7 +37,6 @@ if (env.isProduction) {
 
   // Auto-create tables on startup
   try {
-    const { autoMigrate } = await import("./lib/auto-migrate");
     await autoMigrate();
   } catch (e: any) {
     console.warn("Auto-migration failed:", e.message);
@@ -43,7 +44,6 @@ if (env.isProduction) {
 
   // V2 migration — add new columns to existing tables
   try {
-    const { migrateV2 } = await import("./lib/migrate-v2");
     await migrateV2();
   } catch (e: any) {
     console.warn("V2 migration failed:", e.message);

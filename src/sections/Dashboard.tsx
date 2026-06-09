@@ -121,6 +121,14 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
           💓 {new Date(agent.lastHeartbeat).toLocaleTimeString()}
         </div>
       )}
+      {/* 连接状态 */}
+      <div className="flex items-center gap-1 mt-1">
+        {agent.lastHeartbeat && (Date.now() - new Date(agent.lastHeartbeat).getTime()) < 300000 ? (
+          <span className="text-[10px] font-mono" style={{ color: 'var(--success)' }}>🟢 已连接</span>
+        ) : (
+          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>⚪ 未连接</span>
+        )}
+      </div>
       {agent.progress > 0 && <div className="progress-track mt-2"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
     </div>
   );
@@ -562,10 +570,10 @@ export default function Dashboard() {
     { key: 'archived', label: '已归档' },
   ];
 
-  const handleAddAgent = (v: Record<string, string>) => data.addAgent(v);
+  const handleAddAgent = (v: Record<string, string>) => { data.addAgent(v); setShowAgentForm(false); };
   const handleEditAgent = (v: Record<string, string>) => { if (editAgent) { data.updateAgent(editAgent.id, { name: v.name, system: v.system, source: v.source, model: v.model, role: v.role, description: v.description, capabilities: v.capabilities }); setEditAgent(null); } };
-  const handleAddTask = (v: Record<string, string>) => data.addTask(v);
-  const handleAddOrg = (v: Record<string, string>) => data.addOrg(v);
+  const handleAddTask = (v: Record<string, string>) => { data.addTask(v); setShowTaskForm(false); };
+  const handleAddOrg = (v: Record<string, string>) => { data.addOrg(v); setShowOrgForm(false); };
 
   return (
     <div className="relative z-10 min-h-screen pt-14 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>

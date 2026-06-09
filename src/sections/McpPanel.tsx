@@ -239,7 +239,7 @@ function ApiKeyRow({
     }
     setLoadingKey(true);
     try {
-      const res = await trpcCall("mcp.revealKey", { id: item.id });
+      const res = await trpcCall(`mcp.revealKey?input=${encodeURIComponent(JSON.stringify({id:item.id}))}`);
       const data = res?.result?.data?.json || res?.result?.data || res;
       if (data?.key) {
         setFullKey(data.key);

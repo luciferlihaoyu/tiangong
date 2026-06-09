@@ -28,11 +28,13 @@ app.use("/api/trpc/*", async (c) => {
 
 // Admin migration endpoint
 app.get("/api/admin/migrate", async (c) => {
+  const force = c.req.query("force") === "1";
   const results: string[] = [];
   results.push(`DATABASE_URL: ${env.databaseUrl ? "SET (" + env.databaseUrl.substring(0, 20) + "...)" : "NOT SET"}`);
-  const amLogs = await autoMigrate();
+  results.push(`force: ${force}`);
+  const amLogs = await autoMigrate(force);
   results.push(...amLogs);
-  const mvLogs = await migrateV2();
+  const mvLogs = await migrateV2(force);
   results.push(...mvLogs);
   return c.json({ ok: true, results });
 });

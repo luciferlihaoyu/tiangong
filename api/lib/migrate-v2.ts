@@ -34,7 +34,7 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "parent_task_id", def: "BIGINT" },
 ];
 
-export async function migrateV2(): Promise<string[]> {
+export async function migrateV2(force = false): Promise<string[]> {
   const logs: string[] = [];
   console.log("migrate-v2: DATABASE_URL present =", !!env.databaseUrl);
   if (!env.databaseUrl) {
@@ -108,10 +108,16 @@ export async function migrateV2(): Promise<string[]> {
 
     for (const sql of newTables) {
       try {
-        await conn.execute(sql);
         const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
-        logs.push(`New table ${tableName}: OK`);
-        console.log(`  ✅ New table created`);
+        if (force) {
+          try { await conn.execute(`DROP TABLE IF EXISTS \`${tableName}\``); } catch {}
+          const createSql = sql.replace("IF NOT EXISTS ", "");
+          await conn.execute(createSql);
+          logs.push(`New table ${tableName}: FORCE RECREATED`);
+        } else {
+          await conn.execute(sql);
+          logs.push(`New table ${tableName}: OK`);
+        }
       } catch (e: any) {
         const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
         logs.push(`New table ${tableName}: ${e.message?.slice(0, 80)}`);

@@ -135,7 +135,7 @@ const CREATE_TABLES_SQL = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
-export async function autoMigrate(): Promise<string[]> {
+export async function autoMigrate(force = false): Promise<string[]> {
   const logs: string[] = [];
   console.log("auto-migrate: DATABASE_URL present =", !!env.databaseUrl);
   if (!env.databaseUrl) {
@@ -152,9 +152,17 @@ export async function autoMigrate(): Promise<string[]> {
 
     for (const sql of CREATE_TABLES_SQL) {
       try {
-        await conn.execute(sql);
         const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
-        logs.push(`Table ${tableName}: OK`);
+        if (force) {
+          // Force recreate: drop then create
+          try { await conn.execute(`DROP TABLE IF EXISTS \`${tableName}\``); } catch {}
+          const createSql = sql.replace("IF NOT EXISTS ", "");
+          await conn.execute(createSql);
+          logs.push(`Table ${tableName}: FORCE RECREATED`);
+        } else {
+          await conn.execute(sql);
+          logs.push(`Table ${tableName}: OK`);
+        }
       } catch (e: any) {
         const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
         logs.push(`Table ${tableName}: ${e.message?.slice(0, 80)}`);

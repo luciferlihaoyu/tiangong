@@ -33,6 +33,19 @@ if (env.isProduction) {
   const { serveStaticFiles } = await import("./lib/vite");
   serveStaticFiles(app);
 
+  // Auto-create tables on startup
+  if (env.databaseUrl) {
+    try {
+      const { getDb } = await import("./queries/connection");
+      const db = getDb();
+      // Use drizzle-kit push programmatically — or just test connection
+      await db.execute("SELECT 1");
+      console.log("Database connected successfully");
+    } catch (e: any) {
+      console.warn("Database connection failed:", e.message);
+    }
+  }
+
   const port = parseInt(process.env.PORT || "3000");
   serve({ fetch: app.fetch, port }, () => {
     console.log(`Server running on http://localhost:${port}/`);

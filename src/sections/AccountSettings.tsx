@@ -4,6 +4,7 @@
  */
 
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +30,7 @@ async function trpcCall(path: string, input?: any): Promise<any> {
 }
 
 export default function AccountSettings() {
+  const navigate = useNavigate();
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -72,7 +74,16 @@ export default function AccountSettings() {
   return (
     <div className="max-w-md mx-auto mt-8">
       <div className="glass-panel p-6 sci-border">
-        <div className="section-label mb-4">账户设置 · ACCOUNT</div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="section-label">账户设置 · ACCOUNT</div>
+          <button
+            onClick={() => navigate('/')}
+            className="text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors"
+            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+          >
+            ← 返回首页
+          </button>
+        </div>
 
         {/* 用户信息 */}
         <div className="mb-6 p-3 rounded" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-default)" }}>

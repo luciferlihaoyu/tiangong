@@ -40,7 +40,7 @@ export default function Navigation() {
       }}>
       {/* Left: Logo + 中式印章 */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2.5">
+        <button onClick={() => navigate('/')} className="flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity" title="返回首页">
           {/* 中式印章Logo */}
           <div className="relative w-7 h-7 flex items-center justify-center rounded-sm"
             style={{
@@ -57,7 +57,7 @@ export default function Navigation() {
               TIANGONG
             </span>
           </div>
-        </div>
+        </button>
         <div className="h-4 w-px" style={{ background: 'var(--border-default)' }} />
         <span className="font-mono text-[10px] tracking-wider" style={{ color: 'var(--text-muted)' }}>v2.1.0</span>
       </div>

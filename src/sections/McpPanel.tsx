@@ -226,6 +226,39 @@ function ApiKeyRow({
   const isActive = item.active === "true";
   const { tools, resources } = parsePermissions(item.permissions);
   const allPerms = [...tools.map(t => MCP_TOOLS.find(m => m.id === t)?.label || t), ...resources.map(r => MCP_RESOURCES.find(m => m.id === r)?.label || r)];
+  const [showFullKey, setShowFullKey] = useState(false);
+  const [fullKey, setFullKey] = useState("");
+  const [loadingKey, setLoadingKey] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleReveal = async () => {
+    if (showFullKey) {
+      setShowFullKey(false);
+      setFullKey("");
+      return;
+    }
+    setLoadingKey(true);
+    try {
+      const res = await trpcCall("mcp.revealKey", { id: item.id });
+      const data = res?.result?.data?.json || res?.result?.data || res;
+      if (data?.key) {
+        setFullKey(data.key);
+        setShowFullKey(true);
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setLoadingKey(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (fullKey) {
+      await navigator.clipboard.writeText(fullKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div
@@ -287,10 +320,27 @@ function ApiKeyRow({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 text-[10px]">
-        <span className="font-mono" style={{ color: "var(--text-muted)" }}>
-          {item.keyPreview}
+      <div className="flex flex-wrap gap-2 text-[10px] items-center">
+        <span className="font-mono" style={{ color: showFullKey ? "var(--accent-red-bright)" : "var(--text-muted)" }}>
+          {showFullKey ? fullKey : item.keyPreview}
         </span>
+        <button
+          onClick={handleReveal}
+          disabled={loadingKey}
+          className="font-mono py-0.5 px-1.5 rounded transition-all hover:brightness-110"
+          style={{ background: showFullKey ? "rgba(194,58,48,0.15)" : "rgba(100,181,246,0.08)", color: showFullKey ? "var(--accent-red)" : "var(--accent-cyan)", border: `1px solid ${showFullKey ? "rgba(194,58,48,0.2)" : "rgba(100,181,246,0.15)"}` }}
+        >
+          {loadingKey ? "..." : showFullKey ? "👁️ 隐藏" : "👁️ 查看"}
+        </button>
+        {showFullKey && (
+          <button
+            onClick={handleCopy}
+            className="font-mono py-0.5 px-1.5 rounded transition-all hover:brightness-110"
+            style={{ background: copied ? "rgba(0,200,100,0.15)" : "rgba(194,168,50,0.08)", color: copied ? "var(--success)" : "var(--accent-gold)", border: `1px solid ${copied ? "rgba(0,200,100,0.2)" : "rgba(194,168,50,0.15)"}` }}
+          >
+            {copied ? "✅ 已复制" : "📋 复制"}
+          </button>
+        )}
         <span
           className="font-mono py-0.5 px-1 rounded"
           style={{ background: "rgba(100,181,246,0.08)", color: "var(--accent-cyan)" }}

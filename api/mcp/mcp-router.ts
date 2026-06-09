@@ -60,6 +60,22 @@ export const mcpRouter = createRouter({
       };
     }),
 
+  // ─── Reveal full key (requires confirmation) ───
+  revealKey: authedQuery
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const k = await db
+        .select()
+        .from(mcpApiKeys)
+        .where(eq(mcpApiKeys.id, input.id))
+        .then(r => r[0]);
+
+      if (!k) return null;
+
+      return { id: k.id, key: k.key };
+    }),
+
   // ─── Create a new API key ───
   createKey: adminQuery
     .input(

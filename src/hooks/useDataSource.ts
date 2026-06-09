@@ -62,6 +62,20 @@ export function useDataSource() {
 
   // ── Agent mutations ──
   const addAgent = (data: Record<string, string>) => {
+    if (hasBackend) {
+      trpc.agent.create.useMutation().mutate({
+        agentId: data.agentId || `AG-${String(Date.now()).slice(-4)}`,
+        name: data.name,
+        system: data.system || "custom",
+        description: data.description,
+        source: data.source || "custom",
+        model: data.model,
+        role: data.role,
+        capabilities: data.capabilities,
+      });
+      agentQuery.refetch();
+      return;
+    }
     const id = ++nextId;
     const newAgent: MockAgent = {
       id, agentId: data.agentId || `AG-${String(id).padStart(2, "0")}`,
@@ -74,18 +88,46 @@ export function useDataSource() {
     setLocalAgents(prev => [...prev, newAgent]);
   };
   const updateAgent = (id: number, data: Partial<MockAgent>) => {
+    if (hasBackend) {
+      trpc.agent.update.useMutation().mutate({ id, ...data });
+      agentQuery.refetch();
+      return;
+    }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, ...data } : a));
   };
   const deleteAgent = (id: number) => {
+    if (hasBackend) {
+      trpc.agent.delete.useMutation().mutate({ id });
+      agentQuery.refetch();
+      taskQuery.refetch();
+      return;
+    }
     setLocalAgents(prev => prev.filter(a => a.id !== id));
     setLocalTasks(prev => prev.filter(t => t.agentId !== id));
   };
   const updateAgentStatus = (id: number, status: string) => {
+    if (hasBackend) {
+      trpc.agent.update.useMutation().mutate({ id, status });
+      agentQuery.refetch();
+      return;
+    }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, status } : a));
   };
 
   // ── Task mutations ──
   const addTask = (data: Record<string, string>) => {
+    if (hasBackend) {
+      // 调用后端 API
+      trpc.task.create.useMutation().mutate({
+        taskId: data.taskId || `TASK-${Date.now()}`,
+        name: data.name,
+        agentId: data.agentId ? Number(data.agentId) : undefined,
+        description: data.description,
+        priority: Number(data.priority) || 0,
+      });
+      taskQuery.refetch();
+      return;
+    }
     const id = ++nextId;
     const newTask: MockTask = {
       id, taskId: `#${nextId}`, name: data.name,
@@ -95,8 +137,20 @@ export function useDataSource() {
     };
     setLocalTasks(prev => [newTask, ...prev]);
   };
-  const deleteTask = (id: number) => { setLocalTasks(prev => prev.filter(t => t.id !== id)); };
+  const deleteTask = (id: number) => {
+    if (hasBackend) {
+      trpc.task.delete.useMutation().mutate({ id });
+      taskQuery.refetch();
+      return;
+    }
+    setLocalTasks(prev => prev.filter(t => t.id !== id));
+  };
   const updateTaskProgress = (id: number, progress: number, status: string) => {
+    if (hasBackend) {
+      trpc.orch.updateStatus.useMutation().mutate({ id, status, progress });
+      taskQuery.refetch();
+      return;
+    }
     setLocalTasks(prev => prev.map(t => t.id === id ? { ...t, progress, status } : t));
   };
 

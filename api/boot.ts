@@ -34,16 +34,11 @@ if (env.isProduction) {
   serveStaticFiles(app);
 
   // Auto-create tables on startup
-  if (env.databaseUrl) {
-    try {
-      const { getDb } = await import("./queries/connection");
-      const db = getDb();
-      // Use drizzle-kit push programmatically — or just test connection
-      await db.execute("SELECT 1");
-      console.log("Database connected successfully");
-    } catch (e: any) {
-      console.warn("Database connection failed:", e.message);
-    }
+  try {
+    const { autoMigrate } = await import("./lib/auto-migrate");
+    await autoMigrate();
+  } catch (e: any) {
+    console.warn("Auto-migration failed:", e.message);
   }
 
   const port = parseInt(process.env.PORT || "3000");

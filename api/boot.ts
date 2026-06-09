@@ -41,6 +41,14 @@ if (env.isProduction) {
     console.warn("Auto-migration failed:", e.message);
   }
 
+  // V2 migration — add new columns to existing tables
+  try {
+    const { migrateV2 } = await import("./lib/migrate-v2");
+    await migrateV2();
+  } catch (e: any) {
+    console.warn("V2 migration failed:", e.message);
+  }
+
   const port = parseInt(process.env.PORT || "3000");
   serve({ fetch: app.fetch, port }, () => {
     console.log(`Server running on http://localhost:${port}/`);

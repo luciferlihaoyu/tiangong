@@ -26,6 +26,24 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
+// Admin migration endpoint
+app.get("/api/admin/migrate", async (c) => {
+  const results: string[] = [];
+  try {
+    await autoMigrate();
+    results.push("autoMigrate: OK");
+  } catch (e: any) {
+    results.push(`autoMigrate: ${e.message}`);
+  }
+  try {
+    await migrateV2();
+    results.push("migrateV2: OK");
+  } catch (e: any) {
+    results.push(`migrateV2: ${e.message}`);
+  }
+  return c.json({ ok: true, results });
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 export default app;

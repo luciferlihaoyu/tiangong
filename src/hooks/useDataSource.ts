@@ -1,5 +1,25 @@
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useState, useCallback } from "react";
 import { trpc } from "@/providers/trpc";
+
+// Helper: call tRPC via fetch (avoids React hook issues in callbacks)
+async function trpcFetch(path: string, input?: any): Promise<any> {
+  const token = localStorage.getItem("tiangong_token");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const isQuery = !["create", "update", "delete", "changePassword", "register", "login", "revoke", "activate", "addDep", "removeDep"].some(s => path.includes(s));
+  const url = `/api/trpc/${path}${isQuery && input ? `?input=${encodeURIComponent(JSON.stringify(input))}` : ""}`;
+  const res = await fetch(url, {
+    method: input !== undefined && !isQuery ? "POST" : "GET",
+    headers,
+    body: input !== undefined && !isQuery ? JSON.stringify(input) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err?.message || err?.[0]?.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 // Reuse DB types
 export interface MockAgent {
@@ -61,9 +81,9 @@ export function useDataSource() {
     : { total: agents.reduce((s: number, a: MockAgent) => s + (a.messagesCount || 0), 0) };
 
   // ── Agent mutations ──
-  const addAgent = (data: Record<string, string>) => {
+  const addAgent = useCallback(async (data: Record<string, string>) => {
     if (hasBackend) {
-      trpc.agent.create.useMutation().mutate({
+      await trpcFetch("agent.create", {
         agentId: data.agentId || `AG-${String(Date.now()).slice(-4)}`,
         name: data.name,
         system: data.system || "custom",
@@ -87,17 +107,17 @@ export function useDataSource() {
     };
     setLocalAgents(prev => [...prev, newAgent]);
   };
-  const updateAgent = (id: number, data: Partial<MockAgent>) => {
+  const updateAgent = useCallback(async (id: number, data: Partial<MockAgent>) => {
     if (hasBackend) {
-      trpc.agent.update.useMutation().mutate({ id, ...data });
+      await trpcFetch("agent.update", { id, ...data });
       agentQuery.refetch();
       return;
     }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, ...data } : a));
-  };
-  const deleteAgent = (id: number) => {
+  }, [hasBackend, agentQuery]);
+  const deleteAgent = useCallback(async (id: number) => {
     if (hasBackend) {
-      trpc.agent.delete.useMutation().mutate({ id });
+      await trpcFetch("agent.delete", { id });
       agentQuery.refetch();
       taskQuery.refetch();
       return;
@@ -105,9 +125,9 @@ export function useDataSource() {
     setLocalAgents(prev => prev.filter(a => a.id !== id));
     setLocalTasks(prev => prev.filter(t => t.agentId !== id));
   };
-  const updateAgentStatus = (id: number, status: string) => {
+  const updateAgentStatus = useCallback(async (id: number, status: string) => {
     if (hasBackend) {
-      trpc.agent.update.useMutation().mutate({ id, status });
+      await trpcFetch("agent.update", { id, status });
       agentQuery.refetch();
       return;
     }
@@ -115,10 +135,9 @@ export function useDataSource() {
   };
 
   // ── Task mutations ──
-  const addTask = (data: Record<string, string>) => {
+  const addTask = useCallback(async (data: Record<string, string>) => {
     if (hasBackend) {
-      // 调用后端 API
-      trpc.task.create.useMutation().mutate({
+      await trpcFetch("task.create", {
         taskId: data.taskId || `TASK-${Date.now()}`,
         name: data.name,
         agentId: data.agentId ? Number(data.agentId) : undefined,
@@ -137,17 +156,17 @@ export function useDataSource() {
     };
     setLocalTasks(prev => [newTask, ...prev]);
   };
-  const deleteTask = (id: number) => {
+  const deleteTask = useCallback(async (id: number) => {
     if (hasBackend) {
-      trpc.task.delete.useMutation().mutate({ id });
+      await trpcFetch("task.delete", { id });
       taskQuery.refetch();
       return;
     }
     setLocalTasks(prev => prev.filter(t => t.id !== id));
   };
-  const updateTaskProgress = (id: number, progress: number, status: string) => {
+  const updateTaskProgress = useCallback(async (id: number, progress: number, status: string) => {
     if (hasBackend) {
-      trpc.orch.updateStatus.useMutation().mutate({ id, status, progress });
+      await trpcFetch("orch.updateStatus", { id, status, progress });
       taskQuery.refetch();
       return;
     }

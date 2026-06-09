@@ -61,7 +61,8 @@ export function createMcpApp(): Hono {
   app.get("/health", (c) => {
     return c.json({
       ok: true,
-      version: "2.0.0",
+      version: "2.0.1",
+      build: "4ca0e5f",
       name: "Tiangong MCP Server",
       protocol: "mcp/2025-03-26",
       capabilities: {

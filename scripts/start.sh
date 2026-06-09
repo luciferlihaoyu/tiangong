@@ -3,8 +3,13 @@
 # 1. 同步数据库 schema（容错：失败不影响启动）
 # 2. 启动服务
 
+echo "🔧 DATABASE_URL present: $([ -n "$DATABASE_URL" ] && echo 'YES' || echo 'NO')"
 echo "🔧 Syncing database schema..."
-npx drizzle-kit push 2>&1 || echo "⚠️ db:push failed, continuing..."
+npx drizzle-kit push 2>&1
+PUSH_EXIT=$?
+if [ $PUSH_EXIT -ne 0 ]; then
+  echo "⚠️ db:push failed (exit $PUSH_EXIT), continuing..."
+fi
 
 echo "🚀 Starting Tiangong server..."
 NODE_ENV=production node dist/boot.js

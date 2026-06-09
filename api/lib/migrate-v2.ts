@@ -69,6 +69,14 @@ export async function migrateV2(): Promise<string[]> {
       }
     }
 
+    // 修复 organizations 表：如果 budget 列存在但 budget_cents 不存在，改名
+    try {
+      await conn.execute(`ALTER TABLE organizations CHANGE COLUMN budget budget_cents INT DEFAULT 0`);
+      logs.push("organizations: budget → budget_cents renamed");
+    } catch (e: any) {
+      // 忽略（可能已经正确或者表不存在）
+    }
+
     // 创建新表（如果不存在）
     const newTables = [
       `CREATE TABLE IF NOT EXISTS organizations (
@@ -76,7 +84,7 @@ export async function migrateV2(): Promise<string[]> {
         name VARCHAR(100) NOT NULL,
         description TEXT,
         goals TEXT,
-        budget INT DEFAULT 0,
+        budget_cents INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,

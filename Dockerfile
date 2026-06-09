@@ -4,7 +4,7 @@ WORKDIR /app
 
 # 安装依赖（包含 devDependencies，drizzle-kit 需要）
 COPY package.json package-lock.json ./
-RUN npm ci --include=dev
+RUN npm ci
 
 # 复制源码
 COPY . .

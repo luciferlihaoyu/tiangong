@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { serve } from "@hono/node-server";
 import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
@@ -8,6 +9,7 @@ import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
 import { autoMigrate } from "./lib/auto-migrate";
 import { migrateV2 } from "./lib/migrate-v2";
+import { serveStaticFiles } from "./lib/vite";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -44,8 +46,6 @@ app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 export default app;
 
 if (env.isProduction) {
-  const { serve } = await import("@hono/node-server");
-  const { serveStaticFiles } = await import("./lib/vite");
   serveStaticFiles(app);
 
   // Auto-create tables on startup

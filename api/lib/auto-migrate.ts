@@ -136,6 +136,7 @@ const CREATE_TABLES_SQL = [
 ];
 
 export async function autoMigrate() {
+  console.log("auto-migrate: DATABASE_URL present =", !!env.databaseUrl);
   if (!env.databaseUrl) {
     console.log("DATABASE_URL not set, skipping auto-migration");
     return;

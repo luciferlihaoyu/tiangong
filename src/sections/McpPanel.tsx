@@ -568,10 +568,15 @@ function PermissionEditDialog({
           permissions: perms,
           rateLimit: parseInt(rateLimit) || 10,
         });
-        const data = res?.result?.data?.json || res;
+        const data = res?.result?.data?.json || res?.result?.data || res;
         if (data?.key) {
           setNewKey(data.key);
           onSaved(data.key);
+          // 不自动关闭 — 让用户看到 Key 后再手动关闭
+        } else {
+          // 没返回 key 就直接关闭刷新
+          onSaved();
+          handleClose();
         }
       }
     } catch (e: any) {
@@ -593,6 +598,11 @@ function PermissionEditDialog({
 
   // 显示新创建的 Key
   if (newKey) {
+    const handleCopyAndClose = async () => {
+      await navigator.clipboard.writeText(newKey);
+      handleClose();
+    };
+
     return (
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent
@@ -614,15 +624,24 @@ function PermissionEditDialog({
               {newKey}
             </div>
             <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              ⚠️ 请立即复制此 Key，关闭后无法再次查看完整 Key。
+              ⚠️ 请立即复制此 Key，关闭后需通过「查看」按钮再次获取。
             </p>
-            <Button
-              onClick={() => navigator.clipboard.writeText(newKey)}
-              className="text-xs"
-              style={{ background: "var(--accent-cyan)", color: "#fff" }}
-            >
-              📋 复制到剪贴板
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => navigator.clipboard.writeText(newKey)}
+                className="flex-1 text-xs"
+                style={{ background: "var(--accent-cyan)", color: "#fff" }}
+              >
+                📋 复制
+              </Button>
+              <Button
+                onClick={handleCopyAndClose}
+                className="flex-1 text-xs font-bold"
+                style={{ background: "var(--accent-red)", color: "#fff" }}
+              >
+                📋 复制并关闭
+              </Button>
+            </div>
             <Button
               onClick={handleClose}
               className="text-xs"

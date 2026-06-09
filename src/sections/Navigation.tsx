@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
 
 function SunIcon() {
@@ -20,6 +21,7 @@ function MoonIcon() {
 }
 
 export default function Navigation() {
+  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const tabs = [
     { label: '全部', active: true },
@@ -87,6 +89,11 @@ export default function Navigation() {
           <span className="status-dot status-dot-online" />
           系统正常
         </span>
+
+        {/* 账户设置 */}
+        <button onClick={() => navigate('/account')} className="text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="账户设置">
+          ⚙️
+        </button>
 
         {/* 主题切换 */}
         <button onClick={toggle} className="theme-toggle" title={theme === 'dark' ? '切换亮色' : '切换暗色'}>

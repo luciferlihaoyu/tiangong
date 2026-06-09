@@ -7,6 +7,7 @@ import Features from './sections/Features'
 import ExecutionCore from './sections/ExecutionCore'
 import FAQ from './sections/FAQ'
 import FooterTerminal from './sections/FooterTerminal'
+import AccountSettings from './sections/AccountSettings'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import { useAuth } from './hooks/useAuth'
@@ -45,6 +46,12 @@ export default function App() {
             <ExecutionCore />
             <FAQ />
             <FooterTerminal />
+          </ProtectedLayout>
+        } />
+        <Route path="/account" element={
+          <ProtectedLayout>
+            <Navigation />
+            <AccountSettings />
           </ProtectedLayout>
         } />
         <Route path="*" element={

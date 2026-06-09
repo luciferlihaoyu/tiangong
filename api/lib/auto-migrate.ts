@@ -135,30 +135,40 @@ const CREATE_TABLES_SQL = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
-export async function autoMigrate() {
+export async function autoMigrate(): Promise<string[]> {
+  const logs: string[] = [];
   console.log("auto-migrate: DATABASE_URL present =", !!env.databaseUrl);
   if (!env.databaseUrl) {
+    logs.push("DATABASE_URL not set, skipping auto-migration");
     console.log("DATABASE_URL not set, skipping auto-migration");
-    return;
+    return logs;
   }
 
   let conn: mysql.Connection | null = null;
   try {
     conn = await mysql.createConnection(env.databaseUrl);
+    logs.push("Database connected");
     console.log("Database connected, running migrations...");
 
     for (const sql of CREATE_TABLES_SQL) {
       try {
         await conn.execute(sql);
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`Table ${tableName}: OK`);
       } catch (e: any) {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`Table ${tableName}: ${e.message?.slice(0, 80)}`);
         console.warn("Migration statement warning:", e.message?.slice(0, 100));
       }
     }
 
+    logs.push(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);
     console.log(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);
   } catch (e: any) {
+    logs.push(`Connection failed: ${e.message}`);
     console.warn("Auto-migration failed:", e.message);
   } finally {
     if (conn) await conn.end();
   }
+  return logs;
 }

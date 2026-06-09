@@ -29,18 +29,11 @@ app.use("/api/trpc/*", async (c) => {
 // Admin migration endpoint
 app.get("/api/admin/migrate", async (c) => {
   const results: string[] = [];
-  try {
-    await autoMigrate();
-    results.push("autoMigrate: OK");
-  } catch (e: any) {
-    results.push(`autoMigrate: ${e.message}`);
-  }
-  try {
-    await migrateV2();
-    results.push("migrateV2: OK");
-  } catch (e: any) {
-    results.push(`migrateV2: ${e.message}`);
-  }
+  results.push(`DATABASE_URL: ${env.databaseUrl ? "SET (" + env.databaseUrl.substring(0, 20) + "...)" : "NOT SET"}`);
+  const amLogs = await autoMigrate();
+  results.push(...amLogs);
+  const mvLogs = await migrateV2();
+  results.push(...mvLogs);
   return c.json({ ok: true, results });
 });
 

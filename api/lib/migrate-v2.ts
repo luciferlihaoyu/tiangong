@@ -34,16 +34,19 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "parent_task_id", def: "BIGINT" },
 ];
 
-export async function migrateV2() {
+export async function migrateV2(): Promise<string[]> {
+  const logs: string[] = [];
   console.log("migrate-v2: DATABASE_URL present =", !!env.databaseUrl);
   if (!env.databaseUrl) {
+    logs.push("DATABASE_URL not set, skipping v2 migration");
     console.log("DATABASE_URL not set, skipping v2 migration");
-    return;
+    return logs;
   }
 
   let conn: mysql.Connection | null = null;
   try {
     conn = await mysql.createConnection(env.databaseUrl);
+    logs.push("Database connected");
     console.log("Database connected, running v2 migrations...");
 
     let added = 0;
@@ -60,6 +63,7 @@ export async function migrateV2() {
           console.log(`  ⏭️  ${table}.${col} already exists`);
           skipped++;
         } else {
+          logs.push(`${table}.${col}: ${e.message?.slice(0, 80)}`);
           console.warn(`  ⚠️  ${table}.${col} failed:`, e.message?.slice(0, 80));
         }
       }
@@ -97,16 +101,23 @@ export async function migrateV2() {
     for (const sql of newTables) {
       try {
         await conn.execute(sql);
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`New table ${tableName}: OK`);
         console.log(`  ✅ New table created`);
       } catch (e: any) {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`New table ${tableName}: ${e.message?.slice(0, 80)}`);
         console.warn(`  ⚠️  New table failed:`, e.message?.slice(0, 80));
       }
     }
 
+    logs.push(`V2 migration completed: ${added} columns added, ${skipped} skipped`);
     console.log(`V2 migration completed: ${added} columns added, ${skipped} skipped`);
   } catch (e: any) {
+    logs.push(`Connection failed: ${e.message}`);
     console.warn("V2 migration failed:", e.message);
   } finally {
     if (conn) await conn.end();
   }
+  return logs;
 }

@@ -21,7 +21,7 @@ const CREATE_TABLES_SQL = [
     id INT AUTO_INCREMENT PRIMARY KEY,
     agent_id VARCHAR(20) NOT NULL UNIQUE,
     name VARCHAR(50) NOT NULL,
-    system VARCHAR(30) NOT NULL,
+    \`system\` VARCHAR(30) NOT NULL,
     status ENUM('online','busy','idle') DEFAULT 'idle' NOT NULL,
     task VARCHAR(255),
     progress INT DEFAULT 0 NOT NULL,

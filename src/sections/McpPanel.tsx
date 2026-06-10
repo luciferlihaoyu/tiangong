@@ -854,8 +854,32 @@ export default function McpPanel() {
 
   const tabs = [
     { key: "keys" as const, label: "API Keys", icon: "🔑" },
+    { key: "guide" as const, label: "接入指南", icon: "📖" },
     { key: "audit" as const, label: "审计日志", icon: "📋" },
   ];
+
+  // Heartbeat test
+  const [heartbeatAgentId, setHeartbeatAgentId] = useState("");
+  const [heartbeatResult, setHeartbeatResult] = useState<string | null>(null);
+  const [heartbeatLoading, setHeartbeatLoading] = useState(false);
+
+  const handleHeartbeatTest = async () => {
+    if (!heartbeatAgentId) return;
+    setHeartbeatLoading(true);
+    setHeartbeatResult(null);
+    try {
+      const res = await trpcCall("agent.updateHeartbeat", { id: parseInt(heartbeatAgentId) });
+      const data = res?.result?.data?.json || res?.result?.data || res;
+      setHeartbeatResult(data?.claimedTask
+        ? `✅ 心跳成功！已自动认领任务: ${data.claimedTask.name}`
+        : "✅ 心跳成功！当前无待认领任务"
+      );
+    } catch (e: any) {
+      setHeartbeatResult(`❌ 失败: ${e.message}`);
+    } finally {
+      setHeartbeatLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -926,6 +950,147 @@ export default function McpPanel() {
 
       {/* Audit Log Tab */}
       {tab === "audit" && <AuditLogPanel />}
+
+      {/* Guide Tab */}
+      {tab === "guide" && (
+        <div className="flex flex-col gap-4">
+          {/* 接入步骤 */}
+          <div className="glass-panel p-5 sci-border">
+            <div className="section-label mb-4">🚀 Agent 接入指南 · ONBOARDING</div>
+            <div className="flex flex-col gap-4">
+              {/* Step 1 */}
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                  style={{ background: "var(--accent-red)", color: "#fff" }}>1</div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+                    创建 MCP API Key
+                  </div>
+                  <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+                    在「API Keys」标签页中为你的 Agent 创建一个 Key，选择需要的 Tools 和 Resources 权限。
+                  </p>
+                  <button onClick={() => setTab("keys")} className="text-xs font-mono px-2 py-1 rounded"
+                    style={{ background: "var(--accent-glow-gold)", color: "var(--accent-gold)" }}>
+                    前往创建 →
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                  style={{ background: "var(--accent-gold)", color: "#000" }}>2</div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+                    配置心跳 Cron 任务
+                  </div>
+                  <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+                    在 OpenClaw 中设置定时心跳，每 5 分钟向天宫上报一次。替换下方命令中的 AGENT_ID 和 BASE_URL。
+                  </p>
+                  <div className="p-3 rounded font-mono text-xs overflow-x-auto"
+                    style={{ background: "rgba(0,0,0,0.3)", border: "1px solid var(--border-default)", color: "var(--accent-cyan)" }}>
+                    {`# 心跳上报 curl 命令
+curl -X POST https://tiangg.zeabur.app/api/trpc/agent.updateHeartbeat \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_MCP_KEY" \\
+  -d '{"id": AGENT_DB_ID}'`}
+                  </div>
+                  <p className="text-[10px] mt-1 font-mono" style={{ color: "var(--text-muted)" }}>
+                    💡 提示：将 AGENT_DB_ID 替换为 Agent 在天宫中的数字 ID，YOUR_MCP_KEY 替换为步骤1创建的 Key
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                  style={{ background: "var(--accent-cyan)", color: "#fff" }}>3</div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+                    验证在线状态
+                  </div>
+                  <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+                    使用下方的心跳测试按钮手动触发一次心跳，确认 Agent 出现在仪表盘的「已连接」列表中。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 心跳测试 */}
+          <div className="glass-panel p-5 sci-border">
+            <div className="section-label mb-3">💓 心跳测试 · HEARTBEAT TEST</div>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
+                  选择 Agent
+                </Label>
+                <select
+                  value={heartbeatAgentId}
+                  onChange={e => setHeartbeatAgentId(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded text-xs"
+                  style={{
+                    background: "rgba(0,0,0,0.2)",
+                    border: "1px solid var(--border-default)",
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  <option value="">-- 选择 Agent --</option>
+                  {agents.map(a => (
+                    <option key={a.id} value={String(a.id)}>{a.name} (ID: {a.id})</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleHeartbeatTest}
+                disabled={heartbeatLoading || !heartbeatAgentId}
+                className="px-4 py-1.5 rounded text-xs font-bold transition-all hover:brightness-110 disabled:opacity-50"
+                style={{ background: "var(--accent-red)", color: "#fff" }}
+              >
+                {heartbeatLoading ? "发送中..." : "💓 发送心跳"}
+              </button>
+            </div>
+            {heartbeatResult && (
+              <div className="mt-3 p-2 rounded text-xs font-mono"
+                style={{
+                  background: heartbeatResult.startsWith("✅") ? "rgba(0,200,100,0.1)" : "rgba(194,58,48,0.1)",
+                  border: `1px solid ${heartbeatResult.startsWith("✅") ? "rgba(0,200,100,0.2)" : "rgba(194,58,48,0.2)"}`,
+                  color: heartbeatResult.startsWith("✅") ? "var(--success)" : "var(--accent-red)",
+                }}
+              >
+                {heartbeatResult}
+              </div>
+            )}
+          </div>
+
+          {/* MCP 协议说明 */}
+          <div className="glass-panel p-5 sci-border">
+            <div className="section-label mb-3">📡 MCP 协议说明 · PROTOCOL</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs font-bold mb-1" style={{ color: "var(--accent-gold)" }}>Tools（可执行操作）</div>
+                <div className="flex flex-col gap-1">
+                  {MCP_TOOLS.map(t => (
+                    <div key={t.id} className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                      <span style={{ color: "var(--accent-cyan)" }}>{t.id}</span> — {t.desc}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-bold mb-1" style={{ color: "var(--accent-gold)" }}>Resources（可读取数据）</div>
+                <div className="flex flex-col gap-1">
+                  {MCP_RESOURCES.map(r => (
+                    <div key={r.id} className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                      <span style={{ color: "var(--accent-cyan)" }}>{r.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Dialogs — 新建和编辑共用一个组件 */}
       <PermissionEditDialog

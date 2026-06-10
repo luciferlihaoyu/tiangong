@@ -74,10 +74,11 @@ const statusCfg: Record<string, { dot: string; color: string; label: string }> =
   idle: { dot: 'status-dot-idle', color: 'var(--text-muted)', label: '空闲' },
 };
 
-function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
+function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp }: {
   agent: MockAgent;
   onStatusChange: (id: number, s: string) => void;
   onEdit: (a: MockAgent) => void; onDelete: (id: number) => void;
+  onNavigateToMcp?: () => void;
 }) {
   const c = statusCfg[agent.status] || statusCfg.idle;
   const caps = useMemo(() => { try { return agent.capabilities ? JSON.parse(agent.capabilities) as string[] : []; } catch { return []; } }, [agent.capabilities]);
@@ -121,12 +122,20 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
           💓 {new Date(agent.lastHeartbeat).toLocaleTimeString()}
         </div>
       )}
-      {/* 连接状态: 10分钟内有心跳=已连接 */}
+      {/* 连接状态: 10分钟内有心跳=已连接, 有MCP Key无心跳=待接入 */}
       <div className="flex items-center gap-1 mt-1">
         {agent.lastHeartbeat && (Date.now() - new Date(agent.lastHeartbeat).getTime()) < 600000 ? (
           <span className="text-[10px] font-mono" style={{ color: 'var(--success)' }}>🟢 已连接</span>
+        ) : agent.sourceApiKey ? (
+          <span className="text-[10px] font-mono cursor-pointer hover:underline" style={{ color: 'var(--accent-gold)' }}
+            onClick={(e) => { e.stopPropagation(); onNavigateToMcp?.(); }}>
+            🟡 待接入
+          </span>
         ) : (
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>⚪ 未连接</span>
+          <span className="text-[10px] font-mono cursor-pointer hover:underline" style={{ color: 'var(--text-muted)' }}
+            onClick={(e) => { e.stopPropagation(); onNavigateToMcp?.(); }}>
+            ⚪ 未连接
+          </span>
         )}
       </div>
       {agent.progress > 0 && <div className="progress-track mt-2"><div className="progress-fill" style={{ width: `${agent.progress}%` }} /></div>}
@@ -669,7 +678,8 @@ export default function Dashboard() {
                   <AgentCard key={agent.id} agent={agent}
                     onStatusChange={data.updateAgentStatus}
                     onEdit={a => setEditAgent(a)}
-                    onDelete={data.deleteAgent} />
+                    onDelete={data.deleteAgent}
+                    onNavigateToMcp={() => setMainTab('mcp')} />
                 ))}
               </div>
               <div className="lg:col-span-1">

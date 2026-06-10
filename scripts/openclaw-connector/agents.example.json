@@ -12,7 +12,14 @@
       "token": "tg-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
       "label": "编程大师",
       "execMode": "command",
-      "execCommand": "node ./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs --agent codemaster --timeout 600",
+      "execFile": "node",
+      "execArgs": [
+        "./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs",
+        "--agent",
+        "codemaster",
+        "--timeout",
+        "600"
+      ],
       "execTimeoutMs": 660000,
       "resultMaxChars": 12000
     },
@@ -21,6 +28,19 @@
       "agentId": 3,
       "token": "tg-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
       "label": "编程大师 (Echo 烟测)",
+      "execMode": "command",
+      "execFile": "node",
+      "execArgs": [
+        "./scripts/openclaw-connector/examples/echo-runner.mjs"
+      ],
+      "execTimeoutMs": 300000,
+      "resultMaxChars": 12000
+    },
+    {
+      "name": "codemaster-legacy",
+      "agentId": 4,
+      "token": "tg-wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "label": "编程大师 (Legacy - 仅受信任配置)",
       "execMode": "command",
       "execCommand": "node ./scripts/openclaw-connector/examples/echo-runner.mjs",
       "execTimeoutMs": 300000,

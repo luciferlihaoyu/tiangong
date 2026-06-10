@@ -33,8 +33,10 @@
  *   TIANGONG_AGENT_ID         Agent 在天宫的数据库 ID
  *   TIANGONG_MCP_KEY          Agent 绑定的 MCP API Key (token)
  *   TIANGONG_AGENT_NAME       Agent 显示名称
- *   TIANGONG_EXEC_MODE        执行模式: mock|command (default: mock)
- *   TIANGONG_EXEC_COMMAND     command 模式命令模板
+ *   TIANGONG_EXEC_MODE          执行模式: mock|command (default: mock)
+ *   TIANGONG_EXEC_FILE        command 模式执行文件路径 (优先于 execCommand)
+ *   TIANGONG_EXEC_ARGS_JSON  command 模式执行参数 JSON 数组
+ *   TIANGONG_EXEC_COMMAND     command 模式命令模板 (legacy, trusted-only)
  *   TIANGONG_EXEC_TIMEOUT_MS  执行超时 ms (default: 300000)
  *   TIANGONG_RESULT_MAX_CHARS 结果最大字符数 (default: 12000)
  */
@@ -84,11 +86,33 @@ class Config {
     /** @type {"mock"|"command"} */
     this.execMode = process.env.TIANGONG_EXEC_MODE || "mock";
     /** @type {string} */
+    this.execFile = process.env.TIANGONG_EXEC_FILE || "";
+    /** @type {string[]} */
+    this.execArgs = this._parseExecArgs(process.env.TIANGONG_EXEC_ARGS_JSON);
+    /** @type {string} */
     this.execCommand = process.env.TIANGONG_EXEC_COMMAND || "";
     /** @type {number} */
     this.execTimeoutMs = parseInt(process.env.TIANGONG_EXEC_TIMEOUT_MS || "300000", 10) || 300000;
     /** @type {number} */
     this.resultMaxChars = parseInt(process.env.TIANGONG_RESULT_MAX_CHARS || "12000", 10) || 12000;
+  }
+
+  /**
+   * Parse TIANGONG_EXEC_ARGS_JSON environment variable
+   * @param {string|undefined} json
+   * @returns {string[]}
+   */
+  _parseExecArgs(json) {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) {
+        throw new Error("TIANGONG_EXEC_ARGS_JSON must be a JSON array of strings");
+      }
+      return parsed;
+    } catch (err) {
+      throw new Error(`Invalid TIANGONG_EXEC_ARGS_JSON: ${err.message}`);
+    }
   }
 
   /** Load from JSON config file */
@@ -129,6 +153,13 @@ class Config {
 
     // ─── P2: Per-agent exec overrides ───
     if (agent.execMode) cfg.execMode = agent.execMode;
+    if (agent.execFile) cfg.execFile = agent.execFile;
+    if (agent.execArgs !== undefined) {
+      if (!Array.isArray(agent.execArgs) || !agent.execArgs.every((v) => typeof v === "string")) {
+        throw new Error(`agent.execArgs for ${agent.name || agent.agentId} must be an array of strings`);
+      }
+      cfg.execArgs = agent.execArgs;
+    }
     if (agent.execCommand) cfg.execCommand = agent.execCommand;
     if (agent.execTimeoutMs) cfg.execTimeoutMs = agent.execTimeoutMs;
     if (agent.resultMaxChars) cfg.resultMaxChars = agent.resultMaxChars;
@@ -144,11 +175,11 @@ class Config {
     if (!this.token || this.token.length < 16) {
       throw new Error("Missing or invalid TIANGONG_MCP_KEY (token must be >= 16 chars)");
     }
-  if (this.execMode !== "mock" && this.execMode !== "command") {
+    if (this.execMode !== "mock" && this.execMode !== "command") {
       throw new Error("Invalid exec mode: must be mock or command");
     }
-    if (this.execMode === "command" && !this.execCommand) {
-      throw new Error("execMode=command requires TIANGONG_EXEC_COMMAND or agent.execCommand");
+    if (this.execMode === "command" && !this.execFile && !this.execCommand) {
+      throw new Error("execMode=command requires execFile/execArgs OR execCommand (legacy)");
     }
     if (!Number.isFinite(this.execTimeoutMs) || this.execTimeoutMs <= 0) {
       throw new Error("Invalid execution timeout: must be a positive number");
@@ -310,11 +341,23 @@ function executeCommand(cfg, task, prompt) {
     delete childEnv.TIANGONG_MCP_KEY;
     delete childEnv.TIANGONG_TOKEN;
 
-    const child = spawn(cfg.execCommand, {
-      shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: childEnv,
-    });
+    // P5: Use execFile+execArgs (argv mode, shell:false) if configured; otherwise fallback to legacy execCommand
+    let child;
+    if (cfg.execFile) {
+      L.info(`🚀 执行任务 (command mode: argv)`);
+      child = spawn(cfg.execFile, cfg.execArgs, {
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: childEnv,
+      });
+    } else {
+      L.info(`🚀 执行任务 (command mode: legacy string)`);
+      child = spawn(cfg.execCommand, {
+        shell: true,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: childEnv,
+      });
+    }
 
     let stdout = "";
     let stderr = "";
@@ -629,7 +672,10 @@ function connectWS(cfg) {
 
     ws.onopen = () => {
       L.info(`✅ ${cfg.agentName} (Agent#${cfg.agentId}) 已连接天宫 WebSocket`);
-      L.info(`   执行模式: ${cfg.execMode}${cfg.execMode === "command" ? " (configured command)" : ""}`);
+      const wsExecDetail = cfg.execMode === "command"
+        ? (cfg.execFile ? " (argv mode)" : " (legacy string mode)")
+        : "";
+      L.info(`   执行模式: ${cfg.execMode}${wsExecDetail}`);
 
       // Start heartbeat via HTTP (more reliable than WS ping for status updates)
       heartbeatTimer = setInterval(() => {
@@ -728,7 +774,7 @@ function truncateOutput(text, maxChars) {
 
 function printHelp() {
   console.log(`
-天宫 OpenClaw Connector (P2) — 助手接入器 + 可配置执行桥
+天宫 OpenClaw Connector (P2 + P5) — 助手接入器 + 可配置执行桥 (argv 加固)
 
 用法:
   node connector.mjs [options]
@@ -743,7 +789,9 @@ function printHelp() {
   --heartbeat, -i <ms>       心跳间隔 ms (default: 30000)
 
   --exec-mode <mode>         执行模式: mock|command (default: mock)
-  --exec-command <cmd>       command 模式命令 (来自可信配置)
+  --exec-file <path>         command 模式执行文件 (推荐, argv 模式)
+  --exec-args <json>         command 模式执行参数 JSON 数组
+  --exec-command <cmd>       command 模式命令 (legacy, trusted-only)
   --exec-timeout <ms>        执行超时 ms (default: 300000)
   --result-max-chars <n>     结果最大字符数 (default: 12000)
 
@@ -756,7 +804,9 @@ function printHelp() {
   TIANGONG_MCP_KEY           Agent 的 MCP API Key
   TIANGONG_AGENT_NAME        Agent 显示名称
   TIANGONG_EXEC_MODE         执行模式: mock|command (default: mock)
-  TIANGONG_EXEC_COMMAND      command 模式命令
+  TIANGONG_EXEC_FILE         command 模式执行文件路径 (推荐, argv 模式)
+  TIANGONG_EXEC_ARGS_JSON   command 模式执行参数 JSON 数组
+  TIANGONG_EXEC_COMMAND      command 模式命令 (legacy, trusted-only)
   TIANGONG_EXEC_TIMEOUT_MS  执行超时 ms (default: 300000)
   TIANGONG_RESULT_MAX_CHARS 结果最大字符数 (default: 12000)
 
@@ -770,7 +820,13 @@ function printHelp() {
   # 环境变量
   TIANGONG_AGENT_ID=1 TIANGONG_MCP_KEY=tg-xxx node connector.mjs
 
-  # command 模式 — 用 echo-runner 做烟测
+  # command 模式 (argv 推荐) — 用 echo-runner 做烟测
+  TIANGONG_EXEC_MODE=command \\
+  TIANGONG_EXEC_FILE=node \\
+  TIANGONG_EXEC_ARGS_JSON='["./scripts/openclaw-connector/examples/echo-runner.mjs"]' \\
+  node connector.mjs --config agents.json -n codemaster
+
+  # command 模式 (legacy 字符串方式)
   TIANGONG_EXEC_MODE=command \\
   TIANGONG_EXEC_COMMAND="node ./scripts/openclaw-connector/examples/echo-runner.mjs" \\
   node connector.mjs --config agents.json -n codemaster
@@ -794,6 +850,8 @@ function parseArgs() {
     heartbeatMs: null,
     // P2
     execMode: null,
+    execFile: null,
+    execArgs: null,
     execCommand: null,
     execTimeoutMs: null,
     resultMaxChars: null,
@@ -840,6 +898,19 @@ function parseArgs() {
       // P2
       case "--exec-mode":
         opts.execMode = next;
+        i++;
+        break;
+      case "--exec-file":
+        opts.execFile = next;
+        i++;
+        break;
+      case "--exec-args":
+        try {
+          opts.execArgs = JSON.parse(next);
+          if (!Array.isArray(opts.execArgs)) opts.execArgs = null;
+        } catch {
+          opts.execArgs = null;
+        }
         i++;
         break;
       case "--exec-command":
@@ -897,6 +968,8 @@ async function main() {
     if (opts.wsBase) cfg.wsBase = opts.wsBase.replace(/\/$/, "");
     if (opts.heartbeatMs) cfg.heartbeatIntervalMs = opts.heartbeatMs;
     if (opts.execMode) cfg.execMode = opts.execMode;
+    if (opts.execFile) cfg.execFile = opts.execFile;
+    if (opts.execArgs) cfg.execArgs = opts.execArgs;
     if (opts.execCommand) cfg.execCommand = opts.execCommand;
     if (opts.execTimeoutMs) cfg.execTimeoutMs = opts.execTimeoutMs;
     if (opts.resultMaxChars) cfg.resultMaxChars = opts.resultMaxChars;
@@ -915,7 +988,11 @@ async function main() {
   L.info(`  WS:    ${cfg.wsBase}`);
   L.info(`  心跳:  ${cfg.heartbeatIntervalMs}ms`);
   L.info(`  Token: ${maskToken(cfg.token)}`);
-  L.info(`  执行:  ${cfg.execMode}${cfg.execMode === "command" ? " (configured command)" : ""}`);
+  // P5: Show command mode type but not actual command/args for security
+  const execDetail = cfg.execMode === "command"
+    ? (cfg.execFile ? " (argv mode)" : " (legacy string mode)")
+    : "";
+  L.info(`  执行:  ${cfg.execMode}${execDetail}`);
   L.info(`  超时:  ${cfg.execTimeoutMs}ms`);
   L.info(`  截断:  ${cfg.resultMaxChars} chars`);
   L.info("═══════════════════════════════════════════");

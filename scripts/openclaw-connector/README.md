@@ -100,11 +100,23 @@ node connector.mjs --config agents.json -n meizhizi
 
 通过 `child_process.spawn` 执行可信配置命令，将 task prompt 通过 **stdin** 传入，捕获 stdout 作为结果。
 
+**推荐：argv 模式（shell:false）**
+
 ```bash
-# 使用 echo-runner 烟测
+# 使用 execFile + execArgs（推荐）
+TIANGONG_EXEC_MODE=command \
+TIANGONG_EXEC_FILE=node \
+TIANGONG_EXEC_ARGS_JSON='["./scripts/openclaw-connector/examples/echo-runner.mjs"]' \
+node connector.mjs --config agents.json -n codemaster
+```
+
+**Legacy：字符串模式（shell:true）**
+
+```bash
+# 仅限受信任配置使用
 TIANGONG_EXEC_MODE=command \
 TIANGONG_EXEC_COMMAND="node ./scripts/openclaw-connector/examples/echo-runner.mjs" \
-node connector.mjs --config agents.json -n codemaster
+node connector.mjs --config agents.json -n codemaster-legacy
 ```
 
 **执行流程：**
@@ -112,18 +124,20 @@ node connector.mjs --config agents.json -n codemaster
 1. Connector 收到/认领 task
 2. 调用 `task.updateProgress` → running, progress 10
 3. 调用 `buildTaskPrompt` 生成 prompt（不含 token/key）
-4. `spawn(execCommand)` 启动子进程，stdin 写入 prompt
+4. `spawn(execFile, execArgs)` 或 `spawn(execCommand)` 启动子进程，stdin 写入 prompt
 5. 等待进程退出：
    - **成功 (exit 0)**：`task.updateProgress` → done, progress 100, output=stdout
    - **失败 (exit ≠ 0)**：`task.updateProgress` → failed, error=stderr
    - **超时**：SIGTERM → 5s 后 SIGKILL → failed
 6. stdout/stderr 截断到 `resultMaxChars`
 
-**安全边界：**
+**P5 安全加固：**
 
+- 推荐使用 `execFile` + `execArgs`（argv 模式），使用 `spawn(file, args, {shell: false})`，更安全
+- `execCommand` 为 legacy 模式，仅限**受信任的配置**使用（管理员可控）
+- 日志仅输出模式类型（argv / legacy string），不输出完整 command/args
 - Token/Key **不会**出现在 prompt 中
 - 命令来自**可信配置**（配置文件或环境变量），不接受外部用户拼接
-- 使用 `spawn` + shell 模式，但命令字符串由管理员控制
 - 超时保护防止僵尸进程
 - 输出截断防止写爆数据库
 
@@ -139,7 +153,9 @@ node connector.mjs --config agents.json -n codemaster
 | `--ws-base` | `TIANGONG_WS_BASE` | `ws://localhost:3999` | WebSocket 端点 |
 | `--heartbeat` | — | `30000` | 心跳间隔（毫秒） |
 | `--exec-mode` | `TIANGONG_EXEC_MODE` | `mock` | 执行模式: `mock` 或 `command` |
-| `--exec-command` | `TIANGONG_EXEC_COMMAND` | — | command 模式命令（来自可信配置） |
+| `--exec-file` | `TIANGONG_EXEC_FILE` | — | command 模式执行文件（推荐 argv 模式） |
+| `--exec-args` | `TIANGONG_EXEC_ARGS_JSON` | — | command 模式执行参数 JSON 数组 |
+| `--exec-command` | `TIANGONG_EXEC_COMMAND` | — | command 模式命令（legacy，仅受信任配置） |
 | `--exec-timeout` | `TIANGONG_EXEC_TIMEOUT_MS` | `300000` | 执行超时（毫秒） |
 | `--result-max-chars` | `TIANGONG_RESULT_MAX_CHARS` | `12000` | 结果最大字符数 |
 
@@ -162,6 +178,28 @@ node connector.mjs --config agents.json -n codemaster
       "token": "tg-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
       "label": "编程大师",
       "execMode": "command",
+      "execFile": "node",
+      "execArgs": ["./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs", "--agent", "codemaster", "--timeout", "600"],
+      "execTimeoutMs": 660000,
+      "resultMaxChars": 12000
+    },
+    {
+      "name": "codemaster-echo",
+      "agentId": 3,
+      "token": "tg-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "label": "编程大师 (Echo 烟测)",
+      "execMode": "command",
+      "execFile": "node",
+      "execArgs": ["./scripts/openclaw-connector/examples/echo-runner.mjs"],
+      "execTimeoutMs": 300000,
+      "resultMaxChars": 12000
+    },
+    {
+      "name": "codemaster-legacy",
+      "agentId": 4,
+      "token": "tg-wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "label": "编程大师 (Legacy - 仅受信任配置)",
+      "execMode": "command",
       "execCommand": "node ./scripts/openclaw-connector/examples/echo-runner.mjs",
       "execTimeoutMs": 300000,
       "resultMaxChars": 12000
@@ -172,7 +210,11 @@ node connector.mjs --config agents.json -n codemaster
 
 配置文件中的 `httpBase` 和 `wsBase` 为可选，默认使用环境变量或内置默认值。命令行参数优先级高于配置文件和环境变量。
 
-每个 agent 项可覆盖 `execMode`、`execCommand`、`execTimeoutMs`、`resultMaxChars`。
+每个 agent 项可覆盖 `execMode`、`execFile`、`execArgs`、`execCommand`、`execTimeoutMs`、`resultMaxChars`。
+
+**推荐配置：**
+- 使用 `execFile` + `execArgs`（argv 模式，shell:false），更安全
+- `execCommand` 为 legacy 模式，仅限**受信任的配置**使用（例如管理员手动配置的生产环境）
 
 ## 运行流程
 

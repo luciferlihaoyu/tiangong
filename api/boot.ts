@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serve } from "@hono/node-server";
+import { createNodeWebSocket } from "@hono/node-ws";
 import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
@@ -17,6 +18,8 @@ import { agents, messages } from "@db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
@@ -79,7 +82,10 @@ app.get("/ws", async (c) => {
   // 验证 token
   const authResult = await verifyMcpKey(token);
   if (!authResult.valid) {
-    return c.json({ error: authResult.error || "认证失败" }, authResult.statusCode || 401);
+    return new Response(JSON.stringify({ error: authResult.error || "认证失败" }), {
+      status: authResult.statusCode || 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // 验证 token 关联的 agent 与请求的 agentId 一致
@@ -90,7 +96,6 @@ app.get("/ws", async (c) => {
   const db = getDb();
 
   // 升级到 WebSocket
-  const { upgradeWebSocket } = await import("hono/ws");
   return upgradeWebSocket(c, {
     onOpen: async (_evt, ws) => {
       try {
@@ -183,11 +188,10 @@ app.get("/ws", async (c) => {
       console.log(`[WS] Agent ${agentId} sent:`, data.type || "unknown");
     },
 
-    onClose: async (_evt) => {
+    onClose: async (_evt, ws) => {
       try {
-        // 从连接管理器中移除（需要找到对应的 ws 引用）
-        // 注意：onClose 中的 ws 参数不可靠，我们通过 agentId 来清理
-        wsManager.disconnect(agentId, _evt.target as any);
+        // 从连接管理器中移除当前 WebSocket 连接
+        wsManager.disconnect(agentId, ws);
 
         // 如果该 Agent 没有其他连接了，更新状态为 idle
         if (!wsManager.isOnline(agentId)) {
@@ -223,7 +227,6 @@ app.get("/ws", async (c) => {
  * 无需认证，注册为 Dashboard 客户端，接收实时事件推送。
  */
 app.get("/ws/dashboard", async (c) => {
-  const { upgradeWebSocket } = await import("hono/ws");
   return upgradeWebSocket(c, {
     onOpen: (_evt, ws) => {
       wsManager.registerDashboard(ws);
@@ -253,8 +256,8 @@ app.get("/ws/dashboard", async (c) => {
       }
     },
 
-    onClose: (_evt) => {
-      wsManager.unregisterDashboard(_evt.target as any);
+    onClose: (_evt, ws) => {
+      wsManager.unregisterDashboard(ws);
       console.log("[WS] Dashboard client disconnected");
     },
 
@@ -284,7 +287,8 @@ if (env.isProduction) {
   }
 
   const port = parseInt(process.env.PORT || "3000");
-  serve({ fetch: app.fetch, port }, () => {
+  const server = serve({ fetch: app.fetch, port }, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+  injectWebSocket(server);
 }

@@ -33,6 +33,7 @@ export interface MockAgent {
   currentTask?: string | null;
   budgetCents?: number; spentCents?: number;
   lastHeartbeat?: string | null;
+  sourceApiKey?: string | null;
 }
 export interface MockTask {
   id: number; taskId: string; name: string; agentId: number | null;

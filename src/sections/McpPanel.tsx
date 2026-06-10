@@ -792,7 +792,7 @@ export default function McpPanel() {
   const [keys, setKeys] = useState<McpKeyItem[]>([]);
   const [agents, setAgents] = useState<{ id: number; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<"keys" | "audit">("keys");
+  const [tab, setTab] = useState<"keys" | "audit" | "guide">("keys");
   const [editItem, setEditItem] = useState<McpKeyItem | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 

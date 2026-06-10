@@ -11,7 +11,8 @@ export default defineConfig(async ({ mode }) => {
   if (mode === "development") {
     try {
       const devServer = (await import("@hono/vite-dev-server")).default
-      plugins.push(devServer({ entry: "api/boot.ts", exclude: [/^\/(?!api\/).*$/] }))
+      const honoPlugin = devServer({ entry: "api/boot.ts", exclude: [/^\/(?!api\/).*$/] })
+      plugins.push(...(Array.isArray(honoPlugin) ? honoPlugin : [honoPlugin]))
     } catch {
       console.warn("@hono/vite-dev-server not available, skipping")
     }

@@ -30,6 +30,7 @@ export const taskRouter = createRouter({
         maxRetries: z.number().optional(),
         timeoutMs: z.number().optional(),
         parentTaskId: z.number().optional(),
+        status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -41,6 +42,7 @@ export const taskRouter = createRouter({
         description: input.description ?? null,
         priority: input.priority ?? 0,
         input: input.input ?? null,
+        status: input.status ?? "pending",
         maxRetries: input.maxRetries ?? 3,
         timeoutMs: input.timeoutMs ?? 300000,
         parentTaskId: input.parentTaskId ?? null,

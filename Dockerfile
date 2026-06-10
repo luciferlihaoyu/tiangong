@@ -17,5 +17,5 @@ RUN npm run build
 
 EXPOSE 3000
 
-# 启动：先同步数据库 schema，再启动服务
-CMD ["sh", "-c", "(npx drizzle-kit push || true) && NODE_ENV=production node dist/boot.js"]
+# 启动：数据库 schema 由应用启动时的 autoMigrate + migrateV2 负责，避免 drizzle-kit push 阻塞 Zeabur STARTING
+CMD ["sh", "scripts/start.sh"]

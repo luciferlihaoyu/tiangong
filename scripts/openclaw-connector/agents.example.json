@@ -1,0 +1,30 @@
+{
+  "agents": [
+    {
+      "name": "meizhizi",
+      "agentId": 1,
+      "token": "tg-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "label": "美智子"
+    },
+    {
+      "name": "codemaster",
+      "agentId": 2,
+      "token": "tg-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "label": "编程大师",
+      "execMode": "command",
+      "execCommand": "node ./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs --agent codemaster --timeout 600",
+      "execTimeoutMs": 660000,
+      "resultMaxChars": 12000
+    },
+    {
+      "name": "codemaster-echo",
+      "agentId": 3,
+      "token": "tg-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "label": "编程大师 (Echo 烟测)",
+      "execMode": "command",
+      "execCommand": "node ./scripts/openclaw-connector/examples/echo-runner.mjs",
+      "execTimeoutMs": 300000,
+      "resultMaxChars": 12000
+    }
+  ]
+}

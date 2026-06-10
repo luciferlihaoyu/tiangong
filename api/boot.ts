@@ -49,6 +49,16 @@ app.get("/api/admin/migrate", async (c) => {
   return c.json({ ok: true, results });
 });
 
+// WebSocket 诊断端点（HTTP）
+app.get("/api/ws/status", (c) => {
+  return c.json({
+    ok: true,
+    websocket: "enabled",
+    onlineAgents: wsManager.getOnlineAgents(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 // ═══════════════════════════════════════════════════════════════

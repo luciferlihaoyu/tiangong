@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents } from "@db/schema";
-import { eq, like, and, isNotNull, sql } from "drizzle-orm";
+import { agents, tasks } from "@db/schema";
+import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
 
 export const agentRouter = createRouter({
   list: publicQuery.query(async () => {
@@ -124,15 +124,167 @@ export const agentRouter = createRouter({
       return { success: true };
     }),
 
+  /**
+   * 任务认领 — 查找可认领的 queued 任务并认领
+   */
+  claimTask: publicQuery
+    .input(z.object({ agentId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+
+      // 1. 查询 Agent 信息
+      const agentRows = await db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, input.agentId));
+      const agent = agentRows[0];
+      if (!agent) {
+        throw new Error("Agent not found");
+      }
+
+      // 2. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务），按优先级降序
+      const claimableTasks = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.status, "queued"),
+            agent.orgId
+              ? and(
+                  eq(tasks.agentId, input.agentId),
+                )
+              : eq(tasks.agentId, input.agentId),
+          )
+        )
+        .orderBy(desc(tasks.priority))
+        .limit(1);
+
+      // 也查询 agentId 为 null 的通用任务
+      const genericTasks = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.status, "queued"),
+            isNull(tasks.agentId),
+          )
+        )
+        .orderBy(desc(tasks.priority))
+        .limit(1);
+
+      // 合并并取优先级最高的
+      const allClaimable = [...claimableTasks, ...genericTasks]
+        .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+      const task = allClaimable[0];
+
+      if (!task) {
+        return { task: null };
+      }
+
+      // 3. 认领任务：更新任务状态为 running，设置 agentId
+      await db
+        .update(tasks)
+        .set({
+          status: "running",
+          agentId: input.agentId,
+        })
+        .where(eq(tasks.id, task.id));
+
+      // 4. 更新 Agent 状态为 busy
+      await db
+        .update(agents)
+        .set({ status: "busy" })
+        .where(eq(agents.id, input.agentId));
+
+      return {
+        task: {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          priority: task.priority,
+        },
+      };
+    }),
+
   updateHeartbeat: publicQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
+
+      // 1. 更新心跳
       await db
         .update(agents)
         .set({ lastHeartbeat: new Date(), status: "online" })
         .where(eq(agents.id, input.id));
-      return { success: true };
+
+      // 2. 检查是否有 queued 任务可认领
+      const agentRows = await db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, input.id));
+      const agent = agentRows[0];
+
+      let claimedTask: { id: number; taskId: string; name: string } | null = null;
+
+      if (agent) {
+        // 查找匹配此 Agent 的 queued 任务
+        const matchedTasks = await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.status, "queued"),
+              eq(tasks.agentId, input.id),
+            )
+          )
+          .orderBy(desc(tasks.priority))
+          .limit(1);
+
+        // 查找通用任务（agentId 为 null）
+        const genericTasks = await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.status, "queued"),
+              isNull(tasks.agentId),
+            )
+          )
+          .orderBy(desc(tasks.priority))
+          .limit(1);
+
+        const allClaimable = [...matchedTasks, ...genericTasks]
+          .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+        const bestTask = allClaimable[0];
+
+        if (bestTask) {
+          // 自动认领
+          await db
+            .update(tasks)
+            .set({
+              status: "running",
+              agentId: input.id,
+            })
+            .where(eq(tasks.id, bestTask.id));
+
+          await db
+            .update(agents)
+            .set({ status: "busy" })
+            .where(eq(agents.id, input.id));
+
+          claimedTask = {
+            id: bestTask.id,
+            taskId: bestTask.taskId,
+            name: bestTask.name,
+          };
+        }
+      }
+
+      return { success: true, claimedTask };
     }),
 
   getHierarchy: publicQuery.query(async () => {

@@ -1,15 +1,10 @@
 #!/bin/sh
 # 天宫启动脚本
-# 1. 同步数据库 schema（容错：失败不影响启动）
-# 2. 启动服务
+# 数据库 schema 由应用启动时的 autoMigrate + migrateV2 负责。
+# 不在这里执行 drizzle-kit push：它可能在 Zeabur 启动阶段阻塞，导致服务长期 STARTING。
+
+set -e
 
 echo "🔧 DATABASE_URL present: $([ -n "$DATABASE_URL" ] && echo 'YES' || echo 'NO')"
-echo "🔧 Syncing database schema..."
-npx drizzle-kit push 2>&1
-PUSH_EXIT=$?
-if [ $PUSH_EXIT -ne 0 ]; then
-  echo "⚠️ db:push failed (exit $PUSH_EXIT), continuing..."
-fi
-
 echo "🚀 Starting Tiangong server..."
 NODE_ENV=production node dist/boot.js

@@ -121,9 +121,9 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete }: {
           💓 {new Date(agent.lastHeartbeat).toLocaleTimeString()}
         </div>
       )}
-      {/* 连接状态 */}
+      {/* 连接状态: 10分钟内有心跳=已连接 */}
       <div className="flex items-center gap-1 mt-1">
-        {agent.lastHeartbeat && (Date.now() - new Date(agent.lastHeartbeat).getTime()) < 300000 ? (
+        {agent.lastHeartbeat && (Date.now() - new Date(agent.lastHeartbeat).getTime()) < 600000 ? (
           <span className="text-[10px] font-mono" style={{ color: 'var(--success)' }}>🟢 已连接</span>
         ) : (
           <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>⚪ 未连接</span>

@@ -130,7 +130,7 @@ export const agentRouter = createRouter({
       const db = getDb();
       await db
         .update(agents)
-        .set({ lastHeartbeat: new Date() })
+        .set({ lastHeartbeat: new Date(), status: "online" })
         .where(eq(agents.id, input.id));
       return { success: true };
     }),

@@ -1,6 +1,16 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+
+function canCreateWebGLContext() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    return !!gl;
+  } catch {
+    return false;
+  }
+}
 
 function Scene() {
   const groupRef = useRef<THREE.Group>(null);
@@ -81,18 +91,42 @@ function Connections({ positions }: { positions: THREE.Vector3[] }) {
 }
 
 export default function MatrixNodes() {
+  const [webglAvailable, setWebglAvailable] = useState(true);
+
+  useEffect(() => {
+    setWebglAvailable(canCreateWebGLContext());
+  }, []);
+
   return (
     <section className="relative z-10 w-full py-4 px-4 md:px-6">
       <div className="max-w-7xl mx-auto">
         <div className="glass-panel p-4 overflow-hidden sci-border">
           <div className="flex items-center justify-between mb-3">
             <div className="section-label">ARCHITECTURE VISUALIZATION · 架构可视化</div>
-            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>140 nodes · 实时渲染</span>
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{webglAvailable ? '140 nodes · 实时渲染' : 'static mode · WebGL 降级'}</span>
           </div>
-          <div className="w-full h-[280px] rounded overflow-hidden" style={{ background: 'rgba(0,0,0,0.3)' }}>
-            <Canvas camera={{ position: [0, 0, 30], fov: 50 }} gl={{ antialias: true, alpha: true }}>
-              <Scene />
-            </Canvas>
+          <div className="w-full h-[280px] rounded overflow-hidden relative" style={{ background: 'rgba(0,0,0,0.3)' }}>
+            {webglAvailable ? (
+              <Canvas
+                camera={{ position: [0, 0, 30], fov: 50 }}
+                gl={{ antialias: true, alpha: true }}
+                onCreated={({ gl }) => {
+                  gl.domElement.addEventListener('webglcontextlost', () => setWebglAvailable(false), { once: true });
+                }}
+                onError={() => setWebglAvailable(false)}>
+                <Scene />
+              </Canvas>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                <div className="absolute inset-0 opacity-30" style={{
+                  backgroundImage: 'radial-gradient(circle at 30% 35%, rgba(201,168,76,0.22), transparent 18%), radial-gradient(circle at 62% 48%, rgba(194,58,48,0.18), transparent 20%), radial-gradient(circle at 76% 28%, rgba(86,190,216,0.12), transparent 16%), linear-gradient(135deg, rgba(201,168,76,0.08) 0 1px, transparent 1px 24px)',
+                }} />
+                <div className="relative z-10 text-center font-mono">
+                  <div className="text-sm font-bold tracking-widest" style={{ color: 'var(--accent-gold)' }}>TIANGONG AGENT MESH</div>
+                  <div className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>WebGL unavailable · static architecture view</div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
             {[

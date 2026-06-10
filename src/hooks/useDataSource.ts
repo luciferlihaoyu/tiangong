@@ -93,7 +93,7 @@ export function useDataSource() {
         role: data.role,
         capabilities: data.capabilities,
       });
-      agentQuery.refetch();
+      await agentQuery.refetch();
       return;
     }
     const id = ++nextId;
@@ -106,11 +106,11 @@ export function useDataSource() {
       role: data.role || null, capabilities: data.capabilities || null,
     };
     setLocalAgents(prev => [...prev, newAgent]);
-  };
+  }, [hasBackend, agentQuery]);
   const updateAgent = useCallback(async (id: number, data: Partial<MockAgent>) => {
     if (hasBackend) {
       await trpcFetch("agent.update", { id, ...data });
-      agentQuery.refetch();
+      await agentQuery.refetch();
       return;
     }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, ...data } : a));
@@ -118,21 +118,21 @@ export function useDataSource() {
   const deleteAgent = useCallback(async (id: number) => {
     if (hasBackend) {
       await trpcFetch("agent.delete", { id });
-      agentQuery.refetch();
-      taskQuery.refetch();
+      await agentQuery.refetch();
+      await taskQuery.refetch();
       return;
     }
     setLocalAgents(prev => prev.filter(a => a.id !== id));
     setLocalTasks(prev => prev.filter(t => t.agentId !== id));
-  };
+  }, [hasBackend, agentQuery, taskQuery]);
   const updateAgentStatus = useCallback(async (id: number, status: string) => {
     if (hasBackend) {
       await trpcFetch("agent.update", { id, status });
-      agentQuery.refetch();
+      await agentQuery.refetch();
       return;
     }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-  };
+  }, [hasBackend, agentQuery]);
 
   // ── Task mutations ──
   const addTask = useCallback(async (data: Record<string, string>) => {
@@ -144,7 +144,7 @@ export function useDataSource() {
         description: data.description,
         priority: Number(data.priority) || 0,
       });
-      taskQuery.refetch();
+      await taskQuery.refetch();
       return;
     }
     const id = ++nextId;
@@ -155,23 +155,23 @@ export function useDataSource() {
       priority: Number(data.priority) || 0,
     };
     setLocalTasks(prev => [newTask, ...prev]);
-  };
+  }, [hasBackend, taskQuery]);
   const deleteTask = useCallback(async (id: number) => {
     if (hasBackend) {
       await trpcFetch("task.delete", { id });
-      taskQuery.refetch();
+      await taskQuery.refetch();
       return;
     }
     setLocalTasks(prev => prev.filter(t => t.id !== id));
-  };
+  }, [hasBackend, taskQuery]);
   const updateTaskProgress = useCallback(async (id: number, progress: number, status: string) => {
     if (hasBackend) {
       await trpcFetch("orch.updateStatus", { id, status, progress });
-      taskQuery.refetch();
+      await taskQuery.refetch();
       return;
     }
     setLocalTasks(prev => prev.map(t => t.id === id ? { ...t, progress, status } : t));
-  };
+  }, [hasBackend, taskQuery]);
 
   // ── System mutations ──
   const updateSystemStatus = (id: number, status: string) => {

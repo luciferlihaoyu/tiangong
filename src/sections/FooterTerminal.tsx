@@ -25,9 +25,16 @@ export default function FooterTerminal() {
     camera.position.z = 5;
     camera.rotation.x = -Math.PI / 2.5;
 
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    } catch (error) {
+      console.warn('FooterTerminal WebGL unavailable, falling back to static footer.', error);
+      canvas.style.display = 'none';
+      return;
+    }
 
     const gridHelper = new THREE.GridHelper(80, 40, 0xc9a84c, 0x0a0a12);
     gridHelper.position.y = -2;

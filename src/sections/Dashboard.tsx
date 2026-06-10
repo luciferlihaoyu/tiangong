@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useDataSource, type MockAgent, type MockOrg } from "@/hooks/useDataSource";
 import { useAuth } from "@/hooks/useAuth";
+import { useWebSocket, type WSMessage } from "@/hooks/useWebSocket";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -163,12 +164,13 @@ function OrgTab() {
 function OrgTreePanel() {
   const data = useDataSource();
   const orgs = data.orgs;
+  const agents = data.agents as MockAgent[];
 
   // We build org hierarchy from agents' orgId and reportsTo
   const hierarchy = useMemo(() => {
-    const roots = (data.agents as MockAgent[]).filter(a => !a.reportsTo);
+    const roots = agents.filter(a => !a.reportsTo);
     const children = new Map<number, MockAgent[]>();
-    for (const a of (data.agents as MockAgent[])) {
+    for (const a of agents) {
       if (a.reportsTo) {
         const list = children.get(a.reportsTo) || [];
         list.push(a);
@@ -176,7 +178,7 @@ function OrgTreePanel() {
       }
     }
     return { roots, children };
-  }, [data.agents]);
+  }, [agents]);
 
   const renderNode = (agent: MockAgent, depth: number = 0) => {
     const kids = hierarchy.children.get(agent.id) || [];
@@ -533,6 +535,341 @@ function OrgForm({ onSubmit, onCancel }: { onSubmit: (v: Record<string, string>)
 }
 
 /* ═══════════════════════════════════════════
+   消息面板组件
+   ═══════════════════════════════════════════ */
+
+interface DisplayMessage {
+  id: number;
+  fromAgent: number;
+  toAgent: number;
+  content: string;
+  type: string;
+  status: string;
+  createdAt: string;
+  readAt?: string | null;
+}
+
+function MessagePanel({
+  agents,
+  lastWsMessage,
+  wsConnected,
+}: {
+  agents: MockAgent[];
+  lastWsMessage: WSMessage | null;
+  wsConnected: boolean;
+}) {
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [sendContent, setSendContent] = useState("");
+  const [conversationMsgs, setConversationMsgs] = useState<DisplayMessage[]>([]);
+  const [loadingConv, setLoadingConv] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const agentMap = useMemo(() => {
+    const m = new Map<number, MockAgent>();
+    for (const a of agents) m.set(a.id, a);
+    return m;
+  }, [agents]);
+
+  // Fetch recent messages on mount
+  useEffect(() => {
+    fetch("/api/trpc/message.list")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setMessages(data.slice(0, 50).reverse());
+        } else if (Array.isArray(data?.result?.data)) {
+          setMessages(data.result.data.slice(0, 50).reverse());
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Listen for new messages from WebSocket
+  useEffect(() => {
+    if (!lastWsMessage) return;
+    if (lastWsMessage.type === "new_message" && lastWsMessage.message) {
+      const msg = lastWsMessage.message as DisplayMessage;
+      setMessages((prev) => {
+        // Avoid duplicates
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg].slice(-100);
+      });
+    }
+    if (lastWsMessage.type === "message_read" && lastWsMessage.messageId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === lastWsMessage.messageId ? { ...m, status: "read", readAt: new Date().toISOString() } : m
+        )
+      );
+    }
+  }, [lastWsMessage]);
+
+  // Fetch conversation when selecting an agent
+  useEffect(() => {
+    if (selectedAgentId === null) {
+      setConversationMsgs([]);
+      return;
+    }
+    setLoadingConv(true);
+    // Use the first agent as "me" (just pick the first agent in the list)
+    const myId = agents[0]?.id;
+    if (!myId) {
+      setLoadingConv(false);
+      return;
+    }
+    fetch(
+      `/api/trpc/message.conversation?input=${encodeURIComponent(JSON.stringify({ from: myId, to: selectedAgentId }))}`
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        const msgs = Array.isArray(data) ? data : data?.result?.data || [];
+        setConversationMsgs(msgs);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingConv(false));
+  }, [selectedAgentId, agents]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversationMsgs]);
+
+  const handleSend = useCallback(async () => {
+    if (!sendContent.trim() || selectedAgentId === null) return;
+    const myId = agents[0]?.id;
+    if (!myId) return;
+
+    try {
+      const res = await fetch("/api/trpc/message.send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromAgent: myId,
+          toAgent: selectedAgentId,
+          content: sendContent.trim(),
+          type: "command",
+        }),
+      });
+      const data = await res.json();
+      if (data?.result?.data?.success || data?.success) {
+        // Add optimistic message
+        const newMsg: DisplayMessage = {
+          id: Date.now(),
+          fromAgent: myId,
+          toAgent: selectedAgentId,
+          content: sendContent.trim(),
+          type: "command",
+          status: "sent",
+          createdAt: new Date().toISOString(),
+        };
+        setConversationMsgs((prev) => [...prev, newMsg]);
+        setSendContent("");
+      }
+    } catch (err) {
+      console.warn("Failed to send message:", err);
+    }
+  }, [sendContent, selectedAgentId, agents]);
+
+  const statusLabel = (s: string) => {
+    switch (s) {
+      case "sent":
+        return "已发送";
+      case "delivered":
+        return "已送达";
+      case "read":
+        return "已读";
+      default:
+        return s;
+    }
+  };
+
+  const statusColor = (s: string) => {
+    switch (s) {
+      case "sent":
+        return "var(--text-muted)";
+      case "delivered":
+        return "var(--accent-cyan)";
+      case "read":
+        return "var(--success)";
+      default:
+        return "var(--text-muted)";
+    }
+  };
+
+  return (
+    <div className="glass-panel p-4 sci-border flex flex-col" style={{ minHeight: "400px" }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="section-label">消息面板 · MESSAGES</div>
+        <div className="flex items-center gap-2">
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ background: wsConnected ? "var(--success)" : "var(--accent-red)" }}
+          />
+          <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+            {wsConnected ? "WS 已连接" : "WS 离线"}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex gap-3 flex-1 min-h-0">
+        {/* Agent list sidebar */}
+        <div className="w-40 flex-shrink-0 border-r overflow-y-auto custom-scrollbar" style={{ borderColor: "var(--border-default)" }}>
+          <div className="text-[10px] font-mono mb-2 px-1" style={{ color: "var(--text-muted)" }}>
+            选择 Agent
+          </div>
+          {agents.map((agent) => (
+            <button
+              key={agent.id}
+              onClick={() => setSelectedAgentId(agent.id)}
+              className="w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-1.5"
+              style={{
+                background:
+                  selectedAgentId === agent.id ? "var(--accent-glow-red)" : "transparent",
+                color:
+                  selectedAgentId === agent.id
+                    ? "var(--accent-red-bright)"
+                    : "var(--text-secondary)",
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background:
+                    agent.status === "online" || agent.status === "busy"
+                      ? "var(--success)"
+                      : "var(--text-muted)",
+                }}
+              />
+              <span className="truncate">{agent.name}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Conversation / message area */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {selectedAgentId === null ? (
+            <div
+              className="flex-1 flex items-center justify-center text-xs font-mono"
+              style={{ color: "var(--text-muted)" }}
+            >
+              👈 选择一个 Agent 查看对话
+            </div>
+          ) : (
+            <>
+              {/* Conversation header */}
+              <div
+                className="flex items-center gap-2 pb-2 mb-2"
+                style={{ borderBottom: "1px solid var(--border-default)" }}
+              >
+                <span className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                  {agentMap.get(selectedAgentId)?.name || `Agent #${selectedAgentId}`}
+                </span>
+                <span
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+                  style={{ background: "var(--accent-glow-gold)", color: "var(--accent-gold)" }}
+                >
+                  {agentMap.get(selectedAgentId)?.agentId || ""}
+                </span>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar mb-2 space-y-2" style={{ maxHeight: "300px" }}>
+                {loadingConv ? (
+                  <div className="text-center text-xs font-mono py-4" style={{ color: "var(--text-muted)" }}>
+                    加载中...
+                  </div>
+                ) : conversationMsgs.length === 0 ? (
+                  <div className="text-center text-xs font-mono py-4" style={{ color: "var(--text-muted)" }}>
+                    暂无消息
+                  </div>
+                ) : (
+                  conversationMsgs.map((msg) => {
+                    const isMe = msg.fromAgent === agents[0]?.id;
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className="max-w-[80%] px-3 py-2 rounded-lg text-xs"
+                          style={{
+                            background: isMe
+                              ? "var(--accent-glow-red)"
+                              : "rgba(255,255,255,0.05)",
+                            border: isMe
+                              ? "1px solid rgba(194,58,48,0.2)"
+                              : "1px solid var(--border-default)",
+                          }}
+                        >
+                          <div style={{ color: "var(--text-primary)", wordBreak: "break-word" }}>
+                            {msg.content}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                              {new Date(msg.createdAt).toLocaleTimeString()}
+                            </span>
+                            {isMe && (
+                              <span
+                                className="text-[9px] font-mono"
+                                style={{ color: statusColor(msg.status) }}
+                              >
+                                {statusLabel(msg.status)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Send input */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={sendContent}
+                  onChange={(e) => setSendContent(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="输入消息..."
+                  className="flex-1 px-3 py-2 rounded text-xs"
+                  style={{
+                    background: "rgba(0,0,0,0.2)",
+                    border: "1px solid var(--border-default)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!sendContent.trim()}
+                  className="px-4 py-2 rounded text-xs font-bold transition-all"
+                  style={{
+                    background: sendContent.trim()
+                      ? "var(--accent-red)"
+                      : "rgba(255,255,255,0.05)",
+                    color: sendContent.trim() ? "#fff" : "var(--text-muted)",
+                    opacity: sendContent.trim() ? 1 : 0.5,
+                  }}
+                >
+                  发送
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
    主 DASHBOARD — v2 多 Tab
    ═══════════════════════════════════════════ */
 
@@ -542,9 +879,35 @@ export default function Dashboard() {
   const data = useDataSource();
   const auth = useAuth();
   const navigate = useNavigate();
+  const { connected: wsConnected, lastMessage: lastWsMessage } = useWebSocket();
 
   const [mainTab, setMainTab] = useState<MainTab>('dashboard');
   const [filterTab, setFilterTab] = useState('all');
+
+  // Track agent online status from WebSocket events
+  const [wsAgentStatuses, setWsAgentStatuses] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    if (!lastWsMessage) return;
+    if (lastWsMessage.type === "agent_status" && lastWsMessage.agentId && lastWsMessage.status) {
+      setWsAgentStatuses((prev) => {
+        const next = new Map(prev);
+        next.set(lastWsMessage.agentId, lastWsMessage.status);
+        return next;
+      });
+    }
+  }, [lastWsMessage]);
+
+  // Merge WebSocket status with agent data
+  const agentsWithWS = useMemo(() => {
+    return (data.agents as MockAgent[]).map((a) => {
+      const wsStatus = wsAgentStatuses.get(a.id);
+      if (wsStatus) {
+        return { ...a, status: wsStatus };
+      }
+      return a;
+    });
+  }, [data.agents, wsAgentStatuses]);
 
   // Dialogs
   const [showAgentForm, setShowAgentForm] = useState(false);
@@ -562,8 +925,8 @@ export default function Dashboard() {
   })();
 
   const filteredAgents = filterTab === 'running'
-    ? (data.agents as MockAgent[]).filter(a => a.status === 'online' || a.status === 'busy')
-    : (data.agents as MockAgent[]);
+    ? agentsWithWS.filter(a => a.status === 'online' || a.status === 'busy')
+    : agentsWithWS;
 
   const mainTabs: { key: MainTab; label: string; icon: string }[] = [
     { key: 'dashboard', label: '仪表盘', icon: '📊' },
@@ -631,7 +994,7 @@ export default function Dashboard() {
         {/* ── 仪表盘 Tab ── */}
         {mainTab === 'dashboard' && (
           <>
-            <div className="mb-4"><StatsRow agents={data.agents as MockAgent[]} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} /></div>
+            <div className="mb-4"><StatsRow agents={agentsWithWS} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} /></div>
             {/* Filter + Actions */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-1">
@@ -686,6 +1049,11 @@ export default function Dashboard() {
                 <ConnectionPanel systems={data.systems} onStatusChange={data.updateSystemStatus} />
               </div>
             </div>
+            {/* Message Panel */}
+            <div className="mb-6">
+              <MessagePanel agents={agentsWithWS} lastWsMessage={lastWsMessage} wsConnected={wsConnected} />
+            </div>
+
             {/* Task list */}
             <div className="glass-panel p-4 sci-border">
               <div className="section-label mb-3">任务列表 · TASKS ({filteredTasks.length})</div>

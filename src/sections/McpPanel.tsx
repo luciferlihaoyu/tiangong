@@ -874,6 +874,8 @@ export default function McpPanel() {
         ? `✅ 心跳成功！已自动认领任务: ${data.claimedTask.name}`
         : "✅ 心跳成功！当前无待认领任务"
       );
+      // 刷新页面以更新 Agent 列表中的心跳时间和连接状态
+      setTimeout(() => window.location.reload(), 1500);
     } catch (e: any) {
       setHeartbeatResult(`❌ 失败: ${e.message}`);
     } finally {

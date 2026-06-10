@@ -78,6 +78,8 @@ const CREATE_TABLES_SQL = [
     to_agent BIGINT UNSIGNED NOT NULL,
     content TEXT NOT NULL,
     type ENUM('command','response','broadcast','system') DEFAULT 'command' NOT NULL,
+    status ENUM('sent','delivered','read') DEFAULT 'sent' NOT NULL,
+    read_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 

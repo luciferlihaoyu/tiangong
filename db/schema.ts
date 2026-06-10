@@ -91,6 +91,8 @@ export const messages = mysqlTable("messages", {
   toAgent: bigint("to_agent", { mode: "number", unsigned: true }).notNull(),
   content: text("content").notNull(),
   type: mysqlEnum("type", ["command", "response", "broadcast", "system"]).default("command").notNull(),
+  status: mysqlEnum("status", ["sent", "delivered", "read"]).default("sent").notNull(),
+  readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

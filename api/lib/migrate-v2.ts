@@ -32,6 +32,10 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "max_retries", def: "INT DEFAULT 3" },
   { table: "tasks", col: "timeout_ms", def: "INT DEFAULT 300000" },
   { table: "tasks", col: "parent_task_id", def: "BIGINT" },
+
+  // messages 表新增字段 (WebSocket 实时通信)
+  { table: "messages", col: "status", def: "ENUM('sent','delivered','read') DEFAULT 'sent' NOT NULL" },
+  { table: "messages", col: "read_at", def: "TIMESTAMP NULL" },
 ];
 
 export async function migrateV2(force = false): Promise<string[]> {

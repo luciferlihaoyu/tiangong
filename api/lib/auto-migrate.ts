@@ -80,6 +80,7 @@ const CREATE_TABLES_SQL = [
     type ENUM('command','response','broadcast','system') DEFAULT 'command' NOT NULL,
     status ENUM('sent','delivered','read') DEFAULT 'sent' NOT NULL,
     read_at TIMESTAMP NULL,
+    conversation_id BIGINT UNSIGNED NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -134,6 +135,19 @@ const CREATE_TABLES_SQL = [
     error TEXT,
     duration_ms INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS conversations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    type ENUM('mission','meeting','test','ad_hoc') DEFAULT 'ad_hoc' NOT NULL,
+    status ENUM('active','archived') DEFAULT 'active' NOT NULL,
+    participants TEXT,
+    summary TEXT,
+    created_by BIGINT UNSIGNED,
+    archived_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 

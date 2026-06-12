@@ -93,6 +93,7 @@ export const messages = mysqlTable("messages", {
   type: mysqlEnum("type", ["command", "response", "broadcast", "system"]).default("command").notNull(),
   status: mysqlEnum("status", ["sent", "delivered", "read"]).default("sent").notNull(),
   readAt: timestamp("read_at"),
+  conversationId: bigint("conversation_id", { mode: "number", unsigned: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -181,3 +182,20 @@ export const mcpAuditLog = mysqlTable("mcp_audit_log", {
 
 export type McpAuditLogEntry = typeof mcpAuditLog.$inferSelect;
 export type InsertMcpAuditLogEntry = typeof mcpAuditLog.$inferInsert;
+
+// ─── Conversations (任务记事板) ───
+export const conversations = mysqlTable("conversations", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  type: mysqlEnum("type", ["mission", "meeting", "test", "ad_hoc"]).default("ad_hoc").notNull(),
+  status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
+  participants: text("participants"),
+  summary: text("summary"),
+  createdBy: bigint("created_by", { mode: "number", unsigned: true }),
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Conversation = typeof conversations.$inferSelect;
+export type InsertConversation = typeof conversations.$inferInsert;

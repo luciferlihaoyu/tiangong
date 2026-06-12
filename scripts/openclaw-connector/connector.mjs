@@ -516,18 +516,111 @@ async function processTask(cfg, task) {
  * @param {string} content
  * @param {string} type - message type
  */
-async function sendMessage(cfg, toAgentId, content, type = "response") {
-  const r = await trpcCall(cfg, "message.send", {
+async function sendMessage(cfg, toAgentId, content, type = "response", conversationId = undefined) {
+  const msgData = {
     fromAgent: cfg.agentId,
     toAgent: toAgentId,
     content: content,
     type: type,
-  });
+  };
+  if (conversationId !== undefined) msgData.conversationId = conversationId;
+  const r = await trpcCall(cfg, "message.send", msgData);
   if (!r.ok) {
     L.warn(`发送消息到 Agent#${toAgentId} 失败: ${r.error}`);
   } else {
     L.info(`📤 ACK → Agent#${toAgentId}: ${content.slice(0, 80)}`);
   }
+}
+
+/**
+ * P3 Session Runner: handle a command message by spawning a real OpenClaw session.
+ * Uses execFile (openclaw-agent-runner.mjs) to get an AI-generated reply.
+ * Sends the reply back to the sender via tRPC message.send.
+ *
+ * @param {Config} cfg
+ * @param {{ fromAgent: number, toAgent: number, content: string, id: number, type: string }} msg
+ */
+async function handleCommand(cfg, msg) {
+  const prompt = buildMessagePrompt(cfg, msg);
+
+  L.info(`🧠 启动 OpenClaw 会话处理 command: ${(msg.content || "").slice(0, 100)}`);
+
+  const childEnv = { ...process.env };
+  delete childEnv.TIANGONG_MCP_KEY;
+  delete childEnv.TIANGONG_TOKEN;
+
+  const result = await new Promise((resolve) => {
+    const child = spawn(cfg.execFile, cfg.execArgs, {
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: childEnv,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5000);
+    }, cfg.execTimeoutMs);
+
+    child.stdin.write(prompt);
+    child.stdin.end();
+
+    const MAX_BYTES = 1_048_576;
+    child.stdout.on("data", (chunk) => { const s = chunk.toString(); if (stdout.length < MAX_BYTES) stdout += s; });
+    child.stderr.on("data", (chunk) => { const s = chunk.toString(); if (stderr.length < MAX_BYTES) stderr += s; });
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolve({ text: `[${cfg.agentName}] 处理超时` });
+      } else if (code !== 0) {
+        L.warn(`OpenClaw 退出码 ${code}: ${stderr.slice(0, 200)}`);
+        resolve({ text: `[${cfg.agentName}] 处理出错` });
+      } else {
+        resolve({ text: stdout.trim() });
+      }
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      L.warn(`OpenClaw spawn error: ${err.message}`);
+      resolve({ text: `[${cfg.agentName}] 执行错误: ${err.message}` });
+    });
+  });
+
+  const responseText = result.text || "[无输出]";
+  L.info(`✅ OpenClaw 回复 (${responseText.length} chars): ${responseText.slice(0, 120)}`);
+
+  await sendMessage(cfg, Number(msg.fromAgent), responseText, "response");
+}
+
+/**
+ * Build a prompt for the OpenClaw session from an incoming command message.
+ *
+ * @param {Config} cfg
+ * @param {{ fromAgent: number, toAgent: number, content: string, id: number }} msg
+ * @returns {string}
+ */
+function buildMessagePrompt(cfg, msg) {
+  return [
+    `=== Tiangong Task ===`,
+    `Task ID: MSG-${msg.id}`,
+    `Name: 回复消息`,
+    ``,
+    `你收到了来自 Agent#${msg.fromAgent} 的一条消息。`,
+    `你是 ${cfg.agentName} (Agent#${cfg.agentId})。`,
+    ``,
+    `--- 消息内容 ---`,
+    msg.content || "(空)",
+    `--- 消息结束 ---`,
+    ``,
+    `请以你的身份自然回复这条消息。`,
+    `不要输出 "ACK" 或 "收到指令"——这是给 AI 模型思考后回复的。`,
+    `用中文回复。如果你不知道怎么回复，可以说"收到，正在处理"。`,
+  ].join("\n");
 }
 
 /**
@@ -571,6 +664,13 @@ async function handleWSMessage(cfg, data) {
       if (msg.type === "command" && msg.fromAgent && msg.fromAgent !== cfg.agentId) {
         const ackContent = `ACK: 收到指令 "${(msg.content || "").slice(0, 60)}"`;
         await sendMessage(cfg, msg.fromAgent, ackContent, "response");
+
+        // P3: command mode spawns real OpenClaw session to reply
+        if (cfg.execMode === "command") {
+          handleCommand(cfg, msg).catch((err) => {
+            L.warn(`处理 command 失败: ${err.message}`);
+          });
+        }
       }
       break;
     }

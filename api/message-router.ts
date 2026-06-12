@@ -41,19 +41,24 @@ export const messageRouter = createRouter({
         toAgent: z.number(),
         content: z.string().min(1).max(5000),
         type: z.enum(["command", "response", "broadcast", "system"]).default("command"),
+        conversationId: z.number().optional(),
       })
     )
     .mutation(async ({ input }) => {
       const db = getDb();
 
       // 写入消息
-      const result = await db.insert(messages).values({
+      const values: Record<string, unknown> = {
         fromAgent: input.fromAgent,
         toAgent: input.toAgent,
         content: input.content,
         type: input.type,
         status: "sent",
-      });
+      };
+      if (input.conversationId !== undefined) {
+        values.conversationId = input.conversationId;
+      }
+      const result = await db.insert(messages).values(values as any);
 
       const insertId = (result as any).insertId;
 

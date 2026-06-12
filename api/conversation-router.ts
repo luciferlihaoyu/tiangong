@@ -34,13 +34,13 @@ export const conversationRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(conversations).values({
+      await db.insert(conversations).values({
         title: input.title, type: input.type, status: "active",
         participants: input.participants ? JSON.stringify(input.participants) : null,
         summary: input.summary ?? null, createdBy: input.createdBy ?? null,
       });
-      const insertId = (result as any).insertId || (Array.isArray(result) ? (result as any)[0]?.insertId : 0);
-      return { id: insertId ? Number(insertId) : null };
+      const latest = await db.select({ id: conversations.id }).from(conversations).orderBy(desc(conversations.id)).limit(1);
+      return { id: latest[0]?.id ?? null };
     }),
   update: publicQuery
     .input(z.object({ id: z.number(), title: z.string().optional(), summary: z.string().optional(), participants: z.array(z.number()).optional() }))

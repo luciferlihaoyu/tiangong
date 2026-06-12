@@ -39,7 +39,8 @@ export const conversationRouter = createRouter({
         participants: input.participants ? JSON.stringify(input.participants) : null,
         summary: input.summary ?? null, createdBy: input.createdBy ?? null,
       });
-      return { id: Number((result as any).insertId) };
+      const insertId = (result as any).insertId || (Array.isArray(result) ? (result as any)[0]?.insertId : 0);
+      return { id: insertId ? Number(insertId) : null };
     }),
   update: publicQuery
     .input(z.object({ id: z.number(), title: z.string().optional(), summary: z.string().optional(), participants: z.array(z.number()).optional() }))

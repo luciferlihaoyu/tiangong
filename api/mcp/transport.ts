@@ -59,10 +59,15 @@ export function createMcpApp(): Hono {
 
   // ─── Health check ───
   app.get("/health", (c) => {
+    const build =
+      process.env.GIT_COMMIT ||
+      process.env.ZEABUR_GIT_COMMIT ||
+      process.env.SOURCE_VERSION ||
+      "unknown";
     return c.json({
       ok: true,
       version: "2.0.1",
-      build: "4ca0e5f",
+      build,
       name: "Tiangong MCP Server",
       protocol: "mcp/2025-03-26",
       capabilities: {

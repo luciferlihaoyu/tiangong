@@ -23,6 +23,8 @@ import {
   Play,
   Pause,
   Zap,
+  Bot,
+  Activity,
 } from "lucide-react";
 
 // ═══════════════════════ Types ═══════════════════════
@@ -570,6 +572,33 @@ function TaskDetailDrawer({
             </div>
           )}
 
+          {/* P5: Runner execution info */}
+          {(task.status === "done" || task.status === "failed" || task.status === "running") && (
+            <div className="mb-4">
+              <div className="section-label mb-2">
+                <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <Bot size={11} /> RUNNER · AUTO EXECUTION
+                </span>
+              </div>
+              <div
+                className="glass-panel p-3 sci-border text-xs font-mono"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{
+                    background: task.status === "running" ? "var(--warning)" :
+                               task.status === "done" ? "var(--success)" : "var(--accent-red)"
+                  }} />
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {task.status === "running" ? "Runner picked up this task and is executing it" :
+                     task.status === "done" ? "Runner completed this task automatically" :
+                     "Runner attempted this task but it failed"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Write to board — 写入任务记事板 */}
           {task.output && task.status === "done" && (
             <div className="mb-4">
@@ -935,6 +964,28 @@ export default function TaskCenter() {
   const [filterAgentId, setFilterAgentId] = useState<number | undefined>();
   const [keyword, setKeyword] = useState("");
 
+  // P5: Runner status poll
+  const [runnerStatus, setRunnerStatus] = useState<{
+    enabled: boolean;
+    mode: string;
+    intervalMs: number;
+    running: boolean;
+    commandConfigured: boolean;
+    consecutiveErrors: number;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const poll = () => {
+      fetch("/api/runner/status")
+        .then((r) => r.json())
+        .then((d) => { if (active && d.runner) setRunnerStatus(d.runner); })
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
 
@@ -996,6 +1047,44 @@ export default function TaskCenter() {
           <p className="text-xs mt-1 font-mono" style={{ color: "var(--text-muted)" }}>
             TASK CENTER · CREATE / ASSIGN / TRACK
           </p>
+          {/* P5: Runner status badge */}
+          {runnerStatus && (
+            <div className="flex items-center gap-2 mt-2">
+              <span className="flex items-center gap-1.5" style={{
+                background: runnerStatus.running ? "rgba(76,175,125,0.08)" : "rgba(180,200,255,0.03)",
+                border: `1px solid ${runnerStatus.running ? "rgba(76,175,125,0.2)" : "var(--border-default)"}`,
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontSize: "10px",
+                fontFamily: "monospace",
+              }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{
+                  background: runnerStatus.running ? "var(--success)" : "var(--text-muted)",
+                }} />
+                <Activity size={10} style={{ color: runnerStatus.running ? "var(--success)" : "var(--text-muted)" }} />
+                <span style={{
+                  color: runnerStatus.running ? "var(--success)" : "var(--text-muted)",
+                }}>
+                  Runner {runnerStatus.running ? "ACTIVE" : "STOPPED"}
+                </span>
+              </span>
+              <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                {runnerStatus.mode} · {runnerStatus.intervalMs}ms
+              </span>
+              {runnerStatus.consecutiveErrors > 0 && (
+                <span style={{
+                  background: "var(--accent-glow-red)",
+                  color: "var(--accent-red)",
+                  padding: "1px 6px",
+                  borderRadius: "3px",
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                }}>
+                  ERR:{runnerStatus.consecutiveErrors}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button

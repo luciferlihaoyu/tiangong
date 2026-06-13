@@ -14,6 +14,7 @@ import { serveStaticFiles } from "./lib/vite";
 import { wsManager } from "./ws-manager";
 import { verifyMcpKey } from "./mcp/auth";
 import { getDb } from "./queries/connection";
+import { taskRunner } from "./lib/task-runner";
 import { agents, messages } from "@db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
@@ -33,6 +34,24 @@ app.use("/api/trpc/*", async (c) => {
     req: c.req.raw,
     router: appRouter,
     createContext: ({ req }) => createContext({ req }),
+  });
+});
+
+// Runner 状态诊断端点（不泄露 secrets/command 内容）
+app.get("/api/runner/status", (c) => {
+  const s = taskRunner.status;
+  return c.json({
+    ok: true,
+    runner: {
+      enabled: s.enabled,
+      mode: s.mode,
+      intervalMs: s.intervalMs,
+      batchSize: s.batchSize,
+      running: s.running,
+      commandConfigured: s.commandConfigured,
+      consecutiveErrors: s.consecutiveErrors,
+    },
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -294,6 +313,14 @@ if (env.isProduction) {
     await migrateV2();
   } catch (e: any) {
     console.warn("V2 migration failed:", e.message);
+  }
+
+  // P5: Start Task Runner
+  try {
+    taskRunner.start();
+    console.log("[Boot] Task Runner started");
+  } catch (e: any) {
+    console.warn("[Boot] Task Runner start failed:", e.message);
   }
 
   const port = parseInt(process.env.PORT || "3000");

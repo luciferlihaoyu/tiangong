@@ -1,15 +1,17 @@
 /**
- * 天宫 P5：服务端 Task Runner
+ * 天宫 P6：服务端 Task Runner（安全 argv 执行 + OpenClaw runner 集成）
  *
  * 周期性扫描 queued 任务 → 领取 → 执行（mock / command）→ 回写结果 → 广播 task_update。
  *
  * 配置（环境变量，默认安全）：
- *   TIANGONG_TASK_RUNNER_ENABLED      默认 true
- *   TIANGONG_TASK_RUNNER_MODE         mock | command，默认 mock
- *   TIANGONG_TASK_RUNNER_INTERVAL_MS  默认 5000
- *   TIANGONG_TASK_RUNNER_BATCH_SIZE   默认 1，最大 5
- *   TIANGONG_TASK_RUNNER_COMMAND      command 模式的可信命令
- *   TIANGONG_TASK_RUNNER_TIMEOUT_MS   默认 300000
+ *   TIANGONG_TASK_RUNNER_ENABLED          默认 true
+ *   TIANGONG_TASK_RUNNER_MODE             mock | command，默认 mock
+ *   TIANGONG_TASK_RUNNER_INTERVAL_MS      默认 5000
+ *   TIANGONG_TASK_RUNNER_BATCH_SIZE       默认 1，最大 5
+ *   TIANGONG_TASK_RUNNER_EXEC_FILE        command 模式执行文件（推荐 argv 模式）
+ *   TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON   command 模式执行参数 JSON 数组
+ *   TIANGONG_TASK_RUNNER_COMMAND          legacy command 字符串（fallback）
+ *   TIANGONG_TASK_RUNNER_TIMEOUT_MS       默认 300000
  *   TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS 默认 12000
  */
 
@@ -17,7 +19,7 @@ import { getDb } from "../queries/connection";
 import { tasks, agents } from "@db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 
 // ─── Config ───
 
@@ -36,15 +38,56 @@ function envInt(name: string, def: number, min = 1, max = Number.MAX_SAFE_INTEGE
   return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : def;
 }
 
+function envJsonArray(name: string): { value: string[] | null; configured: boolean; valid: boolean } {
+  const raw = process.env[name];
+  if (!raw) return { value: null, configured: false, valid: false };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+      return { value: parsed as string[], configured: true, valid: true };
+    }
+    return { value: null, configured: true, valid: false };
+  } catch {
+    return { value: null, configured: true, valid: false };
+  }
+}
+
+const execArgsConfig = envJsonArray("TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON");
+
 const CONFIG = {
   enabled: envBool("TIANGONG_TASK_RUNNER_ENABLED", true),
   mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command",
   intervalMs: envInt("TIANGONG_TASK_RUNNER_INTERVAL_MS", 5000, 500),
   batchSize: envInt("TIANGONG_TASK_RUNNER_BATCH_SIZE", 1, 1, 5),
+  // P6: argv-mode (recommended)
+  execFile: envStr("TIANGONG_TASK_RUNNER_EXEC_FILE", ""),
+  execArgs: execArgsConfig.value,
+  execArgsConfigured: execArgsConfig.configured,
+  execArgsValid: execArgsConfig.valid,
+  // P5 legacy fallback
   command: envStr("TIANGONG_TASK_RUNNER_COMMAND", ""),
   timeoutMs: envInt("TIANGONG_TASK_RUNNER_TIMEOUT_MS", 300000, 1000),
   resultMaxChars: envInt("TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS", 12000, 100),
 };
+
+// ─── Helpers ───
+
+function hasValidArgvCommand(): boolean {
+  return CONFIG.execFile.length > 0 && CONFIG.execArgs !== null && CONFIG.execArgsValid;
+}
+
+/** Compute execMode from resolved config */
+function computeExecMode(): "argv" | "legacy" | "none" {
+  if (CONFIG.mode !== "command") return "none";
+  if (hasValidArgvCommand()) return "argv";
+  if (CONFIG.command) return "legacy";
+  return "none";
+}
+
+/** Whether any command config is present (for status reporting) */
+function isCommandConfigured(): boolean {
+  return hasValidArgvCommand() || CONFIG.command.length > 0;
+}
 
 // ─── TaskRunner ───
 
@@ -54,13 +97,22 @@ class TaskRunner {
   private consecutiveErrors = 0;
 
   get status() {
+    const execMode = computeExecMode();
     return {
       enabled: CONFIG.enabled,
       mode: CONFIG.mode,
       intervalMs: CONFIG.intervalMs,
       batchSize: CONFIG.batchSize,
       running: this.timer !== null,
-      commandConfigured: CONFIG.command.length > 0,
+      // P5: legacy field — kept for backwards compat
+      commandConfigured: isCommandConfigured(),
+      // P6: new fields
+      execMode,
+      execFileConfigured: CONFIG.execFile.length > 0,
+      execArgsConfigured: CONFIG.execArgsConfigured,
+      execArgsValid: CONFIG.execArgsValid,
+      execArgsCount: CONFIG.execArgs?.length ?? 0,
+      legacyCommandConfigured: CONFIG.command.length > 0,
       consecutiveErrors: this.consecutiveErrors,
     };
   }
@@ -74,7 +126,7 @@ class TaskRunner {
     if (this.timer) return;
 
     console.log(
-      `[TaskRunner] Starting (mode=${CONFIG.mode}, interval=${CONFIG.intervalMs}ms, batch=${CONFIG.batchSize})`
+      `[TaskRunner] Starting (mode=${CONFIG.mode}, execMode=${computeExecMode()}, interval=${CONFIG.intervalMs}ms, batch=${CONFIG.batchSize})`
     );
     this.timer = setInterval(() => this.tick(), CONFIG.intervalMs);
     // 立即执行一次
@@ -121,11 +173,6 @@ class TaskRunner {
     const db = getDb();
     const startedAt = new Date();
 
-    // 安全领取：UPDATE tasks SET status='running', progress=10 WHERE id=X AND status='queued'
-    // drizzle ORM 的 update 返回结果不直接给出 affected rows，这里用两步：
-    // 先 select ... for update 然后 update，或直接用两个查询。
-    // 为简单起见：先update再检查是否成功（检查当前status）。
-    // 更好的方式：直接 update + where status=queued，然后再读。
     try {
       // 安全领取：只有 status 仍是 queued 才更新
       await db
@@ -133,8 +180,7 @@ class TaskRunner {
         .set({ status: "running", progress: 10, updatedAt: new Date() as any })
         .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
 
-      // 重新读取确认领取成功：只有成功执行本次 update 的 runner 才会看到 running + progress=10。
-      // 若其他 runner 已经推进到 25/100，这里会退出，避免重复执行。
+      // 重新读取确认领取成功
       const claimed = await db
         .select({ status: tasks.status, progress: tasks.progress })
         .from(tasks)
@@ -255,6 +301,7 @@ class TaskRunner {
           timestamp: new Date().toISOString(),
         });
 
+        // 只打安全摘要，不泄露完整 stderr/args
         console.error(
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) failed: ${errorText?.slice(0, 200)}`
         );
@@ -346,7 +393,7 @@ class TaskRunner {
       `runner_interval_ms: ${CONFIG.intervalMs}`,
       `runner_batch_size: ${CONFIG.batchSize}`,
       ``,
-      `Generated by Tiangong P5 Task Runner at ${now}`,
+      `Generated by Tiangong P6 Task Runner at ${now}`,
     ].join("\n");
 
     return {
@@ -356,68 +403,134 @@ class TaskRunner {
     };
   }
 
-  /** Command 模式执行 */
+  /**
+   * P6: Command 模式 — 安全 argv 执行
+   *
+   * 优先使用 execFile + execArgs（spawn(file, args, {shell:false})），
+   * prompt 通过 stdin 传入。保留 legacy COMMAND 为 fallback。
+   *
+   * Timeout: SIGTERM → 5s grace → SIGKILL
+   */
   private executeCommand(
     prompt: string,
     timeoutMs: number
   ): Promise<{ output: string; error: string | null; success: boolean }> {
     return new Promise((resolve) => {
-      if (!CONFIG.command) {
+      let child;
+      let diagExecMode: string;
+
+      // P6: argv mode (recommended)
+      if (hasValidArgvCommand()) {
+        diagExecMode = "argv";
+        const execArgs = CONFIG.execArgs ?? [];
+        child = spawn(CONFIG.execFile, execArgs, {
+          shell: false,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env },
+        });
+
+        // Log safe diagnostic (no full args)
+        console.log(
+          `[TaskRunner] command mode (argv): execFile=${CONFIG.execFile}, argsCount=${execArgs.length}, timeout=${timeoutMs}ms`
+        );
+      } else if (CONFIG.command) {
+        // P5 legacy fallback: shell command
+        diagExecMode = "legacy";
+        child = spawn(CONFIG.command, [], {
+          shell: true,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env },
+        });
+
+        console.log(
+          `[TaskRunner] command mode (legacy shell): timeout=${timeoutMs}ms`
+        );
+      } else {
         resolve({
           output: "",
-          error: "TIANGONG_TASK_RUNNER_COMMAND not configured",
+          error: "TIANGONG_TASK_RUNNER_EXEC_FILE/EXEC_ARGS_JSON or COMMAND not configured",
           success: false,
         });
         return;
       }
 
-      // prompt 通过 stdin 传入，不拼进 shell command
-      const child = exec(CONFIG.command, {
-        timeout: timeoutMs,
-        maxBuffer: CONFIG.resultMaxChars * 4,
-        env: { ...process.env },
-      });
-
       let stdout = "";
       let stderr = "";
+      let timedOut = false;
+      let settled = false;
+      let killTimer: ReturnType<typeof setTimeout> | null = null;
 
-      child.stdout?.on("data", (chunk: string) => {
-        if (stdout.length < CONFIG.resultMaxChars) {
-          stdout += chunk;
+      const done = (code: number | null, signal: string | null) => {
+        if (settled) return;
+        settled = true;
+        if (killTimer) clearTimeout(killTimer);
+
+        const out = this.truncate(stdout, CONFIG.resultMaxChars);
+        const err = this.truncate(stderr, CONFIG.resultMaxChars);
+
+        if (timedOut) {
+          resolve({
+            output: out || "",
+            error: `Command timed out after ${timeoutMs}ms`,
+            success: false,
+          });
+          return;
+        }
+
+        const success = code === 0;
+        resolve({
+          output: out,
+          error: success ? null : (err || `Command exited with code ${code}${signal ? ` (signal=${signal})` : ""}`),
+          success,
+        });
+      };
+
+      // Timeout: SIGTERM → 5s grace → SIGKILL
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          try { child.kill("SIGKILL"); } catch { /* ignore */ }
+        }, 5000);
+      }, timeoutMs);
+
+      // Collect stdout/stderr with truncation
+      const maxBuffer = CONFIG.resultMaxChars * 2;
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (stdout.length < maxBuffer) {
+          stdout += chunk.toString();
         }
       });
 
-      child.stderr?.on("data", (chunk: string) => {
-        if (stderr.length < CONFIG.resultMaxChars) {
-          stderr += chunk;
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (stderr.length < maxBuffer) {
+          stderr += chunk.toString();
         }
       });
 
-      // 写入 prompt 到 stdin
+      child.on("close", (code, signal) => {
+        clearTimeout(timer);
+        done(code, signal);
+      });
+
+      child.on("error", (err: NodeJS.ErrnoException) => {
+        clearTimeout(timer);
+        if (!settled) {
+          settled = true;
+          resolve({
+            output: this.truncate(stdout, CONFIG.resultMaxChars),
+            error: `spawn error: ${err.message}`,
+            success: false,
+          });
+        }
+      });
+
+      // Write prompt to stdin, then close
       if (child.stdin) {
         child.stdin.write(prompt);
         child.stdin.end();
       }
-
-      child.on("close", (code) => {
-        const out = this.truncate(stdout, CONFIG.resultMaxChars);
-        const err = this.truncate(stderr, CONFIG.resultMaxChars);
-        const success = code === 0;
-
-        resolve({
-          output: out,
-          error: success ? null : (err || `Command exited with code ${code}`),
-          success,
-        });
-      });
-
-      child.on("error", (err: NodeJS.ErrnoException) => {
-        resolve({
-          output: this.truncate(stdout, CONFIG.resultMaxChars),
-          error: err.message,
-          success: false,
-        });
-      });
     });
   }
 

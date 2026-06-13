@@ -964,13 +964,19 @@ export default function TaskCenter() {
   const [filterAgentId, setFilterAgentId] = useState<number | undefined>();
   const [keyword, setKeyword] = useState("");
 
-  // P5: Runner status poll
+  // P5/P6: Runner status poll
   const [runnerStatus, setRunnerStatus] = useState<{
     enabled: boolean;
     mode: string;
     intervalMs: number;
     running: boolean;
     commandConfigured: boolean;
+    execMode?: string;
+    execFileConfigured?: boolean;
+    execArgsConfigured?: boolean;
+    execArgsValid?: boolean;
+    execArgsCount?: number;
+    legacyCommandConfigured?: boolean;
     consecutiveErrors: number;
   } | null>(null);
   useEffect(() => {
@@ -1071,6 +1077,20 @@ export default function TaskCenter() {
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
                 {runnerStatus.mode} · {runnerStatus.intervalMs}ms
               </span>
+              {/* P6: execMode badge */}
+              {runnerStatus.mode === "command" && runnerStatus.execMode && runnerStatus.execMode !== "none" && (
+                <span className="text-[10px] font-mono" style={{ color: "var(--accent-cyan)" }}>
+                  {runnerStatus.execMode}
+                  {runnerStatus.execArgsCount !== undefined && runnerStatus.execArgsCount > 0 && (
+                    <span style={{ color: "var(--text-muted)" }}>·{runnerStatus.execArgsCount}args</span>
+                  )}
+                </span>
+              )}
+              {runnerStatus.legacyCommandConfigured && (
+                <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>
+                  legacy
+                </span>
+              )}
               {runnerStatus.consecutiveErrors > 0 && (
                 <span style={{
                   background: "var(--accent-glow-red)",

@@ -504,14 +504,102 @@ kill $STUB_PID 2>/dev/null
 ```
 scripts/openclaw-connector/
 ├── README.md                      # 本文件
-├── connector.mjs                  # 主连接器脚本 (P2)
+├── connector.mjs                  # 主连接器脚本 (P2/P5)
 ├── agents.example.json            # 配置文件示例
+├── start-openclaw-agents.sh       # 批量启动脚本
 └── examples/
     ├── echo-runner.mjs            # command 模式烟测工具 (P2)
     ├── openclaw-agent-runner.mjs  # OpenClaw Session Runner (P3)
     ├── mock-openclaw.mjs          # Mock openclaw 烟测工具 (P3)
     └── trpc-stub-smoke.mjs        # tRPC stub 烟测服务器 (P2)
 ```
+
+## P6: 服务端 Runner Command/OpenClaw 配置
+
+天宫 P6 将服务端 Task Runner（`api/lib/task-runner.ts`）的 command 模式升级为安全 argv 执行，
+支持直接调用 OpenClaw runner 作为命令执行器。
+
+### 服务端环境变量
+
+| 环境变量 | 说明 | 推荐 |
+|----------|------|------|
+| `TIANGONG_TASK_RUNNER_MODE=command` | 启用 command 模式 | ✓ |
+| `TIANGONG_TASK_RUNNER_EXEC_FILE` | 执行文件（推荐 argv 模式） | `node` |
+| `TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON` | JSON 字符串数组 | `["./scripts/.../openclaw-agent-runner.mjs","--agent","codemaster","--timeout","600"]` |
+| `TIANGONG_TASK_RUNNER_COMMAND` | legacy 命令字符串（仅 fallback） | 不推荐 |
+| `TIANGONG_TASK_RUNNER_TIMEOUT_MS` | 执行超时（默认 300000） | — |
+| `TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS` | 结果截断（默认 12000） | — |
+
+### 配置示例：argv smoke（跑 mock openclaw）
+
+```bash
+# 本地开发环境设置
+export TIANGONG_TASK_RUNNER_MODE=command
+export TIANGONG_TASK_RUNNER_EXEC_FILE=node
+export TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON='["./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs","--agent","codemaster","--openclaw-bin","node","--openclaw-bin-override","./scripts/openclaw-connector/examples/mock-openclaw.mjs"]'
+npm run dev
+
+# 创建 task 后会由 runner 通过 openclaw-agent-runner → mock-openclaw 执行
+# task output 应包含 MOCK_OPENCLAW_OK
+```
+
+**注意**：`openclaw-agent-runner.mjs` 的 `--openclaw-bin` 指向 `node` 时无法直接跑 `.mjs`，
+实际需要创建包装脚本或使用 `/tmp/mock-openclaw` 包装器。更实用的 smoke 方式：
+
+```bash
+# 1. 创建 mock openclaw 包装器
+cat > /tmp/mock-openclaw << 'EOF'
+#!/bin/sh
+exec node /path/to/tiangong/scripts/openclaw-connector/examples/mock-openclaw.mjs "$@"
+EOF
+chmod +x /tmp/mock-openclaw
+
+# 2. 直接 smoke（无需天宫服务）
+printf '[TASK] P6-MOCK: smoke\n[INPUT] hello\n' | \
+  node scripts/openclaw-connector/examples/openclaw-agent-runner.mjs \
+    --agent codemaster \
+    --openclaw-bin /tmp/mock-openclaw
+# stdout 应包含 MOCK_OPENCLAW_OK
+```
+
+### 配置示例：真实 OpenClaw runner（生产用）
+
+```bash
+# Zeabur / 生产环境变量（Secret）
+TIANGONG_TASK_RUNNER_MODE=command
+TIANGONG_TASK_RUNNER_EXEC_FILE=node
+TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON='["./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs","--agent","codemaster","--timeout","600"]'
+TIANGONG_TASK_RUNNER_TIMEOUT_MS=660000
+```
+
+如果在已部署的 Zeabur 环境中未配置 execFile/execArgs，服务端
+默认为 mock 模式，任务正常执行 mock 结果，不会因未配置 command 而失败。
+
+### 执行流程
+
+```
+Task created (status=queued)
+  → TaskRunner.tick() scans queued
+  → claim (UPDATE ... WHERE status='queued')
+  → buildPrompt() — 不含 token/secrets
+  → executeCommand():
+      • 优先 argv：spawn(execFile, execArgs, {shell:false})
+      • Fallback legacy：spawn(command, [], {shell:true})
+      • prompt 通过 stdin 写入
+      • timeout: SIGTERM → 5s grace → SIGKILL
+      • stdout/stderr 截断
+  → write back (done/failed)
+  → broadcast task_update via WebSocket
+```
+
+### 安全要点
+
+- 使用 `spawn(file, args, {shell: false})`，不拼接 shell 字符串
+- prompt 来自 buildPrompt，**不含** token/key/secret
+- 日志/status 端点不泄露 execFile、execArgs、command 内容
+- timeout 保护，防止僵尸进程
+- command 失败只标记任务 failed，不影响服务稳定性
+- Zeabur secrets 不自动修改，默认 mock 模式可用
 
 ## 技术依赖
 

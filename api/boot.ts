@@ -37,7 +37,7 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
-// Runner 状态诊断端点（不泄露 secrets/command 内容）
+// P6: Runner 状态诊断端点（不泄露 secrets/command/args 内容）
 app.get("/api/runner/status", (c) => {
   const s = taskRunner.status;
   return c.json({
@@ -48,7 +48,15 @@ app.get("/api/runner/status", (c) => {
       intervalMs: s.intervalMs,
       batchSize: s.batchSize,
       running: s.running,
+      // P5 legacy
       commandConfigured: s.commandConfigured,
+      // P6: new fields
+      execMode: s.execMode,
+      execFileConfigured: s.execFileConfigured,
+      execArgsConfigured: s.execArgsConfigured,
+      execArgsValid: s.execArgsValid,
+      execArgsCount: s.execArgsCount,
+      legacyCommandConfigured: s.legacyCommandConfigured,
       consecutiveErrors: s.consecutiveErrors,
     },
     timestamp: new Date().toISOString(),

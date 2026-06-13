@@ -594,7 +594,8 @@ async function handleCommand(cfg, msg) {
   const responseText = result.text || "[无输出]";
   L.info(`✅ OpenClaw 回复 (${responseText.length} chars): ${responseText.slice(0, 120)}`);
 
-  await sendMessage(cfg, Number(msg.fromAgent), responseText, "response");
+  const convId = Number(msg.conversationId) || undefined;
+  await sendMessage(cfg, Number(msg.fromAgent), responseText, "response", convId);
 }
 
 /**

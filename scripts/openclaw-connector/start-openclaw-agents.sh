@@ -17,10 +17,14 @@ mkdir -p "$RUN_DIR" "$LOG_DIR"
 
 # Agent: name|agent_id|openclaw_agent|model|thinking
 declare -a AGENTS=(
-  "meizhizi|1|meizhizi|4sapi/claude-opus-4-8|medium"
-  "codemaster|2|codemaster|deepseek-official/deepseek-v4-pro|medium"
+  # 架构管理 → GPT 5.5 High
+  "meizhizi|1|meizhizi|4sapi/gpt-5.5-high|medium"
+  "houtu|4|meixizi|4sapi/gpt-5.5-high|medium"
+  # 代码审查/安全 → Claude Opus 4.8
+  "codemaster|2|codemaster|4sapi/claude-opus-4-8|medium"
+  # 中文运营 → MiniMax M3
   "shangguan|3|shangguan|minimax-cn/MiniMax-M3|off"
-  "houtu|4|meixizi|4sapi/claude-opus-4-8|medium"
+  # 日常轻度 → DeepSeek Flash
   "eriyi|5|sumu|deepseek-official/deepseek-v4-flash|off"
   "meichengzi|6|meichengzi|deepseek-official/deepseek-v4-flash|off"
   "jingwei|12|jingwei|deepseek-official/deepseek-v4-flash|off"

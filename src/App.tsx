@@ -11,6 +11,7 @@ import AccountSettings from './sections/AccountSettings'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import MissionLog from './pages/MissionLog'
+import TaskCenter from './pages/TaskCenter'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -59,6 +60,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <MissionLog />
+          </ProtectedLayout>
+        } />
+        <Route path="/task-center" element={
+          <ProtectedLayout>
+            <Navigation />
+            <TaskCenter />
           </ProtectedLayout>
         } />
         <Route path="*" element={

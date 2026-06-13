@@ -2,7 +2,8 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents } from "@db/schema";
-import { eq, and, inArray, sql, desc } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
+import { wsManager } from "./ws-manager";
 
 // ─── Helpers ───
 
@@ -125,6 +126,7 @@ export const orchestrationRouter = createRouter({
       maxRetries: z.number().min(0).max(10).optional(),
       timeoutMs: z.number().min(1000).max(3600000).optional(),
       parentTaskId: z.number().optional(),
+      status: z.enum(["pending", "queued"]).optional(),
       dependsOn: z.array(z.number()).optional(),
     }))
     .mutation(async ({ input }) => {
@@ -141,6 +143,7 @@ export const orchestrationRouter = createRouter({
           description: taskData.description ?? null,
           priority: taskData.priority ?? 0,
           input: taskData.input ?? null,
+          status: taskData.status ?? "pending",
           maxRetries: taskData.maxRetries ?? 3,
           timeoutMs: taskData.timeoutMs ?? 300000,
           parentTaskId: taskData.parentTaskId ?? null,
@@ -161,6 +164,18 @@ export const orchestrationRouter = createRouter({
           await db.insert(taskDependencies).values({ taskId, dependsOnTaskId: dep });
         }
 
+        // 通知 Dashboard
+        wsManager.broadcastToDashboard({
+          type: "task_update",
+          action: "created",
+          id: taskId,
+          taskId: taskData.taskId,
+          name: taskData.name,
+          status: taskData.status ?? "pending",
+          agentId: taskData.agentId,
+          timestamp: new Date().toISOString(),
+        });
+
         return { success: true, id: taskId };
       }
 
@@ -171,12 +186,24 @@ export const orchestrationRouter = createRouter({
         description: taskData.description ?? null,
         priority: taskData.priority ?? 0,
         input: taskData.input ?? null,
+        status: taskData.status ?? "pending",
         maxRetries: taskData.maxRetries ?? 3,
         timeoutMs: taskData.timeoutMs ?? 300000,
         parentTaskId: taskData.parentTaskId ?? null,
       });
 
       const created = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.taskId, taskData.taskId)).then(r => r[0]);
+      // 通知 Dashboard
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "created",
+        id: created?.id ?? null,
+        taskId: taskData.taskId,
+        name: taskData.name,
+        status: taskData.status ?? "pending",
+        agentId: taskData.agentId,
+        timestamp: new Date().toISOString(),
+      });
       return { success: true, id: created?.id ?? null };
     }),
 
@@ -216,6 +243,17 @@ export const orchestrationRouter = createRouter({
             retryCount: retryCount + 1,
             error: null,
           }).where(eq(tasks.id, input.id));
+          wsManager.broadcastToDashboard({
+            type: "task_update",
+            action: "updated",
+            id: input.id,
+            taskId: task.taskId,
+            name: task.name,
+            status: "queued",
+            progress: input.progress,
+            agentId: task.agentId,
+            timestamp: new Date().toISOString(),
+          });
           return { success: true, retryCount: retryCount + 1 };
         }
 
@@ -233,6 +271,19 @@ export const orchestrationRouter = createRouter({
       if (input.status === "done") {
         await triggerDownstream(input.id);
       }
+
+      // 通知 Dashboard
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "updated",
+        id: input.id,
+        taskId: task.taskId,
+        name: task.name,
+        status: input.status,
+        progress: input.progress,
+        agentId: task.agentId,
+        timestamp: new Date().toISOString(),
+      });
 
       return { success: true };
     }),

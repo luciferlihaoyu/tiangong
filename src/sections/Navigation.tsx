@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
-import { ClipboardList } from 'lucide-react';
+import { ClipboardList, Target } from 'lucide-react';
 
 function SunIcon() {
   return (
@@ -91,6 +91,11 @@ export default function Navigation() {
           系统正常
         </span>
 
+        {/* 任务指挥中心 */}
+        <button onClick={() => navigate('/task-center')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务指挥中心">
+          <Target size={14} /> 指挥中心
+        </button>
+
         {/* 记事板 */}
         <button onClick={() => navigate('/missions')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务记事板">
           <ClipboardList size={14} /> 记事板
@@ -109,7 +114,7 @@ export default function Navigation() {
         <div className="h-4 w-px" style={{ background: 'var(--border-default)' }} />
 
         {/* 新建任务按钮 */}
-        <button className="px-3 py-1.5 rounded text-xs font-bold tracking-wide transition-all hover:brightness-110"
+        <button onClick={() => navigate('/task-center')} className="px-3 py-1.5 rounded text-xs font-bold tracking-wide transition-all hover:brightness-110"
           style={{
             background: 'var(--accent-red)',
             color: '#fff',

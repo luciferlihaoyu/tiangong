@@ -82,4 +82,30 @@ export const conversationRouter = createRouter({
     ]);
     return { active: active[0]?.count ?? 0, archived: archived[0]?.count ?? 0 };
   }),
+
+  /** 将任务输出追加到记事板 */
+  appendTaskOutput: publicQuery
+    .input(z.object({
+      conversationId: z.number(),
+      fromAgentId: z.number(),
+      taskName: z.string(),
+      taskId: z.string(),
+      output: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const content = `📋 **${input.taskName}** (${input.taskId}) 执行完成\\n\\n${input.output}`;
+      await db.insert(messages).values({
+        fromAgent: input.fromAgentId,
+        toAgent: input.fromAgentId,
+        content,
+        type: "system",
+        status: "sent",
+        conversationId: input.conversationId,
+      });
+      await db.update(conversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversations.id, input.conversationId));
+      return { success: true };
+    }),
 });

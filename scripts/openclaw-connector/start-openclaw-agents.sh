@@ -20,8 +20,8 @@ declare -a AGENTS=(
   # 架构管理 → GPT 5.5 High
   "meizhizi|1|meizhizi|4sapi/gpt-5.5-high|medium"
   "houtu|4|meixizi|4sapi/gpt-5.5-high|medium"
-  # 代码审查/安全 → Claude Opus 4.8
-  "codemaster|2|codemaster|4sapi/claude-opus-4-8|medium"
+  # 安全审查 → Claude Opus 4.8
+  "codemaster|2|codemaster|deepseek-official/deepseek-v4-pro|medium"
   # 中文运营 → MiniMax M3
   "shangguan|3|shangguan|minimax-cn/MiniMax-M3|off"
   # 日常轻度 → DeepSeek Flash

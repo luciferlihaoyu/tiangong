@@ -234,3 +234,26 @@ docker run -p 3000:3000 --env-file .env tiangong
 ## License
 
 MIT License
+
+## P7 Remote OpenClaw Gateway Runner
+
+Tiangong Task Runner supports a third execution mode for production environments that cannot install the `openclaw` CLI inside the app container:
+
+```bash
+TIANGONG_TASK_RUNNER_MODE=gateway
+TIANGONG_OPENCLAW_GATEWAY_URL=https://your-openclaw-gateway.example.com
+TIANGONG_OPENCLAW_GATEWAY_TOKEN=***
+TIANGONG_OPENCLAW_GATEWAY_AGENT=codemaster
+# optional
+TIANGONG_OPENCLAW_GATEWAY_MODEL=openai/gpt-5.4
+TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX=tiangong
+```
+
+Gateway mode calls OpenClaw Gateway `POST /v1/chat/completions`, routing to `openclaw/<agent>` with `x-openclaw-agent-id` and an explicit Tiangong session key. It does not require `openclaw` CLI in the Tiangong container.
+
+Security notes:
+
+- Production default remains `mock` until the operator explicitly switches it.
+- `/api/runner/status` only exposes safe booleans/host/agent diagnostics; it never returns tokens, full URLs, prompts, command args, or env values.
+- The OpenClaw Gateway chat-completions endpoint must be enabled intentionally and protected by private ingress or bearer auth.
+- Roll back by setting `TIANGONG_TASK_RUNNER_MODE=mock`.

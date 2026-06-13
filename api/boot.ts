@@ -37,7 +37,7 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
-// P6: Runner 状态诊断端点（不泄露 secrets/command/args 内容）
+// P7: Runner 状态诊断端点（不泄露 secrets/command/args/token 内容）
 app.get("/api/runner/status", (c) => {
   const s = taskRunner.status;
   return c.json({
@@ -57,6 +57,14 @@ app.get("/api/runner/status", (c) => {
       execArgsValid: s.execArgsValid,
       execArgsCount: s.execArgsCount,
       legacyCommandConfigured: s.legacyCommandConfigured,
+      // P7: safe Gateway runner diagnostics
+      gatewayConfigured: s.gatewayConfigured,
+      gatewayUrlConfigured: s.gatewayUrlConfigured,
+      gatewayUrlHost: s.gatewayUrlHost,
+      gatewayTokenConfigured: s.gatewayTokenConfigured,
+      gatewayAgent: s.gatewayAgent,
+      gatewayModelConfigured: s.gatewayModelConfigured,
+      gatewaySessionPrefixConfigured: s.gatewaySessionPrefixConfigured,
       consecutiveErrors: s.consecutiveErrors,
     },
     timestamp: new Date().toISOString(),

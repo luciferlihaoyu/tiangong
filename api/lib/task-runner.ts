@@ -5,7 +5,7 @@
  *
  * 配置（环境变量，默认安全）：
  *   TIANGONG_TASK_RUNNER_ENABLED          默认 true
- *   TIANGONG_TASK_RUNNER_MODE             mock | command，默认 mock
+ *   TIANGONG_TASK_RUNNER_MODE             mock | command | gateway，默认 mock
  *   TIANGONG_TASK_RUNNER_INTERVAL_MS      默认 5000
  *   TIANGONG_TASK_RUNNER_BATCH_SIZE       默认 1，最大 5
  *   TIANGONG_TASK_RUNNER_EXEC_FILE        command 模式执行文件（推荐 argv 模式）
@@ -13,6 +13,13 @@
  *   TIANGONG_TASK_RUNNER_COMMAND          legacy command 字符串（fallback）
  *   TIANGONG_TASK_RUNNER_TIMEOUT_MS       默认 300000
  *   TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS 默认 12000
+ *
+ * P7 Gateway 模式（远程 OpenClaw Gateway HTTP，不要求生产容器安装 openclaw CLI）：
+ *   TIANGONG_OPENCLAW_GATEWAY_URL          OpenClaw Gateway URL，如 https://gw.example.com
+ *   TIANGONG_OPENCLAW_GATEWAY_TOKEN        Gateway bearer token/password（status/log 不泄露）
+ *   TIANGONG_OPENCLAW_GATEWAY_AGENT        目标 Agent，默认 codemaster
+ *   TIANGONG_OPENCLAW_GATEWAY_MODEL        可选 backend model override
+ *   TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX  默认 tiangong
  */
 
 import { getDb } from "../queries/connection";
@@ -56,7 +63,7 @@ const execArgsConfig = envJsonArray("TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON");
 
 const CONFIG = {
   enabled: envBool("TIANGONG_TASK_RUNNER_ENABLED", true),
-  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command",
+  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway",
   intervalMs: envInt("TIANGONG_TASK_RUNNER_INTERVAL_MS", 5000, 500),
   batchSize: envInt("TIANGONG_TASK_RUNNER_BATCH_SIZE", 1, 1, 5),
   // P6: argv-mode (recommended)
@@ -68,6 +75,12 @@ const CONFIG = {
   command: envStr("TIANGONG_TASK_RUNNER_COMMAND", ""),
   timeoutMs: envInt("TIANGONG_TASK_RUNNER_TIMEOUT_MS", 300000, 1000),
   resultMaxChars: envInt("TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS", 12000, 100),
+  // P7: remote OpenClaw Gateway mode
+  gatewayUrl: envStr("TIANGONG_OPENCLAW_GATEWAY_URL", ""),
+  gatewayToken: envStr("TIANGONG_OPENCLAW_GATEWAY_TOKEN", ""),
+  gatewayAgent: envStr("TIANGONG_OPENCLAW_GATEWAY_AGENT", "codemaster"),
+  gatewayModel: envStr("TIANGONG_OPENCLAW_GATEWAY_MODEL", ""),
+  gatewaySessionPrefix: envStr("TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX", "tiangong"),
 };
 
 // ─── Helpers ───
@@ -87,6 +100,24 @@ function computeExecMode(): "argv" | "legacy" | "none" {
 /** Whether any command config is present (for status reporting) */
 function isCommandConfigured(): boolean {
   return hasValidArgvCommand() || CONFIG.command.length > 0;
+}
+
+function isGatewayConfigured(): boolean {
+  return CONFIG.gatewayUrl.length > 0 && CONFIG.gatewayAgent.length > 0;
+}
+
+function safeGatewayHost(): string | null {
+  if (!CONFIG.gatewayUrl) return null;
+  try {
+    const u = new URL(CONFIG.gatewayUrl);
+    return u.host;
+  } catch {
+    return "invalid-url";
+  }
+}
+
+function safeSessionPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._:-]/g, "_").slice(0, 96);
 }
 
 // ─── TaskRunner ───
@@ -113,6 +144,14 @@ class TaskRunner {
       execArgsValid: CONFIG.execArgsValid,
       execArgsCount: CONFIG.execArgs?.length ?? 0,
       legacyCommandConfigured: CONFIG.command.length > 0,
+      // P7: remote Gateway diagnostics (safe; no token/full URL)
+      gatewayConfigured: isGatewayConfigured(),
+      gatewayUrlConfigured: CONFIG.gatewayUrl.length > 0,
+      gatewayUrlHost: safeGatewayHost(),
+      gatewayTokenConfigured: CONFIG.gatewayToken.length > 0,
+      gatewayAgent: CONFIG.gatewayAgent || null,
+      gatewayModelConfigured: CONFIG.gatewayModel.length > 0,
+      gatewaySessionPrefixConfigured: CONFIG.gatewaySessionPrefix.length > 0,
       consecutiveErrors: this.consecutiveErrors,
     };
   }
@@ -242,6 +281,8 @@ class TaskRunner {
 
       if (CONFIG.mode === "command") {
         result = await this.executeCommand(prompt, effectiveTimeout);
+      } else if (CONFIG.mode === "gateway") {
+        result = await this.executeGateway(prompt, task, effectiveTimeout);
       } else {
         result = await this.executeMock(task, agent, effectiveTimeout);
       }
@@ -532,6 +573,129 @@ class TaskRunner {
         child.stdin.end();
       }
     });
+  }
+
+
+  /**
+   * P7: Gateway 模式 — 通过远程 OpenClaw Gateway HTTP agent endpoint 执行。
+   *
+   * 使用 /v1/chat/completions（需 OpenClaw Gateway 开启 chatCompletions endpoint），
+   * 目标 agent 通过 model=openclaw/<agent> 与 x-openclaw-agent-id 指定。
+   * 不要求 Tiangong 生产容器安装 openclaw CLI。
+   */
+  private async executeGateway(
+    prompt: string,
+    task: typeof tasks.$inferSelect,
+    timeoutMs: number
+  ): Promise<{ output: string; error: string | null; success: boolean }> {
+    if (!isGatewayConfigured()) {
+      return {
+        output: "",
+        error: "Gateway runner not configured: set TIANGONG_OPENCLAW_GATEWAY_URL and TIANGONG_OPENCLAW_GATEWAY_AGENT",
+        success: false,
+      };
+    }
+
+    let endpoint: URL;
+    try {
+      endpoint = new URL("/v1/chat/completions", CONFIG.gatewayUrl);
+    } catch {
+      return { output: "", error: "Invalid TIANGONG_OPENCLAW_GATEWAY_URL", success: false };
+    }
+
+    const sessionKey = `${CONFIG.gatewaySessionPrefix}-${safeSessionPart(CONFIG.gatewayAgent)}-${safeSessionPart(task.taskId)}`;
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-openclaw-agent-id": CONFIG.gatewayAgent,
+      "x-openclaw-session-key": sessionKey,
+      "x-openclaw-message-channel": "tiangong-task-runner",
+    };
+    if (CONFIG.gatewayToken) headers.authorization = `Bearer ${CONFIG.gatewayToken}`;
+    if (CONFIG.gatewayModel) headers["x-openclaw-model"] = CONFIG.gatewayModel;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    console.log(
+      `[TaskRunner] gateway mode: host=${safeGatewayHost()}, agent=${CONFIG.gatewayAgent}, modelConfigured=${CONFIG.gatewayModel.length > 0}, timeout=${timeoutMs}ms`
+    );
+
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: `openclaw/${CONFIG.gatewayAgent}`,
+          messages: [{ role: "user", content: prompt }],
+          user: sessionKey,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+
+      const raw = await resp.text();
+      if (!resp.ok) {
+        return {
+          output: "",
+          error: `Gateway HTTP ${resp.status}: ${this.summarizeGatewayError(raw)}`,
+          success: false,
+        };
+      }
+
+      const text = this.extractChatCompletionText(raw);
+      if (!text.trim()) {
+        return {
+          output: "",
+          error: "Gateway returned empty chat completion text",
+          success: false,
+        };
+      }
+
+      return { output: text, error: null, success: true };
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        return { output: "", error: `Gateway request timed out after ${timeoutMs}ms`, success: false };
+      }
+      return { output: "", error: `Gateway request failed: ${e?.message ?? String(e)}`, success: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private extractChatCompletionText(raw: string): string {
+    try {
+      const parsed = JSON.parse(raw);
+      const choices = parsed?.choices;
+      if (Array.isArray(choices)) {
+        const texts = choices
+          .map((c) => c?.message?.content ?? c?.delta?.content ?? "")
+          .filter((t) => typeof t === "string" && t.trim());
+        if (texts.length > 0) return texts.join("\n");
+      }
+      if (typeof parsed?.text === "string") return parsed.text;
+      if (typeof parsed?.reply === "string") return parsed.reply;
+      if (Array.isArray(parsed?.payloads)) {
+        const texts = parsed.payloads
+          .map((p: any) => p?.text)
+          .filter((t: any) => typeof t === "string" && t.trim());
+        if (texts.length > 0) return texts.join("\n");
+      }
+    } catch {
+      return raw.trim();
+    }
+    return "";
+  }
+
+  private summarizeGatewayError(raw: string): string {
+    if (!raw) return "(empty response)";
+    try {
+      const parsed = JSON.parse(raw);
+      const message = parsed?.error?.message ?? parsed?.message ?? parsed?.error;
+      if (typeof message === "string") return this.truncate(message, 500);
+    } catch {
+      // fall through
+    }
+    return this.truncate(raw.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/g, "Bearer ***"), 500);
   }
 
   /** 截断文本 */

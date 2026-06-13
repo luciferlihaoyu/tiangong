@@ -10,6 +10,7 @@ import FooterTerminal from './sections/FooterTerminal'
 import AccountSettings from './sections/AccountSettings'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
+import MissionLog from './pages/MissionLog'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -52,6 +53,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <AccountSettings />
+          </ProtectedLayout>
+        } />
+        <Route path="/missions" element={
+          <ProtectedLayout>
+            <Navigation />
+            <MissionLog />
           </ProtectedLayout>
         } />
         <Route path="*" element={

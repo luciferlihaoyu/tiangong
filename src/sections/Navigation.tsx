@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
+import { ClipboardList } from 'lucide-react';
 
 function SunIcon() {
   return (
@@ -89,6 +90,11 @@ export default function Navigation() {
           <span className="status-dot status-dot-online" />
           系统正常
         </span>
+
+        {/* 记事板 */}
+        <button onClick={() => navigate('/missions')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务记事板">
+          <ClipboardList size={14} /> 记事板
+        </button>
 
         {/* 账户设置 */}
         <button onClick={() => navigate('/account')} className="text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="账户设置">

@@ -602,18 +602,80 @@ async function executeTask(cfg, task) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  P2: Task processing (upgraded)
+//  P9: Executor Adapter + Worker Loop + Usage Reporting
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Process a claimed or assigned task.
+ * P9: Executor adapter map — makes it easy to add new execution modes.
+ */
+const executorAdapters = {
+  mock: executeMock,
+  command: executeCommand,
+};
+
+/**
+ * P9: Get the executor adapter for the current config.
+ * @param {Config} cfg
+ * @returns {function(Config, object): Promise<string>}
+ */
+function getExecutor(cfg) {
+  return executorAdapters[cfg.execMode] || executorAdapters.mock;
+}
+
+/**
+ * P9: Report token usage to Tiangong after task execution.
+ * Simulated usage based on task complexity and execution mode.
+ *
+ * @param {Config} cfg
+ * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
+ * @param {string} result
+ * @param {boolean} success
+ */
+async function reportUsage(cfg, task, result, success) {
+  const model = cfg.execMode === "command" ? "openclaw-connector" : "mock-executor";
+  const provider = cfg.execMode === "command" ? "openclaw" : "tiangong-mock";
+
+  // Simulate token counts based on task content
+  const inputLen = (task.description?.length ?? 0) + (task.input?.length ?? 0) + 100;
+  const outputLen = result?.length ?? 0;
+  const promptTokens = Math.max(10, Math.floor(inputLen / 3));
+  const completionTokens = Math.max(5, Math.floor(outputLen / 2));
+  const totalTokens = promptTokens + completionTokens;
+  const costCents = Math.round(totalTokens * 0.002 * 100) / 100; // ~$0.002/1K tokens
+
+  try {
+    const r = await trpcCall(cfg, "usage.record", {
+      model,
+      provider,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      callCount: 1,
+      costCents: Math.max(1, Math.round(costCents)),
+      taskId: task.id,
+      agentId: cfg.agentId,
+    });
+    if (r.ok) {
+      L.debug(`📊 用量上报: ${totalTokens} tokens (${promptTokens}+${completionTokens}), model=${model}`);
+    } else {
+      L.warn(`用量上报失败: ${r.error}`);
+    }
+  } catch (e) {
+    L.warn(`用量上报异常: ${e.message}`);
+  }
+}
+
+/**
+ * P9: Execute a task with full progress reporting pipeline.
+ * Updates progress at 10%, 25%, 50%, 75%, then writes final result.
  *
  * @param {Config} cfg
  * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
  */
-async function processTask(cfg, task) {
+async function executeTaskWithProgress(cfg, task) {
   L.info(`🎯 开始处理任务: ${task.name} (taskId=${task.taskId})`);
 
+  // Report progress 10%
   let r = await trpcCall(cfg, "task.updateProgress", {
     id: task.id,
     progress: 10,
@@ -621,9 +683,26 @@ async function processTask(cfg, task) {
     output: `[${cfg.agentName}] 开始执行 (mode=${cfg.execMode})...`,
   });
   if (!r.ok) L.warn(`报告进度 10% 失败: ${r.error}`);
+  await sleep(200);
+
+  // Report progress 25%
+  r = await trpcCall(cfg, "task.updateProgress", {
+    id: task.id,
+    progress: 25,
+    status: "running",
+    output: `[${cfg.agentName}] 解析任务参数...`,
+  });
+  if (!r.ok) L.warn(`报告进度 25% 失败: ${r.error}`);
 
   try {
-    const result = await executeTask(cfg, task);
+    const executor = getExecutor(cfg);
+    const result = await executor(cfg, task);
+
+    // Report progress 50% and 75% before final
+    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 50, status: "running", output: `[${cfg.agentName}] 执行中 (50%)...` });
+    await sleep(100);
+    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 75, status: "running", output: `[${cfg.agentName}] 整理结果 (75%)...` });
+    await sleep(100);
 
     r = await trpcCall(cfg, "task.updateProgress", {
       id: task.id,
@@ -636,6 +715,9 @@ async function processTask(cfg, task) {
     } else {
       L.info(`✅ 任务 ${task.name} 已标记为 done`);
     }
+
+    // P9: Report usage after completion
+    await reportUsage(cfg, task, result, true);
   } catch (err) {
     const errMsg = err.message || String(err);
     L.error(`❌ 任务 ${task.name} 执行失败: ${errMsg}`);
@@ -652,7 +734,75 @@ async function processTask(cfg, task) {
     } else {
       L.info(`⚠️ 任务 ${task.name} 已标记为 failed`);
     }
+
+    // P9: Report usage even on failure
+    await reportUsage(cfg, task, errMsg, false);
   }
+}
+
+/**
+ * P9: Active task claim loop — runs independently of heartbeat inbox processing.
+ * Polls the task list for queued tasks assigned to this agent, claims, and executes.
+ *
+ * @param {Config} cfg
+ * @returns {Promise<boolean>} true if a task was claimed and processed
+ */
+async function pollAndClaimTask(cfg) {
+  try {
+    // Try the dedicated claim endpoint first
+    const claim = await trpcCall(cfg, "agent.claimTask", { agentId: cfg.agentId });
+    if (!claim.ok) {
+      if (claim.error && claim.error.includes("not found")) {
+        return false;
+      }
+      L.debug(`主动认领检查: ${claim.error}`);
+      return false;
+    }
+
+    const task = claim.data?.task;
+    if (!task) return false;
+
+    L.info(`🎯 主动认领到任务: ${task.name} (taskId=${task.taskId})`);
+    await executeTaskWithProgress(cfg, task);
+    return true;
+  } catch (e) {
+    L.warn(`主动认领异常: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * P9: Worker tick — run active task claiming cycle.
+ * @param {Config} cfg
+ * @param {InboxProcessor} inbox
+ */
+async function workerTick(cfg, inbox) {
+  // 1. Process inbox (already handled by heartbeat, but do a quick check)
+  try {
+    const inboxResult = await inbox.fetchAndProcessInbox();
+    if (inboxResult.count > 0) {
+      L.debug(`📥 Worker inbox: ${inboxResult.count} msgs, ${inboxResult.processed} processed, ${inboxResult.acked} acked`);
+    }
+  } catch (e) {
+    L.warn(`Worker inbox check error: ${e.message}`);
+  }
+
+  // 2. Try to claim and execute a task
+  await pollAndClaimTask(cfg);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  P2: Task processing (upgraded — delegates to P9 executeTaskWithProgress)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Process a claimed or assigned task. Delegates to P9 pipeline.
+ *
+ * @param {Config} cfg
+ * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
+ */
+async function processTask(cfg, task) {
+  await executeTaskWithProgress(cfg, task);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -927,11 +1077,13 @@ function connectWS(cfg) {
 
     let heartbeatTimer = null;
     let pingTimer = null;
+    let workerTimer = null;  // P9: task claim/execute loop
     let resolved = false;
 
     function cleanup() {
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      if (workerTimer) { clearInterval(workerTimer); workerTimer = null; }
     }
 
     function done(exit) {
@@ -960,7 +1112,14 @@ function connectWS(cfg) {
         } catch {}
       }, 30_000);
 
+      // P9: Worker claim loop (every 10s, independent of heartbeat)
+      workerTimer = setInterval(() => {
+        workerTick(cfg, inbox).catch((e) => L.error(`Worker tick 异常: ${e.message}`));
+      }, 10_000);
+
+      // P9: Initial worker tick + heartbeat
       doHeartbeat(cfg, inbox).catch((e) => L.error(`初始心跳异常: ${e.message}`));
+      workerTick(cfg, inbox).catch((e) => L.error(`初始 worker tick 异常: ${e.message}`));
     };
 
     ws.onmessage = (event) => {

@@ -215,6 +215,25 @@ export const mcpAuditLog = mysqlTable("mcp_audit_log", {
 export type McpAuditLogEntry = typeof mcpAuditLog.$inferSelect;
 export type InsertMcpAuditLogEntry = typeof mcpAuditLog.$inferInsert;
 
+// ─── Token Usage (P9: 用量监测) ───
+export const tokenUsage = mysqlTable("token_usage", {
+  id: serial("id").primaryKey(),
+  model: varchar("model", { length: 100 }).notNull(),
+  provider: varchar("provider", { length: 50 }).default("unknown"),
+  promptTokens: int("prompt_tokens").default(0).notNull(),
+  completionTokens: int("completion_tokens").default(0).notNull(),
+  totalTokens: int("total_tokens").default(0).notNull(),
+  callCount: int("call_count").default(1).notNull(),
+  costCents: int("cost_cents").default(0).notNull(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }),
+  startedAt: timestamp("started_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TokenUsage = typeof tokenUsage.$inferSelect;
+export type InsertTokenUsage = typeof tokenUsage.$inferInsert;
+
 // ─── Conversations (任务记事板) ───
 export const conversations = mysqlTable("conversations", {
   id: serial("id").primaryKey(),

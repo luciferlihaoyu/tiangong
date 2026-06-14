@@ -163,11 +163,15 @@ function TaskCard({
   agents,
   onView,
   onDelete,
+  onPromote,
+  onDemote,
 }: {
   task: Task;
   agents: Agent[];
   onView: () => void;
   onDelete: () => void;
+  onPromote: () => void;
+  onDemote: () => void;
 }) {
   const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
   const agent = agents.find((a) => a.id === task.agentId);
@@ -176,6 +180,24 @@ function TaskCard({
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
       {/* Hover actions */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button
+          onClick={onPromote}
+          className="text-[10px] px-1 py-0.5 rounded hover:bg-[rgba(201,168,76,0.15)] font-mono"
+          style={{ color: "var(--accent-gold)" }}
+          title="提升优先级"
+        >
+          ↑ P{task.priority + 1}
+        </button>
+        {task.priority > 0 && (
+          <button
+            onClick={onDemote}
+            className="text-[10px] px-1 py-0.5 rounded hover:bg-[rgba(180,200,255,0.1)] font-mono"
+            style={{ color: "var(--text-muted)" }}
+            title="降低优先级"
+          >
+            ↓
+          </button>
+        )}
         <button
           onClick={onView}
           className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] flex items-center gap-1"
@@ -1287,6 +1309,23 @@ export default function TaskCenter() {
     }
   };
 
+  // P9: Priority promote/demote
+  const promoteMutation = trpc.task.promote.useMutation({
+    onSuccess: () => {
+      utils.task.list.invalidate();
+    },
+  });
+
+  const handlePromote = (task: Task) => {
+    promoteMutation.mutate({ id: task.id, delta: 1 });
+  };
+
+  const handleDemote = (task: Task) => {
+    if (task.priority > 0) {
+      promoteMutation.mutate({ id: task.id, delta: -1 });
+    }
+  };
+
   return (
     <div
       className="min-h-screen pt-16 px-4 md:px-6 max-w-7xl mx-auto"
@@ -1499,6 +1538,8 @@ export default function TaskCenter() {
               agents={agents}
               onView={() => setDetailTask(task)}
               onDelete={() => handleDelete(task)}
+              onPromote={() => handlePromote(task)}
+              onDemote={() => handleDemote(task)}
             />
           ))}
         </div>

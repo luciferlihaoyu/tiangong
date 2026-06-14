@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks } from "@db/schema";
-import { eq, desc, and, or, like } from "drizzle-orm";
+import { eq, desc, asc, and, or, like, sql } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 
@@ -26,9 +26,9 @@ export const taskRouter = createRouter({
         if (orCond) conditions.push(orCond);
       }
       if (conditions.length > 0) {
-        return db.select().from(tasks).where(and(...conditions)).orderBy(desc(tasks.createdAt)).limit(200);
+        return db.select().from(tasks).where(and(...conditions)).orderBy(desc(tasks.priority), asc(tasks.createdAt)).limit(200);
       }
-      return db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(200);
+      return db.select().from(tasks).orderBy(desc(tasks.priority), asc(tasks.createdAt)).limit(200);
     }),
 
   getById: publicQuery
@@ -124,6 +124,49 @@ export const taskRouter = createRouter({
       }
 
       return { success: true };
+    }),
+
+  /**
+   * P9: 提升/降低任务优先级
+   * delta 为正提升，为负降低（最低 0）
+   */
+  promote: publicQuery
+    .input(
+      z.object({
+        id: z.number(),
+        delta: z.number().int().default(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db
+        .select({ id: tasks.id, priority: tasks.priority, taskId: tasks.taskId, name: tasks.name })
+        .from(tasks)
+        .where(eq(tasks.id, input.id))
+        .then((r) => r[0]);
+
+      if (!row) throw new Error("Task not found");
+
+      const oldPriority = row.priority ?? 0;
+      const newPriority = Math.max(0, oldPriority + (input.delta ?? 1));
+
+      await db
+        .update(tasks)
+        .set({ priority: newPriority })
+        .where(eq(tasks.id, input.id));
+
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "promoted",
+        id: input.id,
+        taskId: row.taskId,
+        name: row.name,
+        oldPriority,
+        newPriority,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, oldPriority, newPriority };
     }),
 
   delete: publicQuery

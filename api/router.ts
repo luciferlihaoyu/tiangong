@@ -8,6 +8,7 @@ import { orchestrationRouter } from "./orchestration-router";
 import { mcpRouter } from "./mcp/mcp-router";
 import { conversationRouter } from "./conversation-router";
 import { collaborationRouter } from "./collaboration-router";
+import { usageRouter } from "./usage-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -22,6 +23,7 @@ export const appRouter = createRouter({
   mcp: mcpRouter,
   conversation: conversationRouter,
   collab: collaborationRouter,
+  usage: usageRouter,
 });
 
 export type AppRouter = typeof appRouter;

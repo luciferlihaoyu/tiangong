@@ -34,9 +34,20 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "parent_task_id", def: "BIGINT" },
 
   // messages 表新增字段 (WebSocket 实时通信)
-  { table: "messages", col: "status", def: "ENUM('sent','delivered','read') DEFAULT 'sent' NOT NULL" },
+  { table: "messages", col: "status", def: "ENUM('sent','delivered','read','acked','expired') DEFAULT 'sent' NOT NULL" },
   { table: "messages", col: "read_at", def: "TIMESTAMP NULL" },
   { table: "messages", col: "conversation_id", def: "BIGINT UNSIGNED NULL" },
+
+  // P8.1: 可靠消息总线新字段
+  { table: "messages", col: "correlation_id", def: "VARCHAR(64)" },
+  { table: "messages", col: "idempotency_key", def: "VARCHAR(128)" },
+  { table: "messages", col: "task_id", def: "BIGINT UNSIGNED NULL" },
+  { table: "messages", col: "parent_message_id", def: "BIGINT UNSIGNED NULL" },
+  { table: "messages", col: "expires_at", def: "TIMESTAMP NULL" },
+  { table: "messages", col: "acked_at", def: "TIMESTAMP NULL" },
+  { table: "messages", col: "delivered_at", def: "TIMESTAMP NULL" },
+  { table: "messages", col: "retry_count", def: "INT DEFAULT 0 NOT NULL" },
+  { table: "messages", col: "priority", def: "INT DEFAULT 0 NOT NULL" },
 ];
 
 export async function migrateV2(force = false): Promise<string[]> {
@@ -140,6 +151,47 @@ export async function migrateV2(force = false): Promise<string[]> {
         const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
         logs.push(`New table ${tableName}: ${e.message?.slice(0, 80)}`);
         console.warn(`  ⚠️  New table failed:`, e.message?.slice(0, 80));
+      }
+    }
+
+    // P8.1: migrate type enum to include 'ack' value
+    try {
+      await conn.execute(
+        `ALTER TABLE messages MODIFY COLUMN type ENUM('command','response','broadcast','system','ack') DEFAULT 'command' NOT NULL`
+      );
+      logs.push("messages.type: ENUM updated to include 'ack'");
+      console.log("  ✅ messages.type ENUM updated");
+    } catch (e: any) {
+      logs.push(`messages.type ENUM: ${e.message?.slice(0, 80)}`);
+      console.warn("  ⚠️ messages.type ENUM update failed:", e.message?.slice(0, 80));
+    }
+
+    // P8.1: migrate status enum to include 'acked' and 'expired' values
+    try {
+      await conn.execute(
+        `ALTER TABLE messages MODIFY COLUMN status ENUM('sent','delivered','read','acked','expired') DEFAULT 'sent' NOT NULL`
+      );
+      logs.push("messages.status: ENUM updated to include 'acked','expired'");
+      console.log("  ✅ messages.status ENUM updated");
+    } catch (e: any) {
+      logs.push(`messages.status ENUM: ${e.message?.slice(0, 80)}`);
+      console.warn("  ⚠️ messages.status ENUM update failed:", e.message?.slice(0, 80));
+    }
+
+    // P8.1: add unique index for idempotency (from_agent, idempotency_key)
+    try {
+      await conn.execute(
+        `CREATE UNIQUE INDEX uq_messages_idempotency ON messages (from_agent, idempotency_key)`
+      );
+      logs.push("messages: uq_messages_idempotency index created");
+      console.log("  ✅ messages uq_messages_idempotency index created");
+    } catch (e: any) {
+      if (e.code === "ER_DUP_KEYNAME" || e.message?.includes("Duplicate key name")) {
+        logs.push("messages: uq_messages_idempotency index already exists");
+        console.log("  ⏭️  messages uq_messages_idempotency index already exists");
+      } else {
+        logs.push(`messages uq index: ${e.message?.slice(0, 80)}`);
+        console.warn("  ⚠️ messages uq index failed:", e.message?.slice(0, 80));
       }
     }
 

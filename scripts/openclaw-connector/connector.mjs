@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 
 /**
- * 天宫 OpenClaw Connector (P2)
+ * 天宫 OpenClaw Connector (P8.1: reliable message bus)
  *
  * 让真实 OpenClaw 助手作为 Agent 接入天宫：
  * - 维持 WebSocket 长连接
  * - 定时心跳保持 Agent 在线
  * - 自动认领分派任务并回传结果
+ * - P8.1: 统一 inbox 处理，ACK/去重，离线消息补偿
+ * - P2: 可配置执行桥（mock / command）
  * - 处理 WebSocket 消息（记录 + ACK）
  * - 自动重连（指数退避，上限 30s）
- * - P2: 可配置执行桥（mock / command）
  *
  * 用法：
  *   # 通过 JSON 配置文件按名称选择 Agent
@@ -95,6 +96,10 @@ class Config {
     this.execTimeoutMs = parseInt(process.env.TIANGONG_EXEC_TIMEOUT_MS || "300000", 10) || 300000;
     /** @type {number} */
     this.resultMaxChars = parseInt(process.env.TIANGONG_RESULT_MAX_CHARS || "12000", 10) || 12000;
+
+    // ─── P8.1: inbox processing config ───
+    /** @type {number} Max queued messages to process at once */
+    this.inboxBatchSize = parseInt(process.env.TIANGONG_INBOX_BATCH_SIZE || "20", 10) || 20;
   }
 
   /**
@@ -232,7 +237,6 @@ const L = {
 
 /**
  * Call a tRPC mutation via HTTP POST.
- * All Tiangong procedures are publicQuery.mutation(), so they accept POST with JSON body.
  *
  * @param {Config} cfg
  * @param {string} procedure - e.g. "agent.updateHeartbeat"
@@ -260,10 +264,170 @@ async function trpcCall(cfg, procedure, input) {
       return { ok: true, data: json.result.data };
     }
 
-    // Sometimes tRPC returns data directly
     return { ok: true, data: json };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  P8.1: Inbox processor (dedup + ACK)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Dedup tracker: prevents processing the same message twice.
+ * Uses a Map with periodic cleanup of old entries.
+ */
+class DedupTracker {
+  constructor(maxAgeMs = 5 * 60_000) {
+    /** @type {Map<number, number>} messageId -> timestamp */
+    this.processed = new Map();
+    this.maxAgeMs = maxAgeMs;
+  }
+
+  /**
+   * Check if message was already processed.
+   * @param {number} messageId
+   * @returns {boolean} true if already processed
+   */
+  has(messageId) {
+    const ts = this.processed.get(messageId);
+    if (!ts) return false;
+    if (Date.now() - ts > this.maxAgeMs) {
+      this.processed.delete(messageId);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Mark message as processed.
+   * @param {number} messageId
+   */
+  mark(messageId) {
+    this.processed.set(messageId, Date.now());
+    // Periodic cleanup every 100 marks
+    if (this.processed.size % 100 === 0) this.cleanup();
+  }
+
+  /**
+   * Remove expired entries.
+   */
+  cleanup() {
+    const now = Date.now();
+    for (const [id, ts] of this.processed) {
+      if (now - ts > this.maxAgeMs) this.processed.delete(id);
+    }
+  }
+
+  /** @returns {number} */
+  get size() {
+    return this.processed.size;
+  }
+}
+
+/**
+ * Unified inbox processor.
+ *
+ * Handles incoming messages (live + offline) through a single pipeline:
+ * 1. Filter already-processed (by messageId) → skip
+ * 2. Record as seen in dedup tracker
+ * 3. Send ACK via tRPC message.ack (if not already acked by server)
+ * 4. For command-type messages: optionally handle via handleCommand
+ */
+class InboxProcessor {
+  /**
+   * @param {Config} cfg
+   */
+  constructor(cfg) {
+    this.cfg = cfg;
+    this.dedup = new DedupTracker();
+  }
+
+  /**
+   * Process a batch of inbox messages.
+   * @param {Array<{id: number, fromAgent: number, toAgent: number, content: string, type: string, status?: string, conversationId?: number, correlationId?: string}>} msgs
+   * @param {object} [opts]
+   * @param {boolean} [opts.autoAck] - auto-send ACK for unacked messages (default true)
+   * @param {boolean} [opts.handleCommands] - process command messages (default true)
+   * @returns {Promise<{processed: number, skipped: number, acked: number}>}
+   */
+  async processBatch(msgs, opts = {}) {
+    const autoAck = opts.autoAck !== false;
+    const handleCommands = opts.handleCommands !== false;
+
+    let processed = 0;
+    let skipped = 0;
+    let acked = 0;
+
+    for (const msg of msgs) {
+      // Skip if already processed (dedup by messageId)
+      if (this.dedup.has(msg.id)) {
+        skipped++;
+        continue;
+      }
+
+      // Mark as seen
+      this.dedup.mark(msg.id);
+      processed++;
+
+      // Auto-ACK: send ACK for unacked messages
+      if (autoAck && msg.status !== "acked" && msg.type !== "ack") {
+        await this.sendAck(msg.id);
+        acked++;
+      }
+
+      // For command messages: optionally auto-reply (smoke-safe: mock only)
+      if (handleCommands && msg.type === "command" && msg.fromAgent !== this.cfg.agentId) {
+        // In mock mode: send a simple ACK reply instead of spawning OpenClaw
+        const ackContent =
+          `ACK: 已收到指令 "${(msg.content || "").slice(0, 60)}"` +
+          (msg.correlationId ? ` [corr=${msg.correlationId.slice(0, 16)}]` : "");
+        await sendMessage(this.cfg, msg.fromAgent, ackContent, "response", msg.conversationId);
+      }
+    }
+
+    return { processed, skipped, acked };
+  }
+
+  /**
+   * Send ACK via tRPC message.ack (idempotent server-side).
+   * @param {number} messageId
+   */
+  async sendAck(messageId) {
+    const r = await trpcCall(this.cfg, "message.ack", {
+      messageId,
+      agentId: this.cfg.agentId,
+    });
+    if (r.ok) {
+      L.debug(`✅ ACK message #${messageId}${r.data?.idempotent ? " (already acked)" : ""}`);
+    } else {
+      L.warn(`ACK message #${messageId} failed: ${r.error}`);
+    }
+    return r;
+  }
+
+  /**
+   * Fetch and process pending inbox messages via tRPC.
+   * @returns {Promise<{count: number, processed: number, skipped: number, acked: number}>}
+   */
+  async fetchAndProcessInbox() {
+    const r = await trpcCall(this.cfg, "message.inbox", {
+      agentId: this.cfg.agentId,
+      limit: this.cfg.inboxBatchSize,
+      includeAcked: false,
+    });
+
+    if (!r.ok || !r.data) {
+      L.warn(`Inbox fetch failed: ${r.error}`);
+      return { count: 0, processed: 0, skipped: 0, acked: 0 };
+    }
+
+    const msgs = r.data;
+    if (!msgs || msgs.length === 0) return { count: 0, processed: 0, skipped: 0, acked: 0 };
+
+    const result = await this.processBatch(msgs);
+    return { count: msgs.length, ...result };
   }
 }
 
@@ -335,13 +499,9 @@ async function executeMock(cfg, task) {
 function executeCommand(cfg, task, prompt) {
   return new Promise((resolve, reject) => {
     const childEnv = { ...process.env };
-    // Do not expose Tiangong connector credentials to the execution command.
-    // The command may use its own OpenClaw/provider credentials from the environment,
-    // but it should not need the MCP key used by this connector to talk to Tiangong.
     delete childEnv.TIANGONG_MCP_KEY;
     delete childEnv.TIANGONG_TOKEN;
 
-    // P5: Use execFile+execArgs (argv mode, shell:false) if configured; otherwise fallback to legacy execCommand
     let child;
     if (cfg.execFile) {
       L.info(`🚀 执行任务 (command mode: argv)`);
@@ -366,7 +526,6 @@ function executeCommand(cfg, task, prompt) {
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-      // Force kill after 5s grace
       setTimeout(() => {
         try { child.kill("SIGKILL"); } catch {}
       }, 5000);
@@ -400,7 +559,6 @@ function executeCommand(cfg, task, prompt) {
         return;
       }
 
-      // Log stderr as warning if present but command succeeded
       if (stderr.trim()) {
         L.warn(`Command stderr (non-fatal): ${truncateOutput(stderr, 500)}`);
       }
@@ -414,7 +572,6 @@ function executeCommand(cfg, task, prompt) {
       reject(new Error(`Failed to spawn command: ${err.message}`));
     });
 
-    // Write prompt to stdin and close it
     try {
       child.stdin.write(prompt);
       child.stdin.end();
@@ -440,7 +597,6 @@ async function executeTask(cfg, task) {
     return executeCommand(cfg, task, prompt);
   }
 
-  // Default: mock
   L.info(`🎭 执行任务 (mock mode)`);
   return executeMock(cfg, task);
 }
@@ -451,7 +607,6 @@ async function executeTask(cfg, task) {
 
 /**
  * Process a claimed or assigned task.
- * P2: uses executeTask for real/mock execution.
  *
  * @param {Config} cfg
  * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
@@ -459,7 +614,6 @@ async function executeTask(cfg, task) {
 async function processTask(cfg, task) {
   L.info(`🎯 开始处理任务: ${task.name} (taskId=${task.taskId})`);
 
-  // Step 1: Mark running with progress 10
   let r = await trpcCall(cfg, "task.updateProgress", {
     id: task.id,
     progress: 10,
@@ -469,10 +623,8 @@ async function processTask(cfg, task) {
   if (!r.ok) L.warn(`报告进度 10% 失败: ${r.error}`);
 
   try {
-    // Step 2: Execute
     const result = await executeTask(cfg, task);
 
-    // Step 3: Success — mark done with progress 100
     r = await trpcCall(cfg, "task.updateProgress", {
       id: task.id,
       progress: 100,
@@ -485,7 +637,6 @@ async function processTask(cfg, task) {
       L.info(`✅ 任务 ${task.name} 已标记为 done`);
     }
   } catch (err) {
-    // Step 4: Failure — mark failed with error
     const errMsg = err.message || String(err);
     L.error(`❌ 任务 ${task.name} 执行失败: ${errMsg}`);
 
@@ -528,14 +679,13 @@ async function sendMessage(cfg, toAgentId, content, type = "response", conversat
   if (!r.ok) {
     L.warn(`发送消息到 Agent#${toAgentId} 失败: ${r.error}`);
   } else {
-    L.info(`📤 ACK → Agent#${toAgentId}: ${content.slice(0, 80)}`);
+    L.info(`📤 回复 → Agent#${toAgentId}: ${content.slice(0, 80)}`);
   }
 }
 
 /**
  * P3 Session Runner: handle a command message by spawning a real OpenClaw session.
- * Uses execFile (openclaw-agent-runner.mjs) to get an AI-generated reply.
- * Sends the reply back to the sender via tRPC message.send.
+ * P8.1: only called when execMode is "command" and message is not handled by inbox auto-reply.
  *
  * @param {Config} cfg
  * @param {{ fromAgent: number, toAgent: number, content: string, id: number, type: string }} msg
@@ -624,55 +774,64 @@ function buildMessagePrompt(cfg, msg) {
   ].join("\n");
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  P8.1: Handle WS message with inbox integration
+// ═══════════════════════════════════════════════════════════════
+
 /**
  * Handle an incoming WebSocket message event.
  *
- * Expected message shapes:
- *   { type: "message", message: { id, fromAgent, toAgent, content, type } }
- *   { type: "broadcast", message: { id, fromAgent, content, type } }
- *   { type: "offline_messages", messages: [...], count: number }
- *   { type: "pong", timestamp: ... }
- *   { type: "error", message: ... }
+ * P8.1 unified pipeline:
+ * - "offline_messages" → feed into inbox processor
+ * - "message" → feed into inbox processor (single message batch)
+ * - "broadcast" → log only
+ * - "pong" → silent
  *
  * @param {Config} cfg
+ * @param {InboxProcessor} inbox
  * @param {object} data - parsed JSON from WebSocket
  */
-async function handleWSMessage(cfg, data) {
+async function handleWSMessage(cfg, inbox, data) {
   const msgType = data.type || "unknown";
 
   switch (msgType) {
     case "pong":
-      // Silent heartbeat response
       break;
 
     case "offline_messages": {
       const msgs = data.messages || [];
       L.info(`📬 收到 ${msgs.length} 条离线消息`);
-      for (const m of msgs) {
-        L.info(`  ← Agent#${m.fromAgent}: ${(m.content || "").slice(0, 120)}`);
+      if (msgs.length > 0) {
+        const result = await inbox.processBatch(msgs, {
+          autoAck: true,
+          handleCommands: false, // Don't auto-handle commands during offline batch
+        });
+        L.info(
+          `📬 离线消息处理: ${result.processed} processed, ${result.skipped} skipped, ${result.acked} acked`
+        );
       }
       break;
     }
 
     case "message": {
       const msg = data.message || {};
+      // Skip own messages echoed back
+      if (msg.fromAgent === cfg.agentId) break;
+
       L.info(
         `📩 消息 Agent#${msg.fromAgent} → Agent#${msg.toAgent}: ${(msg.content || "").slice(0, 160)}`
       );
 
-      // Send ACK only for command-type messages.
-      // Never ACK response messages, otherwise two connectors can create an ACK ping-pong loop.
-      if (msg.type === "command" && msg.fromAgent && msg.fromAgent !== cfg.agentId) {
-        const ackContent = `ACK: 收到指令 "${(msg.content || "").slice(0, 60)}"`;
-        await sendMessage(cfg, msg.fromAgent, ackContent, "response");
+      // Process through inbox (dedup + ACK)
+      const result = await inbox.processBatch([msg], {
+        autoAck: true,
+        handleCommands: msg.type === "command", // Auto-reply for commands in mock mode
+      });
 
-        // P3: command mode spawns real OpenClaw session to reply
-        if (cfg.execMode === "command") {
-          handleCommand(cfg, msg).catch((err) => {
-            L.warn(`处理 command 失败: ${err.message}`);
-          });
-        }
+      if (result.skipped > 0) {
+        L.debug(`⏭️ 消息 #${msg.id} 已处理过，跳过`);
       }
+
       break;
     }
 
@@ -700,11 +859,13 @@ async function handleWSMessage(cfg, data) {
 
 /**
  * Call heartbeat and handle any claimed tasks in response.
+ * P8.1: also trigger inbox processing.
  *
  * @param {Config} cfg
+ * @param {InboxProcessor} inbox
  * @returns {Promise<boolean>} true if heartbeat was successful
  */
-async function doHeartbeat(cfg) {
+async function doHeartbeat(cfg, inbox) {
   const r = await trpcCall(cfg, "agent.updateHeartbeat", { id: cfg.agentId });
   if (!r.ok) {
     L.warn(`心跳失败: ${r.error}`);
@@ -713,6 +874,17 @@ async function doHeartbeat(cfg) {
 
   L.debug("💓 心跳成功");
 
+  // P8.1: Process inbox on heartbeat
+  inbox.fetchAndProcessInbox().then((result) => {
+    if (result.count > 0) {
+      L.debug(
+        `📥 Inbox: ${result.count} fetched, ${result.processed} processed, ${result.skipped} skipped, ${result.acked} acked`
+      );
+    }
+  }).catch((e) => {
+    L.warn(`Inbox process error: ${e.message}`);
+  });
+
   const claimedTask = r.data && r.data.claimedTask;
   if (claimedTask) {
     L.info(`🎯 心跳认领到任务: ${claimedTask.name}`);
@@ -720,7 +892,6 @@ async function doHeartbeat(cfg) {
     return true;
   }
 
-  // Fallback: older Tiangong deployments may not claim inside heartbeat.
   const claim = await trpcCall(cfg, "agent.claimTask", { agentId: cfg.agentId });
   if (!claim.ok) {
     L.debug(`主动认领检查失败: ${claim.error}`);
@@ -740,7 +911,6 @@ async function doHeartbeat(cfg) {
 
 /**
  * Connect to Tiangong WebSocket and run the main event loop.
- * Blocks until disconnected (then returns for reconnect logic).
  *
  * @param {Config} cfg
  * @returns {Promise<{exit: boolean}>}
@@ -753,6 +923,7 @@ function connectWS(cfg) {
     L.info(`🔌 连接天宫: ${maskedUrl}`);
 
     const ws = new WebSocket(wsUrl);
+    const inbox = new InboxProcessor(cfg);
 
     let heartbeatTimer = null;
     let pingTimer = null;
@@ -777,23 +948,19 @@ function connectWS(cfg) {
         ? (cfg.execFile ? " (argv mode)" : " (legacy string mode)")
         : "";
       L.info(`   执行模式: ${cfg.execMode}${wsExecDetail}`);
+      L.info(`   Inbox: batch=${cfg.inboxBatchSize}, dedup=${inbox.dedup.size}`);
 
-      // Start heartbeat via HTTP (more reliable than WS ping for status updates)
       heartbeatTimer = setInterval(() => {
-        doHeartbeat(cfg).catch((e) => L.error(`心跳异常: ${e.message}`));
+        doHeartbeat(cfg, inbox).catch((e) => L.error(`心跳异常: ${e.message}`));
       }, cfg.heartbeatIntervalMs);
 
-      // Also send WS-level ping every 30s (server responds with pong, updates lastHeartbeat)
       pingTimer = setInterval(() => {
         try {
           ws.send(JSON.stringify({ type: "ping" }));
-        } catch {
-          // Connection likely dead, ws.onclose will fire
-        }
+        } catch {}
       }, 30_000);
 
-      // Initial heartbeat
-      doHeartbeat(cfg).catch((e) => L.error(`初始心跳异常: ${e.message}`));
+      doHeartbeat(cfg, inbox).catch((e) => L.error(`初始心跳异常: ${e.message}`));
     };
 
     ws.onmessage = (event) => {
@@ -804,7 +971,7 @@ function connectWS(cfg) {
         L.warn(`收到非法 JSON: ${String(event.data).slice(0, 200)}`);
         return;
       }
-      handleWSMessage(cfg, data).catch((e) => L.error(`消息处理异常: ${e.message}`));
+      handleWSMessage(cfg, inbox, data).catch((e) => L.error(`消息处理异常: ${e.message}`));
     };
 
     ws.onclose = (event) => {
@@ -814,7 +981,6 @@ function connectWS(cfg) {
 
     ws.onerror = (err) => {
       L.error(`WebSocket 错误`, err && err.message ? { error: err.message } : undefined);
-      // onclose will fire after onerror
     };
   });
 }
@@ -823,11 +989,6 @@ function connectWS(cfg) {
 //  Reconnection logic
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Connect with exponential backoff reconnection.
- *
- * @param {Config} cfg
- */
 async function runWithReconnect(cfg) {
   let attempt = 0;
 
@@ -856,13 +1017,6 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Truncate output to maxChars, appending a truncation notice if needed.
- *
- * @param {string} text
- * @param {number} maxChars
- * @returns {string}
- */
 function truncateOutput(text, maxChars) {
   if (!text) return "";
   if (text.length <= maxChars) return text;
@@ -875,7 +1029,7 @@ function truncateOutput(text, maxChars) {
 
 function printHelp() {
   console.log(`
-天宫 OpenClaw Connector (P2 + P5) — 助手接入器 + 可配置执行桥 (argv 加固)
+天宫 OpenClaw Connector (P8.1) — 助手接入器 + 可靠消息总线
 
 用法:
   node connector.mjs [options]
@@ -908,34 +1062,11 @@ function printHelp() {
   TIANGONG_EXEC_FILE         command 模式执行文件路径 (推荐, argv 模式)
   TIANGONG_EXEC_ARGS_JSON   command 模式执行参数 JSON 数组
   TIANGONG_EXEC_COMMAND      command 模式命令 (legacy, trusted-only)
-  TIANGONG_EXEC_TIMEOUT_MS  执行超时 ms (default: 300000)
-  TIANGONG_RESULT_MAX_CHARS 结果最大字符数 (default: 12000)
+  TIANGONG_INBOX_BATCH_SIZE  P8.1: inbox 批大小 (default: 20)
 
 示例:
-  # 使用配置文件 (mock 模式)
   node connector.mjs --config ./agents.json --agent-name meizhizi
-
-  # 直接指定
-  node connector.mjs --agent-id 1 --token tg-xxx
-
-  # 环境变量
   TIANGONG_AGENT_ID=1 TIANGONG_MCP_KEY=tg-xxx node connector.mjs
-
-  # command 模式 (argv 推荐) — 用 echo-runner 做烟测
-  TIANGONG_EXEC_MODE=command \\
-  TIANGONG_EXEC_FILE=node \\
-  TIANGONG_EXEC_ARGS_JSON='["./scripts/openclaw-connector/examples/echo-runner.mjs"]' \\
-  node connector.mjs --config agents.json -n codemaster
-
-  # command 模式 (legacy 字符串方式)
-  TIANGONG_EXEC_MODE=command \\
-  TIANGONG_EXEC_COMMAND="node ./scripts/openclaw-connector/examples/echo-runner.mjs" \\
-  node connector.mjs --config agents.json -n codemaster
-
-  # 连接到线上天宫
-  node connector.mjs -c agents.json -n codemaster \\
-    --http-base https://tiangg.zeabur.app \\
-    --ws-base wss://tiangg.zeabur.app
 `);
 }
 
@@ -949,7 +1080,6 @@ function parseArgs() {
     httpBase: null,
     wsBase: null,
     heartbeatMs: null,
-    // P2
     execMode: null,
     execFile: null,
     execArgs: null,
@@ -996,7 +1126,6 @@ function parseArgs() {
         opts.heartbeatMs = parseInt(next, 10);
         i++;
         break;
-      // P2
       case "--exec-mode":
         opts.execMode = next;
         i++;
@@ -1064,7 +1193,6 @@ async function main() {
       if (opts.agentName) cfg.agentName = opts.agentName;
     }
 
-    // CLI overrides (P1 + P2)
     if (opts.httpBase) cfg.httpBase = opts.httpBase.replace(/\/$/, "");
     if (opts.wsBase) cfg.wsBase = opts.wsBase.replace(/\/$/, "");
     if (opts.heartbeatMs) cfg.heartbeatIntervalMs = opts.heartbeatMs;
@@ -1083,22 +1211,20 @@ async function main() {
   }
 
   L.info("═══════════════════════════════════════════");
-  L.info(`天宫 OpenClaw Connector (P2) 启动`);
+  L.info(`天宫 OpenClaw Connector (P8.1) 启动`);
   L.info(`  Agent: ${cfg.agentName} (ID=${cfg.agentId})`);
   L.info(`  HTTP:  ${cfg.httpBase}`);
   L.info(`  WS:    ${cfg.wsBase}`);
   L.info(`  心跳:  ${cfg.heartbeatIntervalMs}ms`);
   L.info(`  Token: ${maskToken(cfg.token)}`);
-  // P5: Show command mode type but not actual command/args for security
   const execDetail = cfg.execMode === "command"
     ? (cfg.execFile ? " (argv mode)" : " (legacy string mode)")
     : "";
   L.info(`  执行:  ${cfg.execMode}${execDetail}`);
   L.info(`  超时:  ${cfg.execTimeoutMs}ms`);
-  L.info(`  截断:  ${cfg.resultMaxChars} chars`);
+  L.info(`  Inbox: batch=${cfg.inboxBatchSize}`);
   L.info("═══════════════════════════════════════════");
 
-  // Graceful shutdown
   process.on("SIGINT", () => {
     L.info("收到 SIGINT，正在退出...");
     process.exit(0);

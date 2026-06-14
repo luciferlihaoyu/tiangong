@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 
 // ─── Helpers ───
 
@@ -270,6 +271,9 @@ export const orchestrationRouter = createRouter({
       // Auto-trigger downstream when task completes
       if (input.status === "done") {
         await triggerDownstream(input.id);
+      }
+      if (input.status === "done" || input.status === "failed") {
+        await emitCollabSummaryForTask(input.id);
       }
 
       // 通知 Dashboard

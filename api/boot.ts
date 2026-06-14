@@ -178,11 +178,12 @@ app.get("/ws", async (c) => {
               })
             );
 
-            // 标记这些消息为 delivered
+            // 标记这些消息为 delivered，同时记录 deliveredAt
+            const now = new Date();
             for (const msg of unreadMessages) {
               await db
                 .update(messages)
-                .set({ status: "delivered" })
+                .set({ status: "delivered", deliveredAt: now })
                 .where(eq(messages.id, msg.id));
             }
 

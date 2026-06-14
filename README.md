@@ -38,7 +38,7 @@
 | `agents` | AI Agent | agentId, name, source, model, role, orgId, departmentId, reportsTo, capabilities, budgetCents, spentCents, lastHeartbeat |
 | `tasks` | 任务 | taskId, name, agentId, status, priority, input, output, retryCount, maxRetries, parentTaskId |
 | `task_dependencies` | 任务依赖 (DAG) | taskId, dependsOnTaskId |
-| `messages` | Agent 间消息 | fromAgent, toAgent, content, type |
+| `messages` | Agent 间消息 (P8.1 可靠总线) | fromAgent, toAgent, content, type, status, correlationId, idempotencyKey, taskId, parentMessageId, expiresAt, ackedAt, deliveredAt, retryCount, priority |
 | `organizations` | 组织 | name, goals, budget |
 | `departments` | 部门 | name, orgId, leadAgentId |
 | `systems` | 外部系统 | name, slug, status |
@@ -88,14 +88,29 @@
 | `org.deptGetAgents` | query | 获取部门下 Agent |
 | `org.deptAssignAgent` | mutation | 分配 Agent 到部门 |
 
-### 消息系统 (`message.*`)
+### 消息系统 (`message.*`) [P8.1 可靠消息总线]
 
 | 路由 | 类型 | 说明 |
 |------|------|------|
 | `message.list` | query | 查询最近 100 条消息 |
 | `message.listByAgent` | query | 查询指定 Agent 消息 |
-| `message.send` | mutation | 发送消息 |
-| `message.stats` | query | 消息统计 |
+| `message.send` | mutation | 发送消息（支持幂等、correlationId、taskId、priority） |
+| `message.inbox` | query | 获取待处理消息（按优先级排序） |
+| `message.ack` | mutation | 幂等确认消息 |
+| `message.replayUndelivered` | mutation | 重推未投递消息 |
+| `message.markRead` | mutation | 标记已读 |
+| `message.conversation` | query | 查询两人对话 |
+| `message.broadcast` | mutation | 广播消息 |
+| `message.stats` | query | 消息统计（含 byStatus 分组） |
+
+### 协作编排 (`collab.*`) [P8.2]
+
+| 路由 | 类型 | 说明 |
+|------|------|------|
+| `collab.delegate` | mutation | 将父任务拆成多个子任务并发送委托消息 |
+| `collab.status` | query | 查看 parent mission 的子任务/Agent/消息 ACK 状态 |
+| `collab.summary` | query | 汇总子任务 output/error/status counts |
+| `collab.unblockReady` | mutation | 依赖完成后将 pending 子任务推进 queued |
 
 ### 认证 (`auth.*`)
 
@@ -234,6 +249,41 @@ docker run -p 3000:3000 --env-file .env tiangong
 ## License
 
 MIT License
+
+## P8.1 Reliable Message Bus
+
+详见 `TIANGONG_P8_RELIABLE_MESSAGE_BUS_SPEC.md`。
+
+核心增强：
+- **幂等发送**：`fromAgent + idempotencyKey` 唯一约束
+- **消息关联**：`correlationId`, `taskId`, `parentMessageId`
+- **Inbox 队列**：`message.inbox` 按优先级获取待处理消息
+- **ACK 确认**：`message.ack` 幂等确认
+- **过期回收**：`expiresAt` 自动过滤
+- **离线补偿**：`message.replayUndelivered` 重推未投递消息
+- **Connector 集成**：统一 InboxProcessor + DedupTracker
+
+## P8.2 Collaboration Orchestration
+
+详见 `TIANGONG_P8_2_COLLABORATION_ORCHESTRATION_SPEC.md`。
+
+核心增强：
+- **任务拆解**：`collab.delegate` 将 parent task 拆成显式子任务
+- **委托消息**：创建子任务时发送绑定 `taskId/correlationId/idempotencyKey` 的 command message
+- **状态追踪**：`collab.status` 展示子任务、Agent、投递和 ACK 状态
+- **结构化汇总**：`collab.summary` 汇总 outputs/errors/status counts
+- **依赖推进**：`collab.unblockReady` 将依赖完成的 pending 子任务推进 queued
+
+## P8.3 Collaboration Command Center
+
+详见 `TIANGONG_P8_3_COLLABORATION_COMMAND_CENTER_SPEC.md`。
+
+核心增强：
+- **协作面板**：任务指挥中心内选择父任务/协调 Agent 并显式输入子任务
+- **一键委托**：前端调用 `collab.delegate` 创建子任务与委托消息
+- **状态/汇总可视化**：展示子任务状态、消息投递/ACK、outputs/errors counts
+- **自动汇总**：任务 done/failed 时广播 `collab_summary`
+- **依赖推进**：依赖完成后自动或手动推进 ready 子任务进入 queued
 
 ## P7 Remote OpenClaw Gateway Runner
 

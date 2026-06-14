@@ -72,16 +72,27 @@ const CREATE_TABLES_SQL = [
     depends_on_task_id BIGINT NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  // P8.1: messages 完整定义（含可靠协作字段）
   `CREATE TABLE IF NOT EXISTS messages (
     id INT AUTO_INCREMENT PRIMARY KEY,
     from_agent BIGINT UNSIGNED NOT NULL,
     to_agent BIGINT UNSIGNED NOT NULL,
     content TEXT NOT NULL,
-    type ENUM('command','response','broadcast','system') DEFAULT 'command' NOT NULL,
-    status ENUM('sent','delivered','read') DEFAULT 'sent' NOT NULL,
+    type ENUM('command','response','broadcast','system','ack') DEFAULT 'command' NOT NULL,
+    status ENUM('sent','delivered','read','acked','expired') DEFAULT 'sent' NOT NULL,
     read_at TIMESTAMP NULL,
     conversation_id BIGINT UNSIGNED NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    correlation_id VARCHAR(64),
+    idempotency_key VARCHAR(128),
+    task_id BIGINT UNSIGNED NULL,
+    parent_message_id BIGINT UNSIGNED NULL,
+    expires_at TIMESTAMP NULL,
+    acked_at TIMESTAMP NULL,
+    delivered_at TIMESTAMP NULL,
+    retry_count INT DEFAULT 0 NOT NULL,
+    priority INT DEFAULT 0 NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    UNIQUE KEY uq_messages_idempotency (from_agent, idempotency_key)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
   `CREATE TABLE IF NOT EXISTS systems (

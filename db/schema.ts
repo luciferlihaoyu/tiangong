@@ -7,6 +7,7 @@ import {
   timestamp,
   int,
   bigint,
+  uniqueIndex,
 } from "drizzle-orm/mysql-core";
 
 // ─── Users (内置认证) ───
@@ -84,18 +85,49 @@ export const tasks = mysqlTable("tasks", {
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
 
-// ─── Messages ───
-export const messages = mysqlTable("messages", {
-  id: serial("id").primaryKey(),
-  fromAgent: bigint("from_agent", { mode: "number", unsigned: true }).notNull(),
-  toAgent: bigint("to_agent", { mode: "number", unsigned: true }).notNull(),
-  content: text("content").notNull(),
-  type: mysqlEnum("type", ["command", "response", "broadcast", "system"]).default("command").notNull(),
-  status: mysqlEnum("status", ["sent", "delivered", "read"]).default("sent").notNull(),
-  readAt: timestamp("read_at"),
-  conversationId: bigint("conversation_id", { mode: "number", unsigned: true }),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+// ─── Messages (P8.1: reliable message bus) ───
+export const messages = mysqlTable(
+  "messages",
+  {
+    id: serial("id").primaryKey(),
+    fromAgent: bigint("from_agent", { mode: "number", unsigned: true }).notNull(),
+    toAgent: bigint("to_agent", { mode: "number", unsigned: true }).notNull(),
+    content: text("content").notNull(),
+    type: mysqlEnum("type", ["command", "response", "broadcast", "system", "ack"]).default("command").notNull(),
+    status: mysqlEnum("status", ["sent", "delivered", "read", "acked", "expired"]).default("sent").notNull(),
+    readAt: timestamp("read_at"),
+    conversationId: bigint("conversation_id", { mode: "number", unsigned: true }),
+
+    // ── P8.1: reliable message bus fields ──
+    /** Links messages across a logical conversation/transaction. */
+    correlationId: varchar("correlation_id", { length: 64 }),
+    /** Sender-defined key for idempotent send. Unique per fromAgent. */
+    idempotencyKey: varchar("idempotency_key", { length: 128 }),
+    /** Task this message is associated with (nullable for non-task messages). */
+    taskId: bigint("task_id", { mode: "number", unsigned: true }),
+    /** Parent message in a reply chain. */
+    parentMessageId: bigint("parent_message_id", { mode: "number", unsigned: true }),
+    /** TTL – message expires if not delivered by this time. */
+    expiresAt: timestamp("expires_at"),
+    /** When the recipient acknowledged receipt. */
+    ackedAt: timestamp("acked_at"),
+    /** When the message was actually pushed to the recipient (WS). */
+    deliveredAt: timestamp("delivered_at"),
+    /** Number of delivery retry attempts. */
+    retryCount: int("retry_count").default(0).notNull(),
+    /** Priority (higher = more urgent). Default 0. */
+    priority: int("priority").default(0).notNull(),
+
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Idempotency: same fromAgent + idempotencyKey → same message
+    idempotencyIdx: uniqueIndex("uq_messages_idempotency").on(
+      table.fromAgent,
+      table.idempotencyKey
+    ),
+  })
+);
 
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = typeof messages.$inferInsert;

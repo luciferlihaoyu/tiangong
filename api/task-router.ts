@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { tasks } from "@db/schema";
 import { eq, desc, and, or, like } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 
 export const taskRouter = createRouter({
   list: publicQuery
@@ -117,6 +118,11 @@ export const taskRouter = createRouter({
         agentId: t?.agentId,
         timestamp: new Date().toISOString(),
       });
+
+      if (input.status === "done" || input.status === "failed") {
+        await emitCollabSummaryForTask(input.id);
+      }
+
       return { success: true };
     }),
 

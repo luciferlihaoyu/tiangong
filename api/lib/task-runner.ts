@@ -26,6 +26,7 @@ import { getDb } from "../queries/connection";
 import { tasks, agents } from "@db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
+import { emitCollabSummaryForTask } from "./collaboration-events";
 import { spawn } from "node:child_process";
 
 // ─── Config ───
@@ -315,6 +316,8 @@ class TaskRunner {
           timestamp: new Date().toISOString(),
         });
 
+        await emitCollabSummaryForTask(task.id);
+
         console.log(
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) completed in ${Date.now() - startedAt.getTime()}ms`
         );
@@ -341,6 +344,8 @@ class TaskRunner {
           agentId: task.agentId,
           timestamp: new Date().toISOString(),
         });
+
+        await emitCollabSummaryForTask(task.id);
 
         // 只打安全摘要，不泄露完整 stderr/args
         console.error(

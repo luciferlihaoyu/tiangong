@@ -133,6 +133,21 @@ export async function migrateV2(force = false): Promise<string[]> {
         task_id BIGINT NOT NULL,
         depends_on_task_id BIGINT NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS token_usage (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        model VARCHAR(100) NOT NULL,
+        provider VARCHAR(50) DEFAULT 'unknown',
+        prompt_tokens INT DEFAULT 0 NOT NULL,
+        completion_tokens INT DEFAULT 0 NOT NULL,
+        total_tokens INT DEFAULT 0 NOT NULL,
+        call_count INT DEFAULT 1 NOT NULL,
+        cost_cents INT DEFAULT 0 NOT NULL,
+        task_id BIGINT UNSIGNED NULL,
+        agent_id BIGINT UNSIGNED NULL,
+        started_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
     ];
 
     for (const sql of newTables) {

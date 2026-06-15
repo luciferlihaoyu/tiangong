@@ -148,6 +148,22 @@ const CREATE_TABLES_SQL = [
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  // P9: Token 用量监测表（不存 key/secret/prompt/response）
+  `CREATE TABLE IF NOT EXISTS token_usage (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    model VARCHAR(100) NOT NULL,
+    provider VARCHAR(50) DEFAULT 'unknown',
+    prompt_tokens INT DEFAULT 0 NOT NULL,
+    completion_tokens INT DEFAULT 0 NOT NULL,
+    total_tokens INT DEFAULT 0 NOT NULL,
+    call_count INT DEFAULT 1 NOT NULL,
+    cost_cents INT DEFAULT 0 NOT NULL,
+    task_id BIGINT UNSIGNED NULL,
+    agent_id BIGINT UNSIGNED NULL,
+    started_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   `CREATE TABLE IF NOT EXISTS conversations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,

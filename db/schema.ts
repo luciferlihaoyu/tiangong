@@ -78,6 +78,9 @@ export const tasks = mysqlTable("tasks", {
   maxRetries: int("max_retries").default(3),
   timeoutMs: int("timeout_ms").default(300000),
   parentTaskId: bigint("parent_task_id", { mode: "number" }),
+  // 输出格式校验
+  expectedOutputSchema: text("expected_output_schema"),
+  outputValid: mysqlEnum("output_valid", ["true", "false", "unknown"]).default("unknown"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });

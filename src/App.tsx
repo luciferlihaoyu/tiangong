@@ -17,6 +17,7 @@ import GuardPanel from './pages/GuardPanel'
 import OpsPanel from './pages/OpsPanel'
 import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
+import DagPanel from './pages/DagPanel'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -101,6 +102,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <EventStream />
+          </ProtectedLayout>
+        } />
+        <Route path="/dag" element={
+          <ProtectedLayout>
+            <Navigation />
+            <DagPanel />
           </ProtectedLayout>
         } />
         <Route path="*" element={

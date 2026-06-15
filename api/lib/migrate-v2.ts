@@ -199,6 +199,9 @@ export async function migrateV2(force = false): Promise<string[]> {
   { table: "token_usage", col: "trace_id", def: "VARCHAR(64)" },
   // Phase 2: 高价模型标记
   { table: "token_usage", col: "high_cost_model", def: "ENUM('true','false') DEFAULT 'false'" },
+  // 输出格式校验
+  { table: "tasks", col: "expected_output_schema", def: "TEXT" },
+  { table: "tasks", col: "output_valid", def: "ENUM('true','false','unknown') DEFAULT 'unknown'" },
 
   // P8.1: add unique index for idempotency (from_agent, idempotency_key)
     try {

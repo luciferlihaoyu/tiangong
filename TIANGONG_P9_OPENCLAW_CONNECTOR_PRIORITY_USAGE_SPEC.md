@@ -230,12 +230,14 @@ output: Array<{
 | `api/usage-router.ts` | 新增 | Token usage API 路由 |
 | `api/router.ts` | 修改 | 注册 `usage` router |
 | `api/task-router.ts` | 修改 | 排序改为 `priority DESC, createdAt ASC`；新增 `promote` mutation |
-| `scripts/openclaw-connector/connector.mjs` | 修改 | 新增 claim 轮询 cycle、executorAdapter、usage 上报 |
+| `scripts/openclaw-connector/connector.mjs` | 修改 | 新增 claim 轮询 cycle、executorAdapter、usage 上报、**P9.1 成本守卫** |
+| `scripts/openclaw-connector/start-openclaw-agents.sh` | 修改 | **P9.1 默认安全配置** |
+| `scripts/openclaw-connector/README.md` | 修改 | **P9.1 文档** |
 | `src/pages/UsagePanel.tsx` | 新增 | Token 用量监测前端页面 |
 | `src/pages/TaskCenter.tsx` | 修改 | 优先级提升/降低按钮 |
 | `src/App.tsx` | 修改 | `/usage` 路由 |
 | `src/sections/Navigation.tsx` | 修改 | 用量监测导航入口 |
-| `scripts/smoke/p9_smoke.mjs` | 新增 | P9 smoke 验证脚本 |
+| `scripts/smoke/p9_smoke.mjs` | 修改 | P9 smoke 验证脚本 + **P9.1 成本守卫验证** |
 
 ---
 
@@ -247,6 +249,31 @@ output: Array<{
 npm run check          # TypeScript 编译检查
 npm run build          # 前端 + 后端构建
 node --check scripts/openclaw-connector/connector.mjs
+node --check scripts/openclaw-connector/examples/openclaw-agent-runner.mjs
+```
+
+### 5.2 P9.1 成本守卫验证
+
+新增环境变量和代码路径验证：
+
+```bash
+# 确认安全默认：connector 不自动认领/执行任务
+TIANGONG_AGENT_ID=1 TIANGONG_MCP_KEY=tg-test-key-for-smoke-123456 \
+  node scripts/openclaw-connector/connector.mjs --help | grep -A6 "P9.1"
+
+# 检查成本守卫函数存在
+node -e "
+const fs = require('fs');
+const code = fs.readFileSync('scripts/openclaw-connector/connector.mjs','utf-8');
+console.assert(code.includes('selectModelForTask'), 'missing selectModelForTask');
+console.assert(code.includes('rewriteModelInArgs'), 'missing rewriteModelInArgs');
+console.assert(code.includes('TIANGONG_PROCESS_INBOX'), 'missing PROCESS_INBOX env');
+console.assert(code.includes('TIANGONG_CLAIM_TASKS'), 'missing CLAIM_TASKS env');
+console.assert(code.includes('TIANGONG_CHEAP_MODEL'), 'missing CHEAP_MODEL env');
+console.assert(code.includes('TIANGONG_CHEAP_MODEL_OPS'), 'missing CHEAP_MODEL_OPS env');
+console.assert(code.includes('TIANGONG_ALLOW_EXPENSIVE_RECURRING'), 'missing ALLOW_EXPENSIVE_RECURRING env');
+console.log('✅ P9.1 cost guard functions and env names present');
+"
 ```
 
 ### 5.2 Smoke 测试

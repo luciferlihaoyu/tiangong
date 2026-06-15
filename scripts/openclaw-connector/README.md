@@ -1,9 +1,10 @@
-# 天宫 OpenClaw Connector (P2 + P3)
+# 天宫 OpenClaw Connector (P2 + P3 + P9.1)
 
 让真实 OpenClaw 助手作为 Agent 接入天宫多助手中枢。
 
 - **P2**: 可配置执行桥（mock / command 模式），通过 stdin 将 task prompt 交给可信命令执行
 - **P3**: OpenClaw Session Runner，调用 `openclaw agent --json` 将天宫 task 派发给 OpenClaw Agent/session，提取最终文本回写天宫
+- **P9.1**: 成本守卫 — 可配置执行开关 + 重复任务自动使用廉价模型
 
 ## 功能
 
@@ -159,6 +160,39 @@ node connector.mjs --config agents.json -n codemaster-legacy
 | `--exec-timeout` | `TIANGONG_EXEC_TIMEOUT_MS` | `300000` | 执行超时（毫秒） |
 | `--result-max-chars` | `TIANGONG_RESULT_MAX_CHARS` | `12000` | 结果最大字符数 |
 
+### P9.1 成本守卫
+
+| 参数 | 环境变量 | 默认值 | 说明 |
+|------|----------|--------|------|
+| `--process-inbox` | `TIANGONG_PROCESS_INBOX` | `true` | 是否处理 inbox 消息（无模型成本，安全开启） |
+| `--claim-tasks` | `TIANGONG_CLAIM_TASKS` | `false` | 是否认领并执行任务（会有模型成本，默认关闭） |
+| `--cheap-model` | `TIANGONG_CHEAP_MODEL` | `deepseek-official/deepseek-v4-flash` | 重复/低优先级任务使用的低成本模型 |
+| `--cheap-model-ops` | `TIANGONG_CHEAP_MODEL_OPS` | `minimax-cn/MiniMax-M3` | 运营/内容类重复任务使用的低成本模型 |
+| `--allow-expensive-recurring` | `TIANGONG_ALLOW_EXPENSIVE_RECURRING` | `false` | 允许重复任务使用昂贵模型（不推荐） |
+
+**模型路由规则：**
+
+1. **高优先级任务（priority >= 8）**：保持原始模型，不替换
+2. **`TIANGONG_ALLOW_EXPENSIVE_RECURRING=true`**：所有任务使用原始模型
+3. **运营/内容类任务**：自动替换为 `cheapModelOps` (MiniMax-M3)
+4. **其他重复/低优先级任务**：自动替换为 `cheapModel` (DeepSeek V4 Flash)
+
+**安全默认：** 启动后仅维持心跳 + inbox 在线，不自动认领执行任务。
+手动执行高价值任务时建议使用非 connector worker 的直接调用方式，
+或通过以下方式临时启用：
+
+```bash
+# 启用自动认领 + 成本守卫
+TIANGONG_CLAIM_TASKS=true \
+TIANGONG_ALLOW_EXPENSIVE_RECURRING=false \
+node connector.mjs --config agents.json -n my-agent
+
+# 允许昂贵模型用于重复任务（谨慎）
+TIANGONG_CLAIM_TASKS=true \
+TIANGONG_ALLOW_EXPENSIVE_RECURRING=true \
+node connector.mjs --config agents.json -n my-agent
+```
+
 ## 配置文件格式
 
 ```json
@@ -180,8 +214,9 @@ node connector.mjs --config agents.json -n codemaster-legacy
       "execMode": "command",
       "execFile": "node",
       "execArgs": ["./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs", "--agent", "codemaster", "--timeout", "600"],
-      "execTimeoutMs": 660000,
-      "resultMaxChars": 12000
+      "cheapModel": "deepseek-official/deepseek-v4-flash",
+      "cheapModelOps": "minimax-cn/MiniMax-M3",
+      "allowExpensiveRecurring": false
     },
     {
       "name": "codemaster-echo",

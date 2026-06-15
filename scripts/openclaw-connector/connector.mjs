@@ -40,6 +40,11 @@
  *   TIANGONG_EXEC_COMMAND     command 模式命令模板 (legacy, trusted-only)
  *   TIANGONG_EXEC_TIMEOUT_MS  执行超时 ms (default: 300000)
  *   TIANGONG_RESULT_MAX_CHARS 结果最大字符数 (default: 12000)
+ *   TIANGONG_PROCESS_INBOX    处理 inbox 消息 (default: true, 无成本)
+ *   TIANGONG_CLAIM_TASKS      认领并执行任务 (default: false, 安全默认)
+ *   TIANGONG_CHEAP_MODEL      低成本模型 (default: deepseek-official/deepseek-v4-flash)
+ *   TIANGONG_CHEAP_MODEL_OPS  运营内容低成本模型 (default: minimax-cn/MiniMax-M3)
+ *   TIANGONG_ALLOW_EXPENSIVE_RECURRING  允许重复任务使用昂贵模型 (default: false)
  */
 
 import { readFileSync } from "node:fs";
@@ -100,6 +105,32 @@ class Config {
     // ─── P8.1: inbox processing config ───
     /** @type {number} Max queued messages to process at once */
     this.inboxBatchSize = parseInt(process.env.TIANGONG_INBOX_BATCH_SIZE || "20", 10) || 20;
+
+    // ─── P9.1: Cost guard / execution gates ───
+    /** @type {boolean} Process inbox messages (safe, no model cost) — default true */
+    this.processInbox = this._parseBool(process.env.TIANGONG_PROCESS_INBOX, true);
+    /** @type {boolean} Claim and execute tasks (costs model calls) — default false for safety */
+    this.claimTasks = this._parseBool(process.env.TIANGONG_CLAIM_TASKS, false);
+    /** @type {string} Cheap model for recurring/low-priority tasks */
+    this.cheapModel = process.env.TIANGONG_CHEAP_MODEL || "deepseek-official/deepseek-v4-flash";
+    /** @type {string} Cheap model for ops/content tasks */
+    this.cheapModelOps = process.env.TIANGONG_CHEAP_MODEL_OPS || "minimax-cn/MiniMax-M3";
+    /** @type {boolean} Allow expensive models for recurring tasks */
+    this.allowExpensiveRecurring = this._parseBool(process.env.TIANGONG_ALLOW_EXPENSIVE_RECURRING, false);
+  }
+
+  /**
+   * Parse a boolean from a string, treating "0"/"false"/"no" as false.
+   * @param {string|undefined} val
+   * @param {boolean} defaultVal
+   * @returns {boolean}
+   */
+  _parseBool(val, defaultVal) {
+    if (val === undefined || val === null || val === "") return defaultVal;
+    const lower = String(val).trim().toLowerCase();
+    if (lower === "0" || lower === "false" || lower === "no" || lower === "off") return false;
+    if (lower === "1" || lower === "true" || lower === "yes" || lower === "on") return true;
+    return defaultVal;
   }
 
   /**
@@ -169,6 +200,13 @@ class Config {
     if (agent.execTimeoutMs) cfg.execTimeoutMs = agent.execTimeoutMs;
     if (agent.resultMaxChars) cfg.resultMaxChars = agent.resultMaxChars;
 
+    // ─── P9.1: Per-agent cost guard overrides ───
+    if (agent.processInbox !== undefined) cfg.processInbox = Boolean(agent.processInbox);
+    if (agent.claimTasks !== undefined) cfg.claimTasks = Boolean(agent.claimTasks);
+    if (agent.cheapModel) cfg.cheapModel = agent.cheapModel;
+    if (agent.cheapModelOps) cfg.cheapModelOps = agent.cheapModelOps;
+    if (agent.allowExpensiveRecurring !== undefined) cfg.allowExpensiveRecurring = Boolean(agent.allowExpensiveRecurring);
+
     return cfg;
   }
 
@@ -191,6 +229,9 @@ class Config {
     }
     if (!Number.isFinite(this.resultMaxChars) || this.resultMaxChars <= 0) {
       throw new Error("Invalid result max chars: must be a positive number");
+    }
+    if (this.claimTasks && this.execMode === "command" && !this.allowExpensiveRecurring) {
+      // safe: cheap-model guard will apply for recurring tasks
     }
   }
 }
@@ -498,6 +539,61 @@ function buildTaskPrompt(cfg, task) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  P9.1: Cost guard — model selection for recurring tasks
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Determine if and what cheap model should be enforced for a task.
+ * Returns null if the original model should be used, otherwise the cheap model name.
+ *
+ * Rules:
+ * - priority >= 8: always use original model (high priority override)
+ * - allowExpensiveRecurring=true: use original model
+ * - Ops/content tasks: use cheapModelOps
+ * - All other recurring/low-priority tasks: use cheapModel
+ *
+ * @param {Config} cfg
+ * @param {{ id: number, taskId: string, name: string, description?: string, priority?: number }} task
+ * @returns {string|null} cheap model name, or null to keep original
+ */
+function selectModelForTask(cfg, task) {
+  // High-priority tasks always keep their original model
+  if (typeof task.priority === "number" && task.priority >= 8) return null;
+
+  // If connector is configured to allow expensive models for recurring tasks
+  if (cfg.allowExpensiveRecurring) return null;
+
+  // Determine if task is ops/content type
+  const taskName = (task.name || "").toLowerCase();
+  const taskDesc = (task.description || "").toLowerCase();
+  const combined = taskName + " " + taskDesc;
+  const isOps = /operat|content|translate|summar|运营|内容|翻译|摘要/i.test(combined);
+
+  return isOps ? cfg.cheapModelOps : cfg.cheapModel;
+}
+
+/**
+ * Rewrite the --model argument in an exec args array.
+ * If --model is found, replace its value. Otherwise append --model <model>.
+ *
+ * @param {string[]} execArgs
+ * @param {string} newModel
+ * @returns {string[]} new args array (shallow copy)
+ */
+function rewriteModelInArgs(execArgs, newModel) {
+  const result = [...execArgs];
+  for (let i = 0; i < result.length - 1; i++) {
+    if (result[i] === "--model") {
+      result[i + 1] = newModel;
+      return result;
+    }
+  }
+  // No --model found; append it
+  result.push("--model", newModel);
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  P2: Execution functions
 // ═══════════════════════════════════════════════════════════════
 
@@ -526,8 +622,11 @@ async function executeMock(cfg, task) {
  * Execute a task in command mode — spawn a trusted command, pass prompt via stdin,
  * capture stdout/stderr, enforce timeout.
  *
+ * P9.1: Applies cost guard — rewrites model in execArgs to cheap model
+ * for recurring/low-priority tasks unless overridden.
+ *
  * @param {Config} cfg
- * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
+ * @param {{ id: number, taskId: string, name: string, description?: string, input?: string, priority?: number }} task
  * @param {string} prompt - prompt built by buildTaskPrompt (no token/key inside)
  * @returns {Promise<string>}
  */
@@ -537,10 +636,18 @@ function executeCommand(cfg, task, prompt) {
     delete childEnv.TIANGONG_MCP_KEY;
     delete childEnv.TIANGONG_TOKEN;
 
+    // P9.1: Apply cost guard — use cheap model for recurring tasks
+    let effectiveArgs = cfg.execArgs;
+    const cheapModel = selectModelForTask(cfg, task);
+    if (cheapModel) {
+      effectiveArgs = rewriteModelInArgs(cfg.execArgs, cheapModel);
+      L.info(`💸 成本守卫: "${task.name}" → model=${cheapModel}`);
+    }
+
     let child;
     if (cfg.execFile) {
       L.info(`🚀 执行任务 (command mode: argv)`);
-      child = spawn(cfg.execFile, cfg.execArgs, {
+      child = spawn(cfg.execFile, effectiveArgs, {
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
         env: childEnv,
@@ -642,10 +749,15 @@ async function executeTask(cfg, task) {
 
 /**
  * P9: Executor adapter map — makes it easy to add new execution modes.
+ * Each adapter receives (cfg, task, prompt).
+ * P9.1: command adapter now builds the prompt internally via buildTaskPrompt.
  */
 const executorAdapters = {
-  mock: executeMock,
-  command: executeCommand,
+  mock: (cfg, task, _prompt) => executeMock(cfg, task),
+  command: (cfg, task, _prompt) => {
+    const prompt = buildTaskPrompt(cfg, task);
+    return executeCommand(cfg, task, prompt);
+  },
 };
 
 /**
@@ -731,7 +843,8 @@ async function executeTaskWithProgress(cfg, task) {
 
   try {
     const executor = getExecutor(cfg);
-    const result = await executor(cfg, task);
+    const prompt = cfg.execMode === "command" ? buildTaskPrompt(cfg, task) : "";
+    const result = await executor(cfg, task, prompt);
 
     // Report progress 50% and 75% before final
     await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 50, status: "running", output: `[${cfg.agentName}] 执行中 (50%)...` });
@@ -812,18 +925,22 @@ async function pollAndClaimTask(cfg) {
  * @param {InboxProcessor} inbox
  */
 async function workerTick(cfg, inbox) {
-  // 1. Process inbox (already handled by heartbeat, but do a quick check)
-  try {
-    const inboxResult = await inbox.fetchAndProcessInbox();
-    if (inboxResult.count > 0) {
-      L.debug(`📥 Worker inbox: ${inboxResult.count} msgs, ${inboxResult.processed} processed, ${inboxResult.acked} acked`);
+  // 1. Process inbox (gated by processInbox)
+  if (cfg.processInbox) {
+    try {
+      const inboxResult = await inbox.fetchAndProcessInbox();
+      if (inboxResult.count > 0) {
+        L.debug(`📥 Worker inbox: ${inboxResult.count} msgs, ${inboxResult.processed} processed, ${inboxResult.acked} acked`);
+      }
+    } catch (e) {
+      L.warn(`Worker inbox check error: ${e.message}`);
     }
-  } catch (e) {
-    L.warn(`Worker inbox check error: ${e.message}`);
   }
 
-  // 2. Try to claim and execute a task
-  await pollAndClaimTask(cfg);
+  // 2. Try to claim and execute a task (gated by claimTasks)
+  if (cfg.claimTasks) {
+    await pollAndClaimTask(cfg);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1059,16 +1176,24 @@ async function doHeartbeat(cfg, inbox) {
 
   L.debug("💓 心跳成功");
 
-  // P8.1: Process inbox on heartbeat
-  inbox.fetchAndProcessInbox().then((result) => {
-    if (result.count > 0) {
-      L.debug(
-        `📥 Inbox: ${result.count} fetched, ${result.processed} processed, ${result.skipped} skipped, ${result.acked} acked`
-      );
-    }
-  }).catch((e) => {
-    L.warn(`Inbox process error: ${e.message}`);
-  });
+  // P8.1: Process inbox on heartbeat (gated by processInbox)
+  if (cfg.processInbox) {
+    inbox.fetchAndProcessInbox().then((result) => {
+      if (result.count > 0) {
+        L.debug(
+          `📥 Inbox: ${result.count} fetched, ${result.processed} processed, ${result.skipped} skipped, ${result.acked} acked`
+        );
+      }
+    }).catch((e) => {
+      L.warn(`Inbox process error: ${e.message}`);
+    });
+  }
+
+  // P9.1: Task claiming and execution gated by claimTasks
+  if (!cfg.claimTasks) {
+    L.debug("📴 任务认领已禁用 (TIANGONG_CLAIM_TASKS=false)，仅维持心跳");
+    return true;
+  }
 
   const claimedTask = r.data && r.data.claimedTask;
   if (claimedTask) {
@@ -1244,6 +1369,13 @@ function printHelp() {
   --exec-timeout <ms>        执行超时 ms (default: 300000)
   --result-max-chars <n>     结果最大字符数 (default: 12000)
 
+  P9.1 成本守卫:
+  --process-inbox <bool>     处理 inbox (default: true, 安全)
+  --claim-tasks <bool>       认领执行任务 (default: false, 安全)
+  --cheap-model <model>      低成本模型 (default: deepseek-official/deepseek-v4-flash)
+  --cheap-model-ops <model>  运营低成本模型 (default: minimax-cn/MiniMax-M3)
+  --allow-expensive-recurring 允许重复任务用昂贵模型
+
   --help, -h                 显示帮助
 
 环境变量:
@@ -1280,6 +1412,12 @@ function parseArgs() {
     execCommand: null,
     execTimeoutMs: null,
     resultMaxChars: null,
+    // P9.1 cost guard
+    processInbox: null,
+    claimTasks: null,
+    cheapModel: null,
+    cheapModelOps: null,
+    allowExpensiveRecurring: false,
     help: false,
   };
 
@@ -1349,6 +1487,26 @@ function parseArgs() {
         opts.resultMaxChars = parseInt(next, 10);
         i++;
         break;
+      // ─── P9.1 cost guard CLI flags ───
+      case "--process-inbox":
+        opts.processInbox = next;
+        i++;
+        break;
+      case "--claim-tasks":
+        opts.claimTasks = next;
+        i++;
+        break;
+      case "--cheap-model":
+        opts.cheapModel = next;
+        i++;
+        break;
+      case "--cheap-model-ops":
+        opts.cheapModelOps = next;
+        i++;
+        break;
+      case "--allow-expensive-recurring":
+        opts.allowExpensiveRecurring = true;
+        break;
       case "--help":
       case "-h":
         opts.help = true;
@@ -1397,6 +1555,13 @@ async function main() {
     if (opts.execTimeoutMs) cfg.execTimeoutMs = opts.execTimeoutMs;
     if (opts.resultMaxChars) cfg.resultMaxChars = opts.resultMaxChars;
 
+    // P9.1: Apply CLI overrides for cost guard
+    if (opts.processInbox !== null) cfg.processInbox = cfg._parseBool(String(opts.processInbox), true);
+    if (opts.claimTasks !== null) cfg.claimTasks = cfg._parseBool(String(opts.claimTasks), false);
+    if (opts.cheapModel) cfg.cheapModel = opts.cheapModel;
+    if (opts.cheapModelOps) cfg.cheapModelOps = opts.cheapModelOps;
+    if (opts.allowExpensiveRecurring) cfg.allowExpensiveRecurring = true;
+
     cfg.validate();
   } catch (err) {
     console.error(`❌ 配置错误: ${err.message}`);
@@ -1417,6 +1582,12 @@ async function main() {
   L.info(`  执行:  ${cfg.execMode}${execDetail}`);
   L.info(`  超时:  ${cfg.execTimeoutMs}ms`);
   L.info(`  Inbox: batch=${cfg.inboxBatchSize}`);
+  L.info("─── P9.1 Cost Guard ───");
+  L.info(`  Process inbox: ${cfg.processInbox ? "✅ enabled" : "❌ disabled"}`);
+  L.info(`  Claim tasks:   ${cfg.claimTasks ? "✅ enabled" : "❌ disabled (safe default)"}`);
+  L.info(`  Cheap model:   ${cfg.cheapModel}`);
+  L.info(`  Cheap ops:     ${cfg.cheapModelOps}`);
+  if (cfg.allowExpensiveRecurring) L.info(`  ⚠️  Allow expensive recurring: ON`);
   L.info("═══════════════════════════════════════════");
 
   process.on("SIGINT", () => {

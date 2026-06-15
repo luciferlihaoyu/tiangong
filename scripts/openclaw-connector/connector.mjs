@@ -270,6 +270,41 @@ async function trpcCall(cfg, procedure, input) {
   }
 }
 
+/**
+ * Call a tRPC query via HTTP GET.
+ *
+ * tRPC rejects POST requests to query procedures with HTTP 405. Use this for
+ * publicQuery endpoints such as message.inbox and message.ack.
+ *
+ * @param {Config} cfg
+ * @param {string} procedure - e.g. "message.inbox"
+ * @param {object} input - procedure input
+ * @returns {Promise<{ok: boolean, data?: any, error?: string}>}
+ */
+async function trpcQuery(cfg, procedure, input) {
+  const qs = new URLSearchParams({ input: JSON.stringify(input) });
+  const url = `${cfg.httpBase}/api/trpc/${procedure}?${qs.toString()}`;
+  try {
+    const res = await fetch(url, { method: "GET" });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    }
+
+    const json = await res.json();
+
+    // tRPC v11 wraps result in { result: { data: ... } }
+    if (json.result && json.result.data !== undefined) {
+      return { ok: true, data: json.result.data };
+    }
+
+    return { ok: true, data: json };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  P8.1: Inbox processor (dedup + ACK)
 // ═══════════════════════════════════════════════════════════════
@@ -412,7 +447,7 @@ class InboxProcessor {
    * @returns {Promise<{count: number, processed: number, skipped: number, acked: number}>}
    */
   async fetchAndProcessInbox() {
-    const r = await trpcCall(this.cfg, "message.inbox", {
+    const r = await trpcQuery(this.cfg, "message.inbox", {
       agentId: this.cfg.agentId,
       limit: this.cfg.inboxBatchSize,
       includeAcked: false,

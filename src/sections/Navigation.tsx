@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
-import { ClipboardList, Target, BarChart3, Shield } from 'lucide-react';
+import { ClipboardList, Target, BarChart3, Shield, Activity } from 'lucide-react';
 
 function SunIcon() {
   return (
@@ -104,6 +104,11 @@ export default function Navigation() {
         {/* 用量监测 */}
         <button onClick={() => navigate('/usage')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="Token 用量监测">
           <BarChart3 size={14} /> 用量
+        </button>
+
+        {/* 作战室 */}
+        <button onClick={() => navigate('/ops')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="Ops 作战室">
+          <Activity size={14} /> 作战室
         </button>
 
         {/* 模型熔断 */}

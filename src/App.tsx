@@ -14,6 +14,7 @@ import MissionLog from './pages/MissionLog'
 import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
 import GuardPanel from './pages/GuardPanel'
+import OpsPanel from './pages/OpsPanel'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -80,6 +81,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <GuardPanel />
+          </ProtectedLayout>
+        } />
+        <Route path="/ops" element={
+          <ProtectedLayout>
+            <Navigation />
+            <OpsPanel />
           </ProtectedLayout>
         } />
         <Route path="*" element={

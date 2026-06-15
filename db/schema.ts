@@ -227,6 +227,10 @@ export const tokenUsage = mysqlTable("token_usage", {
   costCents: int("cost_cents").default(0).notNull(),
   taskId: bigint("task_id", { mode: "number", unsigned: true }),
   agentId: bigint("agent_id", { mode: "number", unsigned: true }),
+  // Phase 1: 审计增强字段
+  sessionKey: varchar("session_key", { length: 128 }),
+  source: varchar("source", { length: 20 }).default("manual"),
+  traceId: varchar("trace_id", { length: 64 }),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

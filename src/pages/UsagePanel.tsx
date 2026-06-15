@@ -44,6 +44,10 @@ interface UsageRecord {
   costCents: number;
   taskId: number | null;
   agentId: number | null;
+  // Phase 1: 审计增强字段
+  sessionKey: string | null;
+  source: string | null;
+  traceId: string | null;
   createdAt: string;
 }
 
@@ -225,6 +229,9 @@ function RecordList({ records, loading }: { records: UsageRecord[]; loading: boo
             <div className="flex items-center gap-3 min-w-0">
               <span className="font-mono truncate max-w-32" style={{ color: "var(--text-primary)" }}>{r.model}</span>
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{r.provider}</span>
+              {r.source && r.source !== "manual" && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(255,200,50,0.1)", color: "var(--accent-gold)" }}>{r.source}</span>
+              )}
             </div>
             <div className="flex items-center gap-4 flex-shrink-0">
               <span className="font-mono text-[10px]" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(r.totalTokens)} tok</span>
@@ -232,6 +239,12 @@ function RecordList({ records, loading }: { records: UsageRecord[]; loading: boo
                 {r.promptTokens}+{r.completionTokens}
               </span>
               <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents)}</span>
+              {r.sessionKey && (
+                <span className="text-[9px] font-mono truncate max-w-24" style={{ color: "var(--text-muted)" }} title={r.sessionKey}>{r.sessionKey.split(":").pop()}</span>
+              )}
+              {r.traceId && (
+                <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }} title={r.traceId}>#{r.traceId.slice(0, 8)}</span>
+              )}
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{fmtDateTime(r.createdAt)}</span>
             </div>
           </div>
@@ -250,9 +263,12 @@ export default function UsagePanel() {
   });
   const [to, setTo] = useState(() => now.toISOString().slice(0, 10));
   const [model, setModel] = useState("");
+  const [source, setSource] = useState("");
+  const [sessionKey, setSessionKey] = useState("");
+  const [traceId, setTraceId] = useState("");
 
   const byModelQuery = trpc.usage.byModel.useQuery(
-    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined },
+    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined, source: source || undefined },
     { retry: 1, staleTime: 10_000 }
   );
 
@@ -261,15 +277,29 @@ export default function UsagePanel() {
     { retry: 1, staleTime: 10_000 }
   );
 
+  const bySourceQuery = trpc.usage.bySource.useQuery(
+    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined },
+    { retry: 1, staleTime: 10_000 }
+  );
+
   const listQuery = trpc.usage.list.useQuery(
-    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined, model: model || undefined, limit: 50 },
+    {
+      from: from ? `${from}T00:00:00Z` : undefined,
+      to: to ? `${to}T23:59:59Z` : undefined,
+      model: model || undefined,
+      source: source || undefined,
+      sessionKey: sessionKey || undefined,
+      traceId: traceId || undefined,
+      limit: 50,
+    },
     { retry: 1, staleTime: 10_000 }
   );
 
   const byModel = (byModelQuery.data as UsageByModel[]) || [];
   const byDay = (byDayQuery.data as UsageByDay[]) || [];
+  const bySource = (bySourceQuery.data as { source: string | null; totalTokens: number; callCount: number; costCents: number }[]) || [];
   const records = (listQuery.data as UsageRecord[]) || [];
-  const loading = byModelQuery.isLoading || byDayQuery.isLoading || listQuery.isLoading;
+  const loading = byModelQuery.isLoading || byDayQuery.isLoading || bySourceQuery.isLoading || listQuery.isLoading;
 
   // Extract unique model names for filter
   const modelNames = useMemo(() => Array.from(new Set(byModel.map((m) => m.model))), [byModel]);
@@ -341,6 +371,45 @@ export default function UsagePanel() {
               ))}
             </select>
           </div>
+          <div>
+            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>来源</label>
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              className="px-3 py-2 rounded text-xs outline-none"
+              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
+            >
+              <option value="">全部来源</option>
+              <option value="manual">manual</option>
+              <option value="cron">cron</option>
+              <option value="connector">connector</option>
+              <option value="runner">runner</option>
+              <option value="system">system</option>
+              <option value="subagent">subagent</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>Session Key</label>
+            <input
+              type="text"
+              value={sessionKey}
+              onChange={(e) => setSessionKey(e.target.value)}
+              placeholder="筛选 session..."
+              className="px-3 py-2 rounded text-xs outline-none"
+              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)", width: "160px" }}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>Trace ID</label>
+            <input
+              type="text"
+              value={traceId}
+              onChange={(e) => setTraceId(e.target.value)}
+              placeholder="筛选 trace..."
+              className="px-3 py-2 rounded text-xs outline-none"
+              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)", width: "160px" }}
+            />
+          </div>
           <div className="flex items-center gap-1 text-[10px] font-mono ml-2 self-center" style={{ color: "var(--text-muted)" }}>
             <Calendar size={12} />
             <span>最近 30 天</span>
@@ -354,6 +423,27 @@ export default function UsagePanel() {
           </div>
           <ModelTable byModel={byModel} loading={loading} />
         </div>
+
+        {/* Source breakdown */}
+        {bySource.length > 0 && (
+          <div className="glass-panel p-4 sci-border mb-6">
+            <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              按来源统计 · BY SOURCE
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              {bySource.map((s) => (
+                <div key={s.source || "unknown"} className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                  <div className="text-xs font-bold font-mono mb-1" style={{ color: "var(--accent-cyan)" }}>{s.source || "unknown"}</div>
+                  <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens)} tok</div>
+                  <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{s.callCount} 次</div>
+                  {s.costCents > 0 && (
+                    <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents)}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Daily trend */}
         <DailyTrend byDay={byDay} loading={loading} />

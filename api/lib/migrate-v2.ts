@@ -193,7 +193,12 @@ export async function migrateV2(force = false): Promise<string[]> {
       console.warn("  ⚠️ messages.status ENUM update failed:", e.message?.slice(0, 80));
     }
 
-    // P8.1: add unique index for idempotency (from_agent, idempotency_key)
+    // Phase 1: token_usage 审计增强字段
+  { table: "token_usage", col: "session_key", def: "VARCHAR(128)" },
+  { table: "token_usage", col: "source", def: "VARCHAR(20) DEFAULT 'manual'" },
+  { table: "token_usage", col: "trace_id", def: "VARCHAR(64)" },
+
+  // P8.1: add unique index for idempotency (from_agent, idempotency_key)
     try {
       await conn.execute(
         `CREATE UNIQUE INDEX uq_messages_idempotency ON messages (from_agent, idempotency_key)`

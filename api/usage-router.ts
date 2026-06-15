@@ -20,6 +20,10 @@ export const usageRouter = createRouter({
         costCents: z.number().int().min(0).default(0),
         taskId: z.number().optional(),
         agentId: z.number().optional(),
+        // Phase 1: 审计增强字段
+        sessionKey: z.string().max(128).optional(),
+        source: z.enum(["manual", "cron", "connector", "runner", "system", "subagent"]).optional(),
+        traceId: z.string().max(64).optional(),
         startedAt: z.string().optional(),
       })
     )
@@ -38,6 +42,9 @@ export const usageRouter = createRouter({
       };
       if (input.taskId !== undefined) values.taskId = input.taskId;
       if (input.agentId !== undefined) values.agentId = input.agentId;
+      if (input.sessionKey !== undefined) values.sessionKey = input.sessionKey;
+      if (input.source !== undefined) values.source = input.source;
+      if (input.traceId !== undefined) values.traceId = input.traceId;
       if (input.startedAt) values.startedAt = new Date(input.startedAt);
 
       const result = await db.insert(tokenUsage).values(values as any);
@@ -55,6 +62,10 @@ export const usageRouter = createRouter({
         model: z.string().optional(),
         provider: z.string().optional(),
         agentId: z.number().optional(),
+        // Phase 1: 审计增强筛选
+        sessionKey: z.string().max(128).optional(),
+        source: z.string().max(20).optional(),
+        traceId: z.string().max(64).optional(),
         from: z.string().optional(),
         to: z.string().optional(),
         limit: z.number().int().min(1).max(500).default(100),
@@ -67,6 +78,9 @@ export const usageRouter = createRouter({
       if (input?.model) conditions.push(eq(tokenUsage.model, input.model));
       if (input?.provider) conditions.push(eq(tokenUsage.provider, input.provider));
       if (input?.agentId) conditions.push(eq(tokenUsage.agentId, input.agentId));
+      if (input?.sessionKey) conditions.push(eq(tokenUsage.sessionKey, input.sessionKey));
+      if (input?.source) conditions.push(eq(tokenUsage.source, input.source));
+      if (input?.traceId) conditions.push(eq(tokenUsage.traceId, input.traceId));
       if (input?.from) conditions.push(gte(tokenUsage.createdAt, new Date(input.from)));
       if (input?.to) conditions.push(lte(tokenUsage.createdAt, new Date(input.to)));
 
@@ -95,6 +109,7 @@ export const usageRouter = createRouter({
         from: z.string().optional(),
         to: z.string().optional(),
         provider: z.string().optional(),
+        source: z.string().max(20).optional(),
       }).optional()
     )
     .query(async ({ input }) => {
@@ -103,6 +118,7 @@ export const usageRouter = createRouter({
       if (input?.from) conditions.push(gte(tokenUsage.createdAt, new Date(input.from)));
       if (input?.to) conditions.push(lte(tokenUsage.createdAt, new Date(input.to)));
       if (input?.provider) conditions.push(eq(tokenUsage.provider, input.provider));
+      if (input?.source) conditions.push(eq(tokenUsage.source, input.source));
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -157,6 +173,40 @@ export const usageRouter = createRouter({
         .groupBy(sql`DATE(${tokenUsage.createdAt})`)
         .orderBy(desc(sql`DATE(${tokenUsage.createdAt})`))
         .limit(input?.limit ?? 30);
+
+      return rows;
+    }),
+
+  /**
+   * Phase 1: 按来源聚合统计
+   */
+  bySource: publicQuery
+    .input(
+      z.object({
+        from: z.string().optional(),
+        to: z.string().optional(),
+      }).optional()
+    )
+    .query(async ({ input }) => {
+      const db = getDb();
+      const conditions: SQL[] = [];
+      if (input?.from) conditions.push(gte(tokenUsage.createdAt, new Date(input.from)));
+      if (input?.to) conditions.push(lte(tokenUsage.createdAt, new Date(input.to)));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const rows = await db
+        .select({
+          source: tokenUsage.source,
+          promptTokens: sql<number>`COALESCE(SUM(${tokenUsage.promptTokens}), 0)`,
+          completionTokens: sql<number>`COALESCE(SUM(${tokenUsage.completionTokens}), 0)`,
+          totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
+          callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
+          costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+        })
+        .from(tokenUsage)
+        .where(whereClause)
+        .groupBy(tokenUsage.source)
+        .orderBy(desc(sql`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`));
 
       return rows;
     }),

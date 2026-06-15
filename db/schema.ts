@@ -232,11 +232,41 @@ export const tokenUsage = mysqlTable("token_usage", {
   source: varchar("source", { length: 20 }).default("manual"),
   traceId: varchar("trace_id", { length: 64 }),
   startedAt: timestamp("started_at"),
+  // Phase 2: 高价模型标记
+  highCostModel: mysqlEnum("high_cost_model", ["true", "false"]).default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type TokenUsage = typeof tokenUsage.$inferSelect;
 export type InsertTokenUsage = typeof tokenUsage.$inferInsert;
+
+// ─── Phase 2: 模型白名单 ───
+export const modelAllowlist = mysqlTable("model_allowlist", {
+  id: serial("id").primaryKey(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }).notNull(),
+  model: varchar("model", { length: 100 }).notNull(),
+  reason: text("reason"),
+  createdBy: varchar("created_by", { length: 50 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ModelAllowlist = typeof modelAllowlist.$inferSelect;
+export type InsertModelAllowlist = typeof modelAllowlist.$inferInsert;
+
+// ─── Phase 2: 高价模型授权 ───
+export const highCostModelAuth = mysqlTable("high_cost_model_auth", {
+  id: serial("id").primaryKey(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }).notNull(),
+  model: varchar("model", { length: 100 }).notNull(),
+  reason: text("reason").notNull(),
+  authorizedBy: varchar("authorized_by", { length: 50 }).notNull(),
+  expiresAt: timestamp("expires_at"),
+  active: mysqlEnum("active", ["true", "false"]).default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type HighCostModelAuth = typeof highCostModelAuth.$inferSelect;
+export type InsertHighCostModelAuth = typeof highCostModelAuth.$inferInsert;
 
 // ─── Conversations (任务记事板) ───
 export const conversations = mysqlTable("conversations", {

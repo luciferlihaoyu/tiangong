@@ -197,6 +197,8 @@ export async function migrateV2(force = false): Promise<string[]> {
   { table: "token_usage", col: "session_key", def: "VARCHAR(128)" },
   { table: "token_usage", col: "source", def: "VARCHAR(20) DEFAULT 'manual'" },
   { table: "token_usage", col: "trace_id", def: "VARCHAR(64)" },
+  // Phase 2: 高价模型标记
+  { table: "token_usage", col: "high_cost_model", def: "ENUM('true','false') DEFAULT 'false'" },
 
   // P8.1: add unique index for idempotency (from_agent, idempotency_key)
     try {
@@ -212,6 +214,42 @@ export async function migrateV2(force = false): Promise<string[]> {
       } else {
         logs.push(`messages uq index: ${e.message?.slice(0, 80)}`);
         console.warn("  ⚠️ messages uq index failed:", e.message?.slice(0, 80));
+      }
+    }
+
+    // Phase 2: 模型白名单 + 高价模型授权表
+    const phase2Tables = [
+      `CREATE TABLE IF NOT EXISTS model_allowlist (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id BIGINT UNSIGNED NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        reason TEXT,
+        created_by VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS high_cost_model_auth (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id BIGINT UNSIGNED NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        reason TEXT NOT NULL,
+        authorized_by VARCHAR(50) NOT NULL,
+        expires_at TIMESTAMP NULL,
+        active ENUM('true','false') DEFAULT 'true',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ];
+
+    for (const sql of phase2Tables) {
+      try {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        await conn.execute(sql);
+        logs.push(`Phase 2 table ${tableName}: OK`);
+        console.log(`  ✅ Phase 2 table ${tableName} created`);
+      } catch (e: any) {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`Phase 2 table ${tableName}: ${e.message?.slice(0, 80)}`);
+        console.warn(`  ⚠️ Phase 2 table ${tableName} failed:`, e.message?.slice(0, 80));
       }
     }
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, tasks } from "@db/schema";
+import { agents, tasks, modelAllowlist } from "@db/schema";
 import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
 
 export const agentRouter = createRouter({
@@ -45,7 +45,7 @@ export const agentRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      await db.insert(agents).values({
+      const result = await db.insert(agents).values({
         agentId: input.agentId,
         name: input.name,
         system: input.system,
@@ -61,7 +61,32 @@ export const agentRouter = createRouter({
         sourceApiKey: input.sourceApiKey ?? null,
         sourceEndpoint: input.sourceEndpoint ?? null,
       });
-      return { success: true };
+      const insertId = (result as any).insertId;
+
+      // P10.3: 自动同步模型白名单
+      if (input.model && insertId) {
+        const existing = await db
+          .select({ id: modelAllowlist.id })
+          .from(modelAllowlist)
+          .where(
+            and(
+              eq(modelAllowlist.agentId, insertId),
+              eq(modelAllowlist.model, input.model)
+            )
+          )
+          .limit(1);
+
+        if (existing.length === 0) {
+          await db.insert(modelAllowlist).values({
+            agentId: insertId,
+            model: input.model,
+            reason: `自动同步: Agent ${input.name} 注册时默认模型`,
+            createdBy: "system",
+          });
+        }
+      }
+
+      return { success: true, id: insertId };
     }),
 
   update: publicQuery
@@ -99,6 +124,30 @@ export const agentRouter = createRouter({
       if (Object.keys(updateFields).length > 0) {
         await db.update(agents).set(updateFields).where(eq(agents.id, id));
       }
+
+      // P10.3: 模型变更时自动同步白名单
+      if (input.model) {
+        const existing = await db
+          .select({ id: modelAllowlist.id })
+          .from(modelAllowlist)
+          .where(
+            and(
+              eq(modelAllowlist.agentId, id),
+              eq(modelAllowlist.model, input.model)
+            )
+          )
+          .limit(1);
+
+        if (existing.length === 0) {
+          await db.insert(modelAllowlist).values({
+            agentId: id,
+            model: input.model,
+            reason: `自动同步: Agent ${input.name || id} 更新时模型变更`,
+            createdBy: "system",
+          });
+        }
+      }
+
       return { success: true };
     }),
 

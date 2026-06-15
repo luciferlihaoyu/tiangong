@@ -13,6 +13,8 @@
 - 执行任务并回写进度/结果/失败原因
 - 接收协作消息并自动回复 ACK
 - 后续支持 Token 用量上报
+- 参与 Fusion 多模型审查（作为审查者或 Judge）
+- 上报模型调用用量（含 sessionKey / source / traceId）
 
 ---
 
@@ -483,6 +485,240 @@ pm2 restart tiangong-qiongxiao
 
 ---
 
+
+## 12.3 多系统多 Agent 配置
+
+天宫支持同时接入多个外部系统，每个 Agent 独立配置。
+
+### 支持的接入系统
+
+| 系统 | 类型 | 示例 Agent |
+|------|------|-----------|
+| OpenClaw | `openclaw` | 美智子、编程大师、后土、琼霄 |
+| ArkClaw | `arkclaw` | 碧霄 |
+| Hermes Agent | `hermes-agent` | 羲和 |
+| 自定义 | `custom` | 其他系统 |
+
+### 多 Agent 配置示例
+
+```json
+{
+  "agents": [
+    {
+      "name": "qiongxiao",
+      "agentId": 16,
+      "token": "tg-16-...",
+      "label": "琼霄",
+      "httpBase": "https://tiangg.zeabur.app",
+      "wsBase": "wss://tiangg.zeabur.app",
+      "execMode": "command",
+      "execFile": "node",
+      "execArgs": ["./runner/qiongxiao-runner.mjs"]
+    },
+    {
+      "name": "xihe",
+      "agentId": 11,
+      "token": "tg-11-...",
+      "label": "羲和",
+      "httpBase": "https://tiangg.zeabur.app",
+      "wsBase": "wss://tiangg.zeabur.app",
+      "execMode": "command",
+      "execFile": "node",
+      "execArgs": ["./runner/xihe-runner.mjs"]
+    }
+  ]
+}
+```
+
+### 关键规则
+
+1. **一个天宫 Agent = 一个独立 Agent ID = 一个独立 MCP Key**
+2. 多个助手可以共用 connector 代码和运行环境，但必须分别配置不同的 `agentId` 和 `token`
+3. 不能共用 MCP Key，否则会导致心跳在线状态覆盖、任务认领串号、用量统计和审计归属错误
+4. 同一系统多个助手可以用 PM2 管理多个 connector 实例
+
+---
+
+## 13. 用量上报增强（Phase 1）
+
+天宫用量监测已支持审计增强字段，上报时建议带上：
+
+```bash
+curl -X POST https://tiangg.zeabur.app/api/trpc/usage.record \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "deepseek-v4-pro",
+    "provider": "deepseek",
+    "promptTokens": 1200,
+    "completionTokens": 600,
+    "totalTokens": 1800,
+    "callCount": 1,
+    "costCents": 5,
+    "taskId": 456,
+    "agentId": 16,
+    "sessionKey": "agent:qiongxiao:main",
+    "source": "connector",
+    "traceId": "task-456-abc123"
+  }'
+```
+
+新增字段说明：
+
+| 字段 | 说明 |
+|------|------|
+| `sessionKey` | 调用的 session 标识，用于定位具体会话 |
+| `source` | 来源：`manual` / `cron` / `connector` / `runner` / `system` / `subagent` |
+| `traceId` | 链路追踪 ID，串联任务、消息、模型调用 |
+
+---
+
+## 14. 高价模型熔断（Phase 2）
+
+天宫已实现高价模型熔断机制。
+
+### 已知高价模型
+
+- `4sapi/gpt-5.5-high`
+- `4sapi/claude-opus-4-8`
+- `zeabur-ai/gpt-5.4-pro`
+- `zeabur-ai/claude-opus-4-7`
+- `zeabur-ai/claude-opus-4-6`
+
+### 熔断规则
+
+1. 高价模型默认禁止使用
+2. 需要在 `/guard` 管理面板添加白名单或创建授权
+3. 授权支持过期时间
+4. 每次调用都会记录 `highCostModel` 标记
+
+### 带熔断检查的用量上报
+
+使用 `guard.recordWithGuard` 替代 `usage.record`：
+
+```bash
+curl -X POST https://tiangg.zeabur.app/api/trpc/guard.recordWithGuard \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "4sapi/gpt-5.5-high",
+    "provider": "4sapi",
+    "costCents": 500,
+    "agentId": 1,
+    "source": "connector",
+    "traceId": "task-xxx"
+  }'
+```
+
+如果模型未授权，会返回 `{ "allowed": false, "reason": "high_cost_not_authorized" }`。
+
+---
+
+## 15. 预算管理（Phase 2）
+
+Agent 表已支持预算字段：
+
+- `budgetCents` — 预算上限（美分）
+- `spentCents` — 已花费（自动累加）
+
+### 设置预算
+
+在 Agent 管理面板或通过 API 设置：
+
+```bash
+curl -X POST https://tiangg.zeabur.app/api/trpc/agent.update \
+  -H "content-type: application/json" \
+  -d '{
+    "id": 16,
+    "budgetCents": 10000
+  }'
+```
+
+### 熔断行为
+
+当 `spentCents + 本次调用 costCents > budgetCents` 时，`guard.recordWithGuard` 会返回 `{ "allowed": false, "reason": "budget_exceeded" }`。
+
+---
+
+## 16. Ops 作战室（Phase 3）
+
+部署后访问 `/ops` 查看：
+
+- Agent 在线拓扑（含心跳检测）
+- 任务流统计（柱状图 + 最近任务列表）
+- 模型调用流（支持仅高价模型筛选）
+- 成本热力图（近 7 天）
+- 今日概览卡片
+
+---
+
+## 17. Fusion 审查模式（P10.1）
+
+天宫支持多模型并行审查 + Judge 裁决。
+
+### 审查流程
+
+1. 在 `/fusion` 面板提交审查请求（主题 + 内容 + 审查者数量）
+2. 系统自动选择 2-5 个不同模型的 Agent 并行审查
+3. 每个审查者分析：共识/分歧/风险/建议
+4. Judge 汇总生成最终裁决
+
+### 作为审查者接入
+
+如果你的 Agent 被选为审查者，会通过 WebSocket 收到 `fusion_review` 消息。
+
+审查完成后调用：
+
+```bash
+curl -X POST https://tiangg.zeabur.app/api/trpc/fusion.submitReview \
+  -H "content-type: application/json" \
+  -d '{
+    "traceId": "fusion-xxx",
+    "reviewerId": 16,
+    "consensus": ["内容A正确"],
+    "conflicts": ["内容B有争议"],
+    "risks": ["内容C有安全风险"],
+    "suggestions": ["建议修改D"],
+    "confidence": 0.85
+  }'
+```
+
+---
+
+## 18. 事件流（P10.2）
+
+所有事件已标准化为统一格式，通过 WebSocket 实时推送。
+
+### 标准事件格式
+
+```json
+{
+  "type": "task.completed",
+  "eventId": "evt-xxx",
+  "traceId": "fusion-xxx",
+  "sourceAgentId": 1,
+  "taskId": 42,
+  "timestamp": "2026-06-15T...",
+  "payload": {}
+}
+```
+
+### 事件类型分类
+
+| 分类 | 事件 |
+|------|------|
+| Agent | `agent.online` / `agent.offline` / `agent.busy` / `agent.idle` |
+| 任务 | `task.created` / `task.started` / `task.completed` / `task.failed` |
+| 消息 | `message.sent` / `message.delivered` / `message.acked` |
+| 模型 | `model.call.started` / `model.call.completed` / `model.high_cost_alert` |
+| Fusion | `fusion.submitted` / `fusion.review_completed` / `fusion.completed` |
+| 系统 | `system.error` / `system.migration` |
+
+### 查看事件流
+
+部署后访问 `/events` 查看实时事件流，支持按类型筛选、按 traceId 串联查看。
+
+---
+
+## 19. 安全规则
 ## 13. 安全规则
 
 **必须遵守：**

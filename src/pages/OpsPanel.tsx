@@ -7,8 +7,9 @@
  * - 模型调用流
  * - 成本热力图
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { trpc } from "@/providers/trpc";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   Activity,
   Users,
@@ -493,6 +494,46 @@ export default function OpsPanel() {
     recentCallsQuery.isLoading ||
     heatmapQuery.isLoading;
 
+  // P10.5: WebSocket 实时推送
+  const ws = useWebSocket();
+  const [liveEvent, setLiveEvent] = useState<{ type: string; timestamp: string } | null>(null);
+  const lastRefreshRef = useRef(0);
+
+  useEffect(() => {
+    if (!ws) return;
+
+    const handler = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        // 记录最新事件
+        if (data.type) {
+          setLiveEvent({ type: data.type, timestamp: data.timestamp || new Date().toISOString() });
+        }
+
+        // 重要事件触发自动刷新（节流 5 秒）
+        const now = Date.now();
+        const importantTypes = [
+          "agent.online", "agent.offline",
+          "task.created", "task.completed", "task.failed",
+          "model.high_cost_alert",
+          "fusion.completed",
+        ];
+        if (importantTypes.includes(data.type) && now - lastRefreshRef.current > 5000) {
+          lastRefreshRef.current = now;
+          overviewQuery.refetch();
+          agentStatusQuery.refetch();
+          taskStatsQuery.refetch();
+          recentTasksQuery.refetch();
+          recentCallsQuery.refetch();
+          heatmapQuery.refetch();
+        }
+      } catch {}
+    };
+
+    ws.addEventListener("message", handler);
+    return () => ws.removeEventListener("message", handler);
+  }, [ws]);
+
   const handleRefresh = () => {
     overviewQuery.refetch();
     agentStatusQuery.refetch();
@@ -515,13 +556,21 @@ export default function OpsPanel() {
               多 Agent 运行状态 · 任务流 · 模型调用 · 成本监控
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
-            style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
-          >
-            <RefreshCw size={14} /> 刷新
-          </button>
+          <div className="flex items-center gap-2">
+            {liveEvent && (
+              <div className="flex items-center gap-1.5 text-[9px] font-mono px-2 py-1 rounded" style={{ background: "rgba(74,158,255,0.05)", border: "1px solid rgba(74,158,255,0.15)", color: "var(--accent-cyan)" }}>
+                <Activity size={10} />
+                <span className="truncate max-w-24">{liveEvent.type}</span>
+              </div>
+            )}
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
+              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+            >
+              <RefreshCw size={14} /> 刷新
+            </button>
+          </div>
         </div>
 
         {/* 今日概览 */}

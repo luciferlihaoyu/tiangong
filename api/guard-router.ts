@@ -284,6 +284,27 @@ export const guardRouter = createRouter({
         input.costCents >= HIGH_COST_THRESHOLD_CENTS ||
         KNOWN_HIGH_COST_MODELS.includes(input.model);
 
+      // P10.4: 预算检查
+      if (input.agentId) {
+        const agentInfo = await db
+          .select({ budgetCents: agents.budgetCents, spentCents: agents.spentCents })
+          .from(agents)
+          .where(eq(agents.id, input.agentId))
+          .limit(1)
+          .then((rows) => rows[0]);
+
+        if (agentInfo && agentInfo.budgetCents && agentInfo.budgetCents > 0) {
+          const newSpent = (agentInfo.spentCents ?? 0) + input.costCents;
+          if (newSpent > agentInfo.budgetCents) {
+            return {
+              allowed: false,
+              reason: "budget_exceeded",
+              message: `Agent #${input.agentId} 预算已超限：已用 $${(agentInfo.spentCents ?? 0) / 100} / 预算 $${agentInfo.budgetCents / 100}，本次调用需要 $${input.costCents / 100}`,
+            };
+          }
+        }
+      }
+
       // 如果是高价模型，检查授权
       if (isHighCost && input.agentId) {
         const allowlistEntry = await db
@@ -344,6 +365,16 @@ export const guardRouter = createRouter({
 
       const result = await db.insert(tokenUsage).values(values as any);
       const insertId = (result as any).insertId;
+
+      // P10.4: 更新 Agent 已用预算
+      if (input.agentId && input.costCents > 0) {
+        await db
+          .update(agents)
+          .set({
+            spentCents: sql`COALESCE(${agents.spentCents}, 0) + ${input.costCents}`,
+          })
+          .where(eq(agents.id, input.agentId));
+      }
 
       return {
         allowed: true,

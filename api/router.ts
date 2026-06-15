@@ -11,6 +11,7 @@ import { collaborationRouter } from "./collaboration-router";
 import { usageRouter } from "./usage-router";
 import { guardRouter } from "./guard-router";
 import { opsRouter } from "./ops-router";
+import { fusionRouter } from "./fusion-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -28,6 +29,7 @@ export const appRouter = createRouter({
   usage: usageRouter,
   guard: guardRouter,
   ops: opsRouter,
+  fusion: fusionRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -15,6 +15,7 @@ import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
 import GuardPanel from './pages/GuardPanel'
 import OpsPanel from './pages/OpsPanel'
+import FusionPanel from './pages/FusionPanel'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -87,6 +88,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <OpsPanel />
+          </ProtectedLayout>
+        } />
+        <Route path="/fusion" element={
+          <ProtectedLayout>
+            <Navigation />
+            <FusionPanel />
           </ProtectedLayout>
         } />
         <Route path="*" element={

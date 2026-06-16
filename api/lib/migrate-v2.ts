@@ -47,7 +47,17 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "messages", col: "acked_at", def: "TIMESTAMP NULL" },
   { table: "messages", col: "delivered_at", def: "TIMESTAMP NULL" },
   { table: "messages", col: "retry_count", def: "INT DEFAULT 0 NOT NULL" },
-  { table: "messages", col: "priority", def: "INT DEFAULT 0 NOT NULL" },
+    { table: "messages", col: "priority", def: "INT DEFAULT 0 NOT NULL" },
+  // Phase 1: token_usage 审计增强字段
+  { table: "token_usage", col: "session_key", def: "VARCHAR(128)" },
+  { table: "token_usage", col: "source", def: "VARCHAR(20) DEFAULT 'manual'" },
+  { table: "token_usage", col: "trace_id", def: "VARCHAR(64)" },
+  // Phase 2: 高价模型标记
+  { table: "token_usage", col: "high_cost_model", def: "ENUM('true','false') DEFAULT 'false'" },
+  // 输出格式校验
+  { table: "tasks", col: "expected_output_schema", def: "TEXT" },
+  { table: "tasks", col: "output_valid", def: "ENUM('true','false','unknown') DEFAULT 'unknown'" },
+
 ];
 
 export async function migrateV2(force = false): Promise<string[]> {
@@ -192,16 +202,6 @@ export async function migrateV2(force = false): Promise<string[]> {
       logs.push(`messages.status ENUM: ${e.message?.slice(0, 80)}`);
       console.warn("  ⚠️ messages.status ENUM update failed:", e.message?.slice(0, 80));
     }
-
-    // Phase 1: token_usage 审计增强字段
-  { table: "token_usage", col: "session_key", def: "VARCHAR(128)" },
-  { table: "token_usage", col: "source", def: "VARCHAR(20) DEFAULT 'manual'" },
-  { table: "token_usage", col: "trace_id", def: "VARCHAR(64)" },
-  // Phase 2: 高价模型标记
-  { table: "token_usage", col: "high_cost_model", def: "ENUM('true','false') DEFAULT 'false'" },
-  // 输出格式校验
-  { table: "tasks", col: "expected_output_schema", def: "TEXT" },
-  { table: "tasks", col: "output_valid", def: "ENUM('true','false','unknown') DEFAULT 'unknown'" },
 
   // P8.1: add unique index for idempotency (from_agent, idempotency_key)
     try {

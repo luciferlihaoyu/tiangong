@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
-import { ClipboardList, Target, BarChart3, Shield, Activity, Scale, Radio, GitBranch } from 'lucide-react';
+import { ClipboardList, Target, BarChart3, Shield, Activity, Scale, Radio, GitBranch, Github } from 'lucide-react';
 
 function SunIcon() {
   return (
@@ -109,6 +109,11 @@ export default function Navigation() {
         {/* DAG */}
         <button onClick={() => navigate('/dag')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务 DAG">
           <GitBranch size={14} /> DAG
+        </button>
+
+        {/* GitHub 集成 */}
+        <button onClick={() => navigate('/github')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="GitHub 集成">
+          <Github size={14} /> GitHub
         </button>
 
         {/* 事件流 */}

@@ -256,7 +256,84 @@ export async function migrateV2(force = false): Promise<string[]> {
       }
     }
 
-    logs.push(`V2 migration completed: ${added} columns added, ${skipped} skipped`);
+
+
+    // P11: GitHub App integration tables
+    const githubTables = [
+      `CREATE TABLE IF NOT EXISTS github_integrations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        app_id VARCHAR(20),
+        installation_id VARCHAR(20),
+        owner VARCHAR(100),
+        active ENUM('true','false') DEFAULT 'true',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS github_repos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        owner VARCHAR(100) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        full_name VARCHAR(255) NOT NULL,
+        default_branch VARCHAR(100) DEFAULT 'main',
+        installation_id BIGINT UNSIGNED NULL,
+        active ENUM('true','false') DEFAULT 'true',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS github_repo_permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agent_id BIGINT UNSIGNED NOT NULL,
+        repo_id BIGINT UNSIGNED NOT NULL,
+        permission_level ENUM('read','push','admin') DEFAULT 'read' NOT NULL,
+        active ENUM('true','false') DEFAULT 'true',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS github_pull_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        repo_id BIGINT UNSIGNED NOT NULL,
+        pr_number INT NOT NULL,
+        title VARCHAR(500) NOT NULL,
+        body TEXT,
+        branch_name VARCHAR(255),
+        base_branch VARCHAR(255),
+        head_sha VARCHAR(40),
+        author_agent_id BIGINT UNSIGNED NULL,
+        status ENUM('pending','approved','rejected','merged','closed') DEFAULT 'pending' NOT NULL,
+        approved_by BIGINT UNSIGNED NULL,
+        approved_at TIMESTAMP NULL,
+        merged_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS github_audit_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        pr_id BIGINT UNSIGNED NULL,
+        action ENUM('approve','reject','merge','register','revoke') NOT NULL,
+        agent_id BIGINT UNSIGNED NULL,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    ];
+
+    for (const sql of githubTables) {
+      try {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        await conn.execute(sql);
+        logs.push(`P11 GitHub table ${tableName}: OK`);
+        console.log(`  ✅ P11 GitHub table ${tableName} created`);
+      } catch (e: any) {
+        const tableName = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/)?.[1] || "unknown";
+        logs.push(`P11 GitHub table ${tableName}: ${e.message?.slice(0, 80)}`);
+        console.warn(`  ⚠️ P11 GitHub table ${tableName} failed:`, e.message?.slice(0, 80));
+      }
+    }
+
+        logs.push(`V2 migration completed: ${added} columns added, ${skipped} skipped`);
     console.log(`V2 migration completed: ${added} columns added, ${skipped} skipped`);
   } catch (e: any) {
     logs.push(`Connection failed: ${e.message}`);

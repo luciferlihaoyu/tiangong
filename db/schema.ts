@@ -271,6 +271,81 @@ export const highCostModelAuth = mysqlTable("high_cost_model_auth", {
 export type HighCostModelAuth = typeof highCostModelAuth.$inferSelect;
 export type InsertHighCostModelAuth = typeof highCostModelAuth.$inferInsert;
 
+// ─── P11: GitHub App Integration ───
+export const githubIntegrations = mysqlTable("github_integrations", {
+  id: serial("id").primaryKey(),
+  appId: varchar("app_id", { length: 20 }),
+  installationId: varchar("installation_id", { length: 20 }),
+  owner: varchar("owner", { length: 100 }),
+  active: mysqlEnum("active", ["true", "false"]).default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type GithubIntegration = typeof githubIntegrations.$inferSelect;
+export type InsertGithubIntegration = typeof githubIntegrations.$inferInsert;
+
+export const githubRepos = mysqlTable("github_repos", {
+  id: serial("id").primaryKey(),
+  owner: varchar("owner", { length: 100 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  fullName: varchar("full_name", { length: 255 }).notNull(),
+  defaultBranch: varchar("default_branch", { length: 100 }).default("main"),
+  installationId: bigint("installation_id", { mode: "number", unsigned: true }),
+  active: mysqlEnum("active", ["true", "false"]).default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type GithubRepo = typeof githubRepos.$inferSelect;
+export type InsertGithubRepo = typeof githubRepos.$inferInsert;
+
+export const githubRepoPermissions = mysqlTable("github_repo_permissions", {
+  id: serial("id").primaryKey(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }).notNull(),
+  repoId: bigint("repo_id", { mode: "number", unsigned: true }).notNull(),
+  permissionLevel: mysqlEnum("permission_level", ["read", "push", "admin"]).default("read").notNull(),
+  active: mysqlEnum("active", ["true", "false"]).default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type GithubRepoPermission = typeof githubRepoPermissions.$inferSelect;
+export type InsertGithubRepoPermission = typeof githubRepoPermissions.$inferInsert;
+
+export const githubPullRequests = mysqlTable("github_pull_requests", {
+  id: serial("id").primaryKey(),
+  repoId: bigint("repo_id", { mode: "number", unsigned: true }).notNull(),
+  prNumber: int("pr_number").notNull(),
+  title: varchar("title", { length: 500 }).notNull(),
+  body: text("body"),
+  branchName: varchar("branch_name", { length: 255 }),
+  baseBranch: varchar("base_branch", { length: 255 }),
+  headSha: varchar("head_sha", { length: 40 }),
+  authorAgentId: bigint("author_agent_id", { mode: "number", unsigned: true }),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "merged", "closed"]).default("pending").notNull(),
+  approvedBy: bigint("approved_by", { mode: "number", unsigned: true }),
+  approvedAt: timestamp("approved_at"),
+  mergedAt: timestamp("merged_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type GithubPullRequest = typeof githubPullRequests.$inferSelect;
+export type InsertGithubPullRequest = typeof githubPullRequests.$inferInsert;
+
+export const githubAuditLog = mysqlTable("github_audit_log", {
+  id: serial("id").primaryKey(),
+  prId: bigint("pr_id", { mode: "number", unsigned: true }),
+  action: mysqlEnum("action", ["approve", "reject", "merge", "register", "revoke"]).notNull(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type GithubAuditLogEntry = typeof githubAuditLog.$inferSelect;
+export type InsertGithubAuditLogEntry = typeof githubAuditLog.$inferInsert;
+
 // ─── Conversations (任务记事板) ───
 export const conversations = mysqlTable("conversations", {
   id: serial("id").primaryKey(),

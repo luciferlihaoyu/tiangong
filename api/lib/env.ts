@@ -16,4 +16,12 @@ export const env = {
   adminPassword: optional("ADMIN_PASSWORD", "admin"),
 
   isProduction: process.env.NODE_ENV === "production",
+
+  // P11: GitHub App Integration
+  githubAppId: optional("GITHUB_APP_ID"),
+  githubAppPrivateKeyPath: optional("GITHUB_APP_PRIVATE_KEY_PATH"),
+  githubAppPrivateKey: optional("GITHUB_APP_PRIVATE_KEY"),
+  githubAppPrivateKeyBase64: optional("GITHUB_APP_PRIVATE_KEY_BASE64"),
+  githubAppInstallationId: optional("GITHUB_APP_INSTALLATION_ID"),
+  githubWebhookSecret: optional("GITHUB_WEBHOOK_SECRET"),
 };

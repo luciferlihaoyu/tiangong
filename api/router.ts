@@ -13,6 +13,7 @@ import { guardRouter } from "./guard-router";
 import { opsRouter } from "./ops-router";
 import { fusionRouter } from "./fusion-router";
 import { planRouter } from "./plan-router";
+import { githubRouter } from "./github-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -32,6 +33,7 @@ export const appRouter = createRouter({
   ops: opsRouter,
   fusion: fusionRouter,
   plan: planRouter,
+  github: githubRouter,
 });
 
 export type AppRouter = typeof appRouter;

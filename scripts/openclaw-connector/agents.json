@@ -1,0 +1,27 @@
+{
+  "agents": [
+    {
+      "name": "meizhizi",
+      "agentId": 1,
+      "token": "tg-1-88BgwZ-fzXi0HcKsOFtpVeXchK88RM6l",
+      "label": "美智子"
+    },
+    {
+      "name": "codemaster",
+      "agentId": 2,
+      "token": "tg-2-COl17DqQaROZIi94kbZ31g1S98NfY9Tt",
+      "label": "编程大师",
+      "execMode": "command",
+      "execFile": "node",
+      "execArgs": [
+        "./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs",
+        "--agent",
+        "codemaster",
+        "--timeout",
+        "600"
+      ],
+      "execTimeoutMs": 660000,
+      "resultMaxChars": 12000
+    }
+  ]
+}

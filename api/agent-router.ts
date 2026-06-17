@@ -199,9 +199,7 @@ export const agentRouter = createRouter({
           and(
             eq(tasks.status, "queued"),
             agent.orgId
-              ? and(
-                  eq(tasks.agentId, input.agentId),
-                )
+              ? eq(tasks.agentId, input.agentId)
               : eq(tasks.agentId, input.agentId),
           )
         )

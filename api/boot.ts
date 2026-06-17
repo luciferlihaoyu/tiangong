@@ -37,6 +37,33 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
+// P11.4: 版本信息端点（读取部署环境变量，无运行时 .git 依赖）
+app.get("/api/version", (c) => {
+  const sha =
+    process.env.COMMIT_SHA ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.SOURCE_COMMIT ||
+    process.env.ZBPACK_COMMIT_SHA ||
+    null;
+
+  let buildTime = process.env.BUILD_TIME || process.env.VERCEL_BUILD_TIME || null;
+  if (!buildTime) {
+    // Generate a build timestamp if not provided
+    buildTime = new Date().toISOString();
+  }
+
+  return c.json({
+    ok: true,
+    version: process.env.npm_package_version || "0.0.0",
+    commit: sha,
+    shortCommit: sha ? sha.slice(0, 7) : null,
+    buildTime,
+    deployedAt: process.env.DEPLOYED_AT || process.env.ZEABUR_DEPLOY_TIME || null,
+    source: sha ? "env" : "unknown",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // P7: Runner 状态诊断端点（不泄露 secrets/command/args/token 内容）
 app.get("/api/runner/status", (c) => {
   const s = taskRunner.status;

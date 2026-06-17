@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
+import { useVersion } from '@/hooks/useVersion';
 import { ClipboardList, Target, BarChart3, Shield, Activity, Scale, Radio, GitBranch, Github } from 'lucide-react';
 
 function SunIcon() {
@@ -24,6 +25,7 @@ function MoonIcon() {
 export default function Navigation() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
+  const { data: version } = useVersion();
   const tabs = [
     { label: '全部', active: true },
     { label: '运行中', count: 5 },
@@ -60,7 +62,12 @@ export default function Navigation() {
           </div>
         </button>
         <div className="h-4 w-px" style={{ background: 'var(--border-default)' }} />
-        <span className="font-mono text-[10px] tracking-wider" style={{ color: 'var(--text-muted)' }}>v2.1.0</span>
+        <span className="font-mono text-[10px] tracking-wider" style={{ color: 'var(--text-muted)' }} title={version?.commit || 'unknown'}>
+          v{version?.version || '...'}
+          {version?.shortCommit && (
+            <span className="ml-1 text-[8px] opacity-60">({version.shortCommit})</span>
+          )}
+        </span>
       </div>
 
       {/* Center: Tabs */}

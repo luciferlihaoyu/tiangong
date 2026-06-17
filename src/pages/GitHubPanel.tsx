@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Lock,
   Unlock,
+  ExternalLink,
 } from "lucide-react";
 
 /* ═══════════════════════════════════════════
@@ -238,7 +239,16 @@ function RepoPanel({ repos, onRefresh }: { repos: any[]; onRefresh: () => void }
             >
               <div className="flex items-center gap-2">
                 <GitBranch size={12} style={{ color: "var(--accent-cyan)" }} />
-                <span style={{ color: "var(--text-primary)" }}>{r.fullName}</span>
+                <a
+                  href={`https://github.com/${r.owner}/${r.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 transition-opacity hover:opacity-80"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  <span>{r.fullName}</span>
+                  <ExternalLink size={10} style={{ color: "var(--text-muted)" }} />
+                </a>
                 <span style={{ color: "var(--text-muted)" }}>分支: {r.defaultBranch}</span>
               </div>
               <span style={{ color: "var(--text-muted)" }}>权限: {r.permissionCount ?? 0}</span>

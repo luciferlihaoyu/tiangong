@@ -172,7 +172,7 @@ export default function Login() {
         {/* Hint */}
         <div className="mt-4 text-center">
           <p className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
-            默认管理员: admin / admin
+            请联系管理员获取账号
           </p>
         </div>
       </div>

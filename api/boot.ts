@@ -37,14 +37,33 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
-// P11.4: 版本信息端点（读取部署环境变量，无运行时 .git 依赖）
-app.get("/api/version", (c) => {
-  const sha =
+// P11.4: 版本信息端点（读取部署环境变量或构建时注入的 commit，无运行时 .git 依赖）
+app.get("/api/version", async (c) => {
+  let buildCommitSha: string | null = null;
+  try {
+    const commitMod = await import('./commit.js');
+    buildCommitSha = commitMod.COMMIT_SHA ?? null;
+  } catch {
+    buildCommitSha = null;
+  }
+
+  let sha: string | null = null;
+  let source = "unknown";
+
+  const envSha =
     process.env.COMMIT_SHA ||
     process.env.VERCEL_GIT_COMMIT_SHA ||
     process.env.SOURCE_COMMIT ||
     process.env.ZBPACK_COMMIT_SHA ||
     null;
+
+  if (envSha) {
+    sha = envSha;
+    source = "env";
+  } else if (buildCommitSha) {
+    sha = buildCommitSha;
+    source = "build";
+  }
 
   let buildTime = process.env.BUILD_TIME || process.env.VERCEL_BUILD_TIME || null;
   if (!buildTime) {
@@ -59,7 +78,7 @@ app.get("/api/version", (c) => {
     shortCommit: sha ? sha.slice(0, 7) : null,
     buildTime,
     deployedAt: process.env.DEPLOYED_AT || process.env.ZEABUR_DEPLOY_TIME || null,
-    source: sha ? "env" : "unknown",
+    source,
     timestamp: new Date().toISOString(),
   });
 });

@@ -6,3 +6,4 @@ dist/
 jiti/
 feishu_write.json
 openclaw-git-backup
+api/commit.ts

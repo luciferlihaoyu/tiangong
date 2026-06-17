@@ -26,13 +26,6 @@ export default function Navigation() {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const { data: version } = useVersion();
-  const tabs = [
-    { label: '全部', active: true },
-    { label: '运行中', count: 5 },
-    { label: '审核中', count: 2 },
-    { label: '已归档', count: 0 },
-  ];
-
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-6"
       style={{
@@ -68,27 +61,6 @@ export default function Navigation() {
             <span className="ml-1 text-[8px] opacity-60">({version.shortCommit})</span>
           )}
         </span>
-      </div>
-
-      {/* Center: Tabs */}
-      <div className="hidden md:flex items-center gap-1">
-        {tabs.map((tab) => (
-          <button key={tab.label}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs transition-all"
-            style={{
-              background: tab.active ? 'var(--accent-glow-red)' : 'transparent',
-              color: tab.active ? 'var(--accent-red-bright)' : 'var(--text-muted)',
-              border: tab.active ? '1px solid rgba(194, 58, 48, 0.2)' : '1px solid transparent',
-            }}>
-            {tab.label}
-            {tab.count !== undefined && tab.count > 0 && (
-              <span className="text-[9px] px-1 py-0.5 rounded font-mono"
-                style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
       </div>
 
       {/* Right: Actions */}

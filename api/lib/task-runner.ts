@@ -38,7 +38,7 @@ function envBool(name: string, def: boolean): boolean {
 }
 
 function envStr(name: string, def: string): string {
-  return process.env[name] ?? def;
+  return (process.env[name] ?? def).trim();
 }
 
 function envInt(name: string, def: number, min = 1, max = Number.MAX_SAFE_INTEGER): number {

@@ -64,7 +64,7 @@ const execArgsConfig = envJsonArray("TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON");
 
 const CONFIG = {
   enabled: envBool("TIANGONG_TASK_RUNNER_ENABLED", true),
-  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway",
+  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway" | "none",
   intervalMs: envInt("TIANGONG_TASK_RUNNER_INTERVAL_MS", 5000, 500),
   batchSize: envInt("TIANGONG_TASK_RUNNER_BATCH_SIZE", 1, 1, 5),
   // P6: argv-mode (recommended)
@@ -161,6 +161,10 @@ class TaskRunner {
   start(): void {
     if (!CONFIG.enabled) {
       console.log("[TaskRunner] Disabled by config, not starting.");
+      return;
+    }
+    if (CONFIG.mode === "none") {
+      console.log("[TaskRunner] Mode is 'none', not starting periodic scan.");
       return;
     }
     if (this.timer) return;

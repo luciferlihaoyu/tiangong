@@ -188,6 +188,7 @@ class TaskRunner {
 
   /** 每隔 intervalMs 执行一次扫描 */
   private async tick(): Promise<void> {
+    if (CONFIG.mode === "none") return;
     if (this.tickRunning) return;
     this.tickRunning = true;
     try {

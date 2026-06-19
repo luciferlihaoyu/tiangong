@@ -53,6 +53,11 @@ export const agents = mysqlTable("agents", {
   lastHeartbeat: timestamp("last_heartbeat"),
   sourceApiKey: varchar("source_api_key", { length: 255 }),
   sourceEndpoint: varchar("source_endpoint", { length: 500 }),
+  // ── A2A-lite v0.1: Agent Card extensibility ──
+  agentCard: text("agent_card"),
+  openclawAgent: varchar("openclaw_agent", { length: 100 }),
+  canModifyTiangongCore: mysqlEnum("can_modify_tiangong_core", ["true", "false"]).default("false"),
+  canSendExternalMessage: mysqlEnum("can_send_external_message", ["true", "false"]).default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });
@@ -81,6 +86,15 @@ export const tasks = mysqlTable("tasks", {
   // 输出格式校验
   expectedOutputSchema: text("expected_output_schema"),
   outputValid: mysqlEnum("output_valid", ["true", "false", "unknown"]).default("unknown"),
+  // ── A2A-lite v0.1: lifecycle status machine ──
+  lifecycleStatus: varchar("lifecycle_status", { length: 30 }).default("created"),
+  dispatcherAgentId: bigint("dispatcher_agent_id", { mode: "number", unsigned: true }),
+  claimedAt: timestamp("claimed_at"),
+  dispatchedAt: timestamp("dispatched_at"),
+  acceptedAt: timestamp("accepted_at"),
+  completedAt: timestamp("completed_at"),
+  failedAt: timestamp("failed_at"),
+  timeoutAt: timestamp("timeout_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });
@@ -362,3 +376,58 @@ export const conversations = mysqlTable("conversations", {
 
 export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = typeof conversations.$inferInsert;
+
+// ─── A2A-lite v0.1: Task Threads ───
+export const taskThreads = mysqlTable("task_threads", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  title: varchar("title", { length: 255 }),
+  status: mysqlEnum("status", ["open", "closed", "archived"]).default("open").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type TaskThread = typeof taskThreads.$inferSelect;
+export type InsertTaskThread = typeof taskThreads.$inferInsert;
+
+// ─── A2A-lite v0.1: Task Messages (thread events) ───
+export const taskMessages = mysqlTable("task_messages", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  threadId: bigint("thread_id", { mode: "number", unsigned: true }),
+  fromAgentId: bigint("from_agent_id", { mode: "number", unsigned: true }),
+  toAgentId: bigint("to_agent_id", { mode: "number", unsigned: true }),
+  eventType: mysqlEnum("event_type", [
+    "dispatch",
+    "ack",
+    "progress",
+    "working",
+    "result",
+    "error",
+    "timeout",
+    "cancel",
+    "system",
+  ]).default("system").notNull(),
+  content: text("content"),
+  metadata: text("metadata"), // JSON
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TaskMessage = typeof taskMessages.$inferSelect;
+export type InsertTaskMessage = typeof taskMessages.$inferInsert;
+
+// ─── A2A-lite v0.1: Task Artifacts ───
+export const taskArtifacts = mysqlTable("task_artifacts", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }),
+  type: varchar("type", { length: 50 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  content: text("content"),
+  jsonPayload: text("json_payload"),
+  mimeType: varchar("mime_type", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TaskArtifact = typeof taskArtifacts.$inferSelect;
+export type InsertTaskArtifact = typeof taskArtifacts.$inferInsert;

@@ -47,6 +47,7 @@ interface Task {
   name: string;
   agentId: number | null;
   status: "pending" | "queued" | "running" | "done" | "failed";
+  lifecycleStatus: string | null;
   progress: number;
   description: string | null;
   priority: number;
@@ -74,6 +75,23 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   running: { label: "执行中", color: "var(--warning)", bg: "var(--accent-glow-gold)", icon: <Play size={12} /> },
   done: { label: "已完成", color: "var(--success)", bg: "rgba(76,175,125,0.08)", icon: <CheckCircle size={12} /> },
   failed: { label: "失败", color: "var(--accent-red)", bg: "var(--accent-glow-red)", icon: <AlertTriangle size={12} /> },
+};
+
+// A2A-lite v0.1: lifecycle status display
+const LIFECYCLE_LABELS: Record<string, string> = {
+  created: "已创建",
+  queued: "已排队",
+  claimed: "已认领",
+  dispatched: "已投递",
+  accepted: "已接受",
+  working: "工作中",
+  awaiting_result: "等待结果",
+  submitted: "已提交",
+  reviewing: "审核中",
+  completed: "已完成",
+  failed: "已失败",
+  timeout: "已超时",
+  cancelled: "已取消",
 };
 
 const PRIORITY_LABELS: Record<number, string> = {
@@ -175,6 +193,7 @@ function TaskCard({
 }) {
   const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
   const agent = agents.find((a) => a.id === task.agentId);
+  const lcLabel = task.lifecycleStatus ? LIFECYCLE_LABELS[task.lifecycleStatus] : null;
 
   return (
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
@@ -222,6 +241,14 @@ function TaskCard({
         >
           {sc.icon} {sc.label}
         </span>
+        {lcLabel && lcLabel !== sc.label && (
+          <span
+            className="text-[9px] px-1 py-0 rounded font-mono flex-shrink-0"
+            style={{ background: "rgba(180,200,255,0.05)", color: "var(--text-muted)" }}
+          >
+            {lcLabel}
+          </span>
+        )}
         <span
           className="text-[10px] font-mono"
           style={{ color: "var(--accent-gold)" }}
@@ -685,6 +712,9 @@ function TaskDetailDrawer({
           >
             <div>
               <span style={{ color: "var(--text-secondary)" }}>状态:</span> {task.status}
+            </div>
+            <div>
+              <span style={{ color: "var(--text-secondary)" }}>生命周期:</span> {task.lifecycleStatus || "—"}
             </div>
             <div>
               <span style={{ color: "var(--text-secondary)" }}>优先级:</span> P{task.priority}

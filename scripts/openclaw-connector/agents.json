@@ -3,8 +3,102 @@
     {
       "name": "meizhizi",
       "agentId": 1,
-      "token": "tg-1-88BgwZ-fzXi0HcKsOFtpVeXchK88RM6l",
-      "label": "美智子"
+      "label": "美智子",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-meizhizi.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_MEIZHIZI_MCP_KEY"
+    },
+    {
+      "name": "codemaster",
+      "agentId": 2,
+      "label": "编程大师",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-codemaster.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_CODEMASTER_MCP_KEY"
+    },
+    {
+      "name": "houtu",
+      "agentId": 5,
+      "label": "后土",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-houtu.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_HOUTU_MCP_KEY"
+    },
+    {
+      "name": "shangguan",
+      "agentId": 6,
+      "label": "上官婉儿",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-shangguan.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_SHANGGUAN_MCP_KEY"
+    },
+    {
+      "name": "sumu",
+      "agentId": 7,
+      "label": "上杉绘梨衣",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-sumu.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_SUMU_MCP_KEY"
+    },
+    {
+      "name": "qiongxiao",
+      "agentId": 8,
+      "label": "琼霄",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-qiongxiao.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_QIONGXIAO_MCP_KEY"
+    },
+    {
+      "name": "yunxiao",
+      "agentId": 9,
+      "label": "云霄",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-yunxiao.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_YUNXIAO_MCP_KEY"
+    },
+    {
+      "name": "weizi",
+      "agentId": 10,
+      "label": "薇子",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-weizi.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_WEIZI_MCP_KEY"
+    },
+    {
+      "name": "meichengzi",
+      "agentId": 11,
+      "label": "美成子",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-meichengzi.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_MEICHENGZI_MCP_KEY"
+    },
+    {
+      "name": "jingwei",
+      "agentId": 12,
+      "label": "精卫",
+      "execMode": "command",
+      "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-jingwei.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_JINGWEI_MCP_KEY"
     }
   ]
 }

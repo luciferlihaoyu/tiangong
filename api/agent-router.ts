@@ -41,6 +41,11 @@ export const agentRouter = createRouter({
         reportsTo: z.number().optional(),
         sourceApiKey: z.string().max(255).optional(),
         sourceEndpoint: z.string().max(500).optional(),
+        // A2A-lite v0.1
+        agentCard: z.record(z.string(), z.any()).optional(),
+        openclawAgent: z.string().max(100).optional(),
+        canModifyTiangongCore: z.boolean().optional(),
+        canSendExternalMessage: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -60,6 +65,10 @@ export const agentRouter = createRouter({
         reportsTo: input.reportsTo ?? null,
         sourceApiKey: input.sourceApiKey ?? null,
         sourceEndpoint: input.sourceEndpoint ?? null,
+        agentCard: input.agentCard ? JSON.stringify(input.agentCard) : null,
+        openclawAgent: input.openclawAgent ?? null,
+        canModifyTiangongCore: input.canModifyTiangongCore ? "true" : "false",
+        canSendExternalMessage: input.canSendExternalMessage ? "true" : "false",
       });
       const insertId = (result as any).insertId;
 
@@ -112,6 +121,11 @@ export const agentRouter = createRouter({
         spentCents: z.number().optional(),
         sourceApiKey: z.string().max(255).optional(),
         sourceEndpoint: z.string().max(500).optional(),
+        // A2A-lite v0.1
+        agentCard: z.record(z.string(), z.any()).optional(),
+        openclawAgent: z.string().max(100).optional(),
+        canModifyTiangongCore: z.boolean().optional(),
+        canSendExternalMessage: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -121,6 +135,10 @@ export const agentRouter = createRouter({
       for (const [k, v] of Object.entries(fields)) {
         if (v !== undefined) updateFields[k] = v;
       }
+      // Normalize agentCard JSON
+      if (input.agentCard !== undefined) updateFields.agentCard = JSON.stringify(input.agentCard);
+      if (input.canModifyTiangongCore !== undefined) updateFields.canModifyTiangongCore = input.canModifyTiangongCore ? "true" : "false";
+      if (input.canSendExternalMessage !== undefined) updateFields.canSendExternalMessage = input.canSendExternalMessage ? "true" : "false";
       if (Object.keys(updateFields).length > 0) {
         await db.update(agents).set(updateFields).where(eq(agents.id, id));
       }
@@ -229,12 +247,14 @@ export const agentRouter = createRouter({
         return { task: null };
       }
 
-      // 3. 认领任务：更新任务状态为 running，设置 agentId
+      // 3. 认领任务：更新任务状态为 running，设置 agentId，A2A-lite lifecycle
       await db
         .update(tasks)
         .set({
           status: "running",
+          lifecycleStatus: "claimed",
           agentId: input.agentId,
+          claimedAt: new Date(),
         })
         .where(eq(tasks.id, task.id));
 
@@ -309,12 +329,14 @@ export const agentRouter = createRouter({
         const bestTask = allClaimable[0];
 
         if (bestTask) {
-          // 自动认领
+          // 自动认领，A2A-lite lifecycle
           await db
             .update(tasks)
             .set({
               status: "running",
+              lifecycleStatus: "claimed",
               agentId: input.id,
+              claimedAt: new Date(),
             })
             .where(eq(tasks.id, bestTask.id));
 

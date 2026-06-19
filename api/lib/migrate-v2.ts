@@ -22,6 +22,11 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "agents", col: "last_heartbeat", def: "TIMESTAMP NULL" },
   { table: "agents", col: "source_api_key", def: "VARCHAR(255)" },
   { table: "agents", col: "source_endpoint", def: "VARCHAR(500)" },
+  // A2A-lite v0.1: AgentCard / permission boundary
+  { table: "agents", col: "agent_card", def: "TEXT" },
+  { table: "agents", col: "openclaw_agent", def: "VARCHAR(100)" },
+  { table: "agents", col: "can_modify_tiangong_core", def: "ENUM('true','false') DEFAULT 'false'" },
+  { table: "agents", col: "can_send_external_message", def: "ENUM('true','false') DEFAULT 'false'" },
 
   // tasks 表新增字段
   { table: "tasks", col: "priority", def: "INT DEFAULT 0" },
@@ -57,6 +62,15 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   // 输出格式校验
   { table: "tasks", col: "expected_output_schema", def: "TEXT" },
   { table: "tasks", col: "output_valid", def: "ENUM('true','false','unknown') DEFAULT 'unknown'" },
+  // A2A-lite v0.1: task lifecycle
+  { table: "tasks", col: "lifecycle_status", def: "VARCHAR(30) DEFAULT 'created'" },
+  { table: "tasks", col: "dispatcher_agent_id", def: "BIGINT UNSIGNED" },
+  { table: "tasks", col: "claimed_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "dispatched_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "accepted_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "completed_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "failed_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "timeout_at", def: "TIMESTAMP NULL" },
 
 ];
 
@@ -142,6 +156,39 @@ export async function migrateV2(force = false): Promise<string[]> {
         id INT AUTO_INCREMENT PRIMARY KEY,
         task_id BIGINT NOT NULL,
         depends_on_task_id BIGINT NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS task_threads (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id BIGINT UNSIGNED NOT NULL,
+        title VARCHAR(255),
+        status ENUM('open','closed','archived') DEFAULT 'open' NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS task_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id BIGINT UNSIGNED NOT NULL,
+        thread_id BIGINT UNSIGNED,
+        from_agent_id BIGINT UNSIGNED,
+        to_agent_id BIGINT UNSIGNED,
+        event_type ENUM('dispatch','ack','progress','working','result','error','timeout','cancel','system') DEFAULT 'system' NOT NULL,
+        content TEXT,
+        metadata TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+      `CREATE TABLE IF NOT EXISTS task_artifacts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id BIGINT UNSIGNED NOT NULL,
+        agent_id BIGINT UNSIGNED,
+        type VARCHAR(50) NOT NULL,
+        name VARCHAR(255),
+        content TEXT,
+        json_payload TEXT,
+        mime_type VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
       `CREATE TABLE IF NOT EXISTS token_usage (

@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { agents, tasks, messages, organizations, departments, taskDependencies, mcpApiKeys, mcpAuditLog } from "./schema";
+import { agents, tasks, messages, organizations, departments, taskDependencies, mcpApiKeys, mcpAuditLog, taskThreads, taskMessages, taskArtifacts } from "./schema";
 
 export const agentRelations = relations(agents, ({ many, one }) => ({
   tasks: many(tasks),
@@ -14,6 +14,10 @@ export const taskRelations = relations(tasks, ({ one, many }) => ({
   parentTask: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id] }),
   childTasks: many(tasks, { relationName: "childTasks" }),
   dependencies: many(taskDependencies),
+  // A2A-lite v0.1
+  threads: many(taskThreads),
+  taskMessages: many(taskMessages),
+  artifacts: many(taskArtifacts),
 }));
 
 export const messageRelations = relations(messages, ({ one }) => ({
@@ -44,4 +48,22 @@ export const mcpApiKeyRelations = relations(mcpApiKeys, ({ one, many }) => ({
 
 export const mcpAuditLogRelations = relations(mcpAuditLog, ({ one }) => ({
   apiKey: one(mcpApiKeys, { fields: [mcpAuditLog.keyId], references: [mcpApiKeys.id] }),
+}));
+
+// ── A2A-lite v0.1 relations ──
+export const taskThreadRelations = relations(taskThreads, ({ one, many }) => ({
+  task: one(tasks, { fields: [taskThreads.taskId], references: [tasks.id] }),
+  messages: many(taskMessages),
+}));
+
+export const taskMessageRelations = relations(taskMessages, ({ one }) => ({
+  task: one(tasks, { fields: [taskMessages.taskId], references: [tasks.id] }),
+  thread: one(taskThreads, { fields: [taskMessages.threadId], references: [taskThreads.id] }),
+  fromAgent: one(agents, { fields: [taskMessages.fromAgentId], references: [agents.id] }),
+  toAgent: one(agents, { fields: [taskMessages.toAgentId], references: [agents.id] }),
+}));
+
+export const taskArtifactRelations = relations(taskArtifacts, ({ one }) => ({
+  task: one(tasks, { fields: [taskArtifacts.taskId], references: [tasks.id] }),
+  agent: one(agents, { fields: [taskArtifacts.agentId], references: [agents.id] }),
 }));

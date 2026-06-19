@@ -23,7 +23,7 @@
  */
 
 import { getDb } from "../queries/connection";
-import { tasks, agents } from "@db/schema";
+import { tasks, agents, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
@@ -213,6 +213,30 @@ class TaskRunner {
     }
   }
 
+  /** A2A-lite v0.1: record task event directly via DB */
+  private async recordEvent(taskId: number, eventType: string, content?: string, metadata?: Record<string, unknown>, agentId?: number) {
+    const db = getDb();
+    await db.insert(taskMessages).values({
+      taskId,
+      fromAgentId: agentId ?? null,
+      eventType: eventType as any,
+      content: content ?? null,
+      metadata: metadata ? JSON.stringify(metadata) : null,
+    });
+  }
+
+  /** A2A-lite v0.1: record artifact directly via DB */
+  private async recordArtifact(taskId: number, type: string, content: string, agentId?: number) {
+    const db = getDb();
+    await db.insert(taskArtifacts).values({
+      taskId,
+      agentId: agentId ?? null,
+      type,
+      name: `${type}-${taskId}`,
+      content,
+    });
+  }
+
   /** 安全领取任务（防止重复领取）并执行 */
   private async claimAndExecute(task: typeof tasks.$inferSelect): Promise<void> {
     const db = getDb();
@@ -222,12 +246,12 @@ class TaskRunner {
       // 安全领取：只有 status 仍是 queued 才更新
       await db
         .update(tasks)
-        .set({ status: "running", progress: 10, updatedAt: new Date() as any })
+        .set({ status: "running", lifecycleStatus: "claimed", progress: 10, claimedAt: new Date(), updatedAt: new Date() as any })
         .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
 
       // 重新读取确认领取成功
       const claimed = await db
-        .select({ status: tasks.status, progress: tasks.progress })
+        .select({ status: tasks.status, progress: tasks.progress, lifecycleStatus: tasks.lifecycleStatus })
         .from(tasks)
         .where(eq(tasks.id, task.id))
         .then((r) => r[0]);
@@ -237,6 +261,8 @@ class TaskRunner {
         return;
       }
 
+      await this.recordEvent(task.id, "system", `TaskRunner claimed task ${task.taskId}`, undefined, task.agentId ?? undefined);
+
       // 广播状态变更
       wsManager.broadcastToDashboard({
         type: "task_update",
@@ -245,6 +271,7 @@ class TaskRunner {
         taskId: task.taskId,
         name: task.name,
         status: "running",
+        lifecycleStatus: "claimed",
         progress: 10,
         agentId: task.agentId,
         timestamp: startedAt.toISOString(),
@@ -264,10 +291,10 @@ class TaskRunner {
       // 3. 构造执行 prompt
       const prompt = this.buildPrompt(task, agent);
 
-      // 4. 更新进度到 25
+      // 4. 更新进度到 25，标记 working
       await db
         .update(tasks)
-        .set({ progress: 25 })
+        .set({ progress: 25, lifecycleStatus: "working" })
         .where(eq(tasks.id, task.id));
       wsManager.broadcastToDashboard({
         type: "task_update",
@@ -276,6 +303,7 @@ class TaskRunner {
         taskId: task.taskId,
         name: task.name,
         status: "running",
+        lifecycleStatus: "working",
         progress: 25,
         agentId: task.agentId,
         timestamp: new Date().toISOString(),
@@ -283,7 +311,7 @@ class TaskRunner {
 
       // 5. 执行任务
       const effectiveTimeout = task.timeoutMs ?? CONFIG.timeoutMs;
-      let result: { output: string; error: string | null; success: boolean };
+      let result: { output: string; error: string | null; success: boolean; awaitingResult?: boolean };
 
       if (CONFIG.mode === "command") {
         result = await this.executeCommand(prompt, effectiveTimeout);
@@ -293,21 +321,56 @@ class TaskRunner {
         result = await this.executeMock(task, agent, effectiveTimeout);
       }
 
-      // 6. 回写结果
+      // 6. 回写结果（A2A-lite 语义）
       const outputText = this.truncate(result.output, CONFIG.resultMaxChars);
       const errorText = result.error ? this.truncate(result.error, CONFIG.resultMaxChars) : null;
 
-      if (result.success) {
+      if (result.awaitingResult) {
+        // A2A-lite: gateway 只返回 started，进入 awaiting_result
+        await db
+          .update(tasks)
+          .set({
+            lifecycleStatus: "awaiting_result",
+            output: outputText || null,
+            updatedAt: new Date() as any,
+          })
+          .where(eq(tasks.id, task.id));
+
+        await this.recordEvent(task.id, "system", "Gateway returned 'started' only. Task is awaiting final result.", { mode: CONFIG.mode }, task.agentId ?? undefined);
+
+        wsManager.broadcastToDashboard({
+          type: "task_update",
+          action: "updated",
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          status: "running",
+          lifecycleStatus: "awaiting_result",
+          progress: task.progress,
+          agentId: task.agentId,
+          timestamp: new Date().toISOString(),
+        });
+
+        console.log(
+          `[TaskRunner] Task ${task.taskId} (id=${task.id}) awaiting final result (gateway returned started only)`
+        );
+      } else if (result.success) {
+        // A2A-lite: submit result then mark completed
         await db
           .update(tasks)
           .set({
             status: "done",
+            lifecycleStatus: "completed",
             progress: 100,
             output: outputText,
             error: errorText ?? null,
+            completedAt: new Date(),
             updatedAt: new Date() as any,
           })
           .where(eq(tasks.id, task.id));
+
+        await this.recordEvent(task.id, "result", outputText, { artifactType: "task_result" }, task.agentId ?? undefined);
+        await this.recordArtifact(task.id, "task_result", outputText, task.agentId ?? undefined);
 
         wsManager.broadcastToDashboard({
           type: "task_update",
@@ -316,6 +379,7 @@ class TaskRunner {
           taskId: task.taskId,
           name: task.name,
           status: "done",
+          lifecycleStatus: "completed",
           progress: 100,
           agentId: task.agentId,
           timestamp: new Date().toISOString(),
@@ -331,12 +395,16 @@ class TaskRunner {
           .update(tasks)
           .set({
             status: "failed",
-            progress: task.progress, // 保留当前进度
+            lifecycleStatus: "failed",
+            progress: task.progress,
             output: outputText || null,
             error: errorText,
+            failedAt: new Date(),
             updatedAt: new Date() as any,
           })
           .where(eq(tasks.id, task.id));
+
+        await this.recordEvent(task.id, "error", errorText || "Task execution failed", undefined, task.agentId ?? undefined);
 
         wsManager.broadcastToDashboard({
           type: "task_update",
@@ -345,6 +413,7 @@ class TaskRunner {
           taskId: task.taskId,
           name: task.name,
           status: "failed",
+          lifecycleStatus: "failed",
           progress: task.progress,
           agentId: task.agentId,
           timestamp: new Date().toISOString(),
@@ -352,7 +421,6 @@ class TaskRunner {
 
         await emitCollabSummaryForTask(task.id);
 
-        // 只打安全摘要，不泄露完整 stderr/args
         console.error(
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) failed: ${errorText?.slice(0, 200)}`
         );
@@ -365,10 +433,14 @@ class TaskRunner {
           .update(tasks)
           .set({
             status: "failed",
+            lifecycleStatus: "failed",
             error: `Runner internal error: ${e.message}`.slice(0, CONFIG.resultMaxChars),
+            failedAt: new Date(),
             updatedAt: new Date() as any,
           })
           .where(eq(tasks.id, task.id));
+
+        await this.recordEvent(task.id, "error", `Runner internal error: ${e.message}`, undefined, task.agentId ?? undefined);
 
         wsManager.broadcastToDashboard({
           type: "task_update",
@@ -377,6 +449,7 @@ class TaskRunner {
           taskId: task.taskId,
           name: task.name,
           status: "failed",
+          lifecycleStatus: "failed",
           agentId: task.agentId,
           timestamp: new Date().toISOString(),
         });
@@ -409,7 +482,7 @@ class TaskRunner {
     task: typeof tasks.$inferSelect,
     agent: typeof agents.$inferSelect | null,
     _timeoutMs: number
-  ): Promise<{ output: string; error: string | null; success: boolean }> {
+  ): Promise<{ output: string; error: string | null; success: boolean; awaitingResult?: boolean }> {
     // 模拟执行耗时
     const simMs = 500;
     await new Promise((r) => setTimeout(r, simMs));
@@ -524,6 +597,16 @@ class TaskRunner {
             output: out || "",
             error: `Command timed out after ${timeoutMs}ms`,
             success: false,
+          });
+          return;
+        }
+
+        if (code === 2) {
+          resolve({
+            output: out,
+            error: err || "Command is awaiting final result",
+            success: false,
+            awaitingResult: true,
           });
           return;
         }

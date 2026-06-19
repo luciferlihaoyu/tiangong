@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { tasks } from "@db/schema";
+import { tasks, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, desc, asc, and, or, like, sql } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
@@ -36,7 +36,24 @@ export const taskRouter = createRouter({
     .query(async ({ input }) => {
       const db = getDb();
       const rows = await db.select().from(tasks).where(eq(tasks.id, input.id));
-      return rows[0] ?? null;
+      const task = rows[0] ?? null;
+      if (!task) return null;
+
+      // A2A-lite v0.1: fetch thread messages and artifacts
+      const messages = await db.select().from(taskMessages).where(eq(taskMessages.taskId, input.id)).orderBy(asc(taskMessages.createdAt));
+      const artifacts = await db.select().from(taskArtifacts).where(eq(taskArtifacts.taskId, input.id)).orderBy(desc(taskArtifacts.createdAt));
+
+      return {
+        ...task,
+        threadMessages: messages.map((m) => ({
+          ...m,
+          metadata: m.metadata ? (() => { try { return JSON.parse(m.metadata); } catch { return null; } })() : null,
+        })),
+        artifacts: artifacts.map((a) => ({
+          ...a,
+          jsonPayload: a.jsonPayload ? (() => { try { return JSON.parse(a.jsonPayload); } catch { return null; } })() : null,
+        })),
+      };
     }),
 
   /** Auto-generate taskId 避免冲突 */
@@ -59,6 +76,10 @@ export const taskRouter = createRouter({
         timeoutMs: z.number().optional(),
         parentTaskId: z.number().optional(),
         status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
+        lifecycleStatus: z.enum([
+          "created", "queued", "claimed", "dispatched", "accepted", "working",
+          "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
+        ]).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -71,6 +92,7 @@ export const taskRouter = createRouter({
         priority: input.priority ?? 0,
         input: input.input ?? null,
         status: input.status ?? "pending",
+        lifecycleStatus: input.lifecycleStatus ?? "created",
         maxRetries: input.maxRetries ?? 3,
         timeoutMs: input.timeoutMs ?? 300000,
         parentTaskId: input.parentTaskId ?? null,
@@ -94,6 +116,10 @@ export const taskRouter = createRouter({
         id: z.number(),
         progress: z.number().min(0).max(100),
         status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
+        lifecycleStatus: z.enum([
+          "created", "queued", "claimed", "dispatched", "accepted", "working",
+          "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
+        ]).optional(),
         output: z.string().optional(),
         error: z.string().optional(),
       })
@@ -102,6 +128,7 @@ export const taskRouter = createRouter({
       const db = getDb();
       const update: Record<string, unknown> = { progress: input.progress };
       if (input.status) update.status = input.status;
+      if (input.lifecycleStatus) update.lifecycleStatus = input.lifecycleStatus;
       if (input.output !== undefined) update.output = input.output;
       if (input.error !== undefined) update.error = input.error;
       await db.update(tasks).set(update).where(eq(tasks.id, input.id));

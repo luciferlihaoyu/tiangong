@@ -128,6 +128,10 @@ export const orchestrationRouter = createRouter({
       timeoutMs: z.number().min(1000).max(3600000).optional(),
       parentTaskId: z.number().optional(),
       status: z.enum(["pending", "queued"]).optional(),
+      lifecycleStatus: z.enum([
+        "created", "queued", "claimed", "dispatched", "accepted", "working",
+        "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
+      ]).optional(),
       dependsOn: z.array(z.number()).optional(),
     }))
     .mutation(async ({ input }) => {
@@ -145,6 +149,7 @@ export const orchestrationRouter = createRouter({
           priority: taskData.priority ?? 0,
           input: taskData.input ?? null,
           status: taskData.status ?? "pending",
+          lifecycleStatus: taskData.lifecycleStatus ?? "created",
           maxRetries: taskData.maxRetries ?? 3,
           timeoutMs: taskData.timeoutMs ?? 300000,
           parentTaskId: taskData.parentTaskId ?? null,
@@ -188,6 +193,7 @@ export const orchestrationRouter = createRouter({
         priority: taskData.priority ?? 0,
         input: taskData.input ?? null,
         status: taskData.status ?? "pending",
+        lifecycleStatus: taskData.lifecycleStatus ?? "created",
         maxRetries: taskData.maxRetries ?? 3,
         timeoutMs: taskData.timeoutMs ?? 300000,
         parentTaskId: taskData.parentTaskId ?? null,
@@ -212,6 +218,10 @@ export const orchestrationRouter = createRouter({
     .input(z.object({
       id: z.number(),
       status: taskStatusEnum,
+      lifecycleStatus: z.enum([
+        "created", "queued", "claimed", "dispatched", "accepted", "working",
+        "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
+      ]).optional(),
       progress: z.number().min(0).max(100).optional(),
       output: z.string().optional(),
       error: z.string().optional(),
@@ -262,6 +272,7 @@ export const orchestrationRouter = createRouter({
       }
 
       const updates: Record<string, unknown> = { status: input.status };
+      if (input.lifecycleStatus) updates.lifecycleStatus = input.lifecycleStatus;
       if (input.progress !== undefined) updates.progress = input.progress;
       if (input.output !== undefined) updates.output = input.output;
       if (input.error !== undefined) updates.error = input.error;

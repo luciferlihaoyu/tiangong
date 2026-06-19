@@ -179,8 +179,8 @@ class Config {
 
     const cfg = new Config();
     cfg.agentId = agent.agentId;
-    cfg.token = agent.token;
     cfg.agentName = agent.label || agent.name || `Agent#${agent.agentId}`;
+    cfg.token = resolveAgentToken(agent, cfg.agentId, agent.name);
     cfg.configPath = fullPath;
 
     // Config file can override http/ws base
@@ -253,6 +253,51 @@ function sanitize(obj) {
   if (clone.mcpKey) clone.mcpKey = maskToken(clone.mcpKey);
   return clone;
 }
+
+function envNamePart(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function readTokenFile(path) {
+  if (!path) return "";
+  try {
+    return readFileSync(resolve(path), "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveAgentToken(agent, agentId, agentName) {
+  if (agent.tokenEnv) {
+    const fromEnv = process.env[agent.tokenEnv];
+    if (fromEnv) return fromEnv.trim();
+  }
+  if (agent.tokenFile) {
+    const fromFile = readTokenFile(agent.tokenFile);
+    if (fromFile) return fromFile;
+  }
+
+  const namePart = envNamePart(agentName || agent.name);
+  const candidates = [
+    namePart ? `TIANGONG_${namePart}_MCP_KEY` : "",
+    agentId ? `TIANGONG_AGENT_${agentId}_MCP_KEY` : "",
+    "TIANGONG_MCP_KEY",
+  ].filter(Boolean);
+
+  for (const envName of candidates) {
+    const value = process.env[envName];
+    if (value) return value.trim();
+  }
+
+  // Backward-compatible local-only fallback. Do not commit real tokens in agents.json.
+  if (agent.token) return String(agent.token).trim();
+  return "";
+}
+
 
 function log(level, msg, extra) {
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -814,6 +859,7 @@ async function reportUsage(cfg, task, result, success) {
 
 /**
  * P9: Execute a task with full progress reporting pipeline.
+ * A2A-lite v0.1 upgrade: dispatch → ack → working → awaiting_result / submitted → completed
  * Updates progress at 10%, 25%, 50%, 75%, then writes final result.
  *
  * @param {Config} cfg
@@ -822,21 +868,38 @@ async function reportUsage(cfg, task, result, success) {
 async function executeTaskWithProgress(cfg, task) {
   L.info(`🎯 开始处理任务: ${task.name} (taskId=${task.taskId})`);
 
+  // A2A-lite: record dispatch event
+  await trpcCall(cfg, "a2a.dispatch", {
+    taskId: task.id,
+    targetAgentId: cfg.agentId,
+    dispatcherAgentId: cfg.agentId,
+    payload: `Connector dispatching task ${task.taskId} to ${cfg.agentName}`,
+  });
+
   // Report progress 10%
   let r = await trpcCall(cfg, "task.updateProgress", {
     id: task.id,
     progress: 10,
     status: "running",
+    lifecycleStatus: "dispatched",
     output: `[${cfg.agentName}] 开始执行 (mode=${cfg.execMode})...`,
   });
   if (!r.ok) L.warn(`报告进度 10% 失败: ${r.error}`);
   await sleep(200);
+
+  // A2A-lite: ack
+  await trpcCall(cfg, "a2a.ack", {
+    taskId: task.id,
+    agentId: cfg.agentId,
+    note: `Agent ${cfg.agentName} acknowledged task`,
+  });
 
   // Report progress 25%
   r = await trpcCall(cfg, "task.updateProgress", {
     id: task.id,
     progress: 25,
     status: "running",
+    lifecycleStatus: "working",
     output: `[${cfg.agentName}] 解析任务参数...`,
   });
   if (!r.ok) L.warn(`报告进度 25% 失败: ${r.error}`);
@@ -847,21 +910,33 @@ async function executeTaskWithProgress(cfg, task) {
     const result = await executor(cfg, task, prompt);
 
     // Report progress 50% and 75% before final
-    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 50, status: "running", output: `[${cfg.agentName}] 执行中 (50%)...` });
+    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 50, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 执行中 (50%)...` });
     await sleep(100);
-    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 75, status: "running", output: `[${cfg.agentName}] 整理结果 (75%)...` });
+    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 75, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 整理结果 (75%)...` });
     await sleep(100);
 
-    r = await trpcCall(cfg, "task.updateProgress", {
-      id: task.id,
-      progress: 100,
-      status: "done",
+    // A2A-lite: submit result
+    const submitR = await trpcCall(cfg, "a2a.submitResult", {
+      taskId: task.id,
+      agentId: cfg.agentId,
       output: truncateOutput(result, cfg.resultMaxChars),
+      artifactType: "task_result",
+      artifactName: `result-${task.taskId}`,
+    });
+    if (!submitR.ok) {
+      L.warn(`A2A submitResult failed: ${submitR.error}`);
+    }
+
+    // Final update: mark completed
+    r = await trpcCall(cfg, "a2a.review", {
+      taskId: task.id,
+      approved: true,
+      note: `Task completed by ${cfg.agentName}`,
     });
     if (!r.ok) {
       L.warn(`报告完成失败: ${r.error}`);
     } else {
-      L.info(`✅ 任务 ${task.name} 已标记为 done`);
+      L.info(`✅ 任务 ${task.name} 已标记为 completed`);
     }
 
     // P9: Report usage after completion
@@ -870,17 +945,26 @@ async function executeTaskWithProgress(cfg, task) {
     const errMsg = err.message || String(err);
     L.error(`❌ 任务 ${task.name} 执行失败: ${errMsg}`);
 
-    r = await trpcCall(cfg, "task.updateProgress", {
-      id: task.id,
-      progress: 0,
-      status: "failed",
-      error: truncateOutput(errMsg, cfg.resultMaxChars),
-      output: truncateOutput(`[${cfg.agentName}] 执行失败: ${errMsg}`, cfg.resultMaxChars),
-    });
-    if (!r.ok) {
-      L.warn(`报告失败状态失败: ${r.error}`);
+    // A2A-lite: check if this is an "awaiting_result" scenario (runner exit code 2)
+    const isAwaitingResult = errMsg.includes("awaiting final result") || errMsg.includes("started");
+    if (isAwaitingResult) {
+      await trpcCall(cfg, "a2a.markAwaitingResult", {
+        taskId: task.id,
+        agentId: cfg.agentId,
+        note: `Gateway returned 'started' only. Task is awaiting final result.`,
+      });
+      L.info(`⏳ 任务 ${task.name} 进入 awaiting_result 状态`);
     } else {
-      L.info(`⚠️ 任务 ${task.name} 已标记为 failed`);
+      r = await trpcCall(cfg, "a2a.fail", {
+        taskId: task.id,
+        agentId: cfg.agentId,
+        error: truncateOutput(errMsg, cfg.resultMaxChars),
+      });
+      if (!r.ok) {
+        L.warn(`报告失败状态失败: ${r.error}`);
+      } else {
+        L.info(`⚠️ 任务 ${task.name} 已标记为 failed`);
+      }
     }
 
     // P9: Report usage even on failure

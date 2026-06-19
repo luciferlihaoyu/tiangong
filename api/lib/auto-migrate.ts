@@ -42,6 +42,10 @@ const CREATE_TABLES_SQL = [
     last_heartbeat TIMESTAMP NULL,
     source_api_key VARCHAR(255),
     source_endpoint VARCHAR(500),
+    agent_card TEXT,
+    openclaw_agent VARCHAR(100),
+    can_modify_tiangong_core ENUM('true','false') DEFAULT 'false',
+    can_send_external_message ENUM('true','false') DEFAULT 'false',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -62,6 +66,16 @@ const CREATE_TABLES_SQL = [
     max_retries INT DEFAULT 3,
     timeout_ms INT DEFAULT 300000,
     parent_task_id BIGINT,
+    expected_output_schema TEXT,
+    output_valid ENUM('true','false','unknown') DEFAULT 'unknown',
+    lifecycle_status VARCHAR(30) DEFAULT 'created',
+    dispatcher_agent_id BIGINT UNSIGNED,
+    claimed_at TIMESTAMP NULL,
+    dispatched_at TIMESTAMP NULL,
+    accepted_at TIMESTAMP NULL,
+    completed_at TIMESTAMP NULL,
+    failed_at TIMESTAMP NULL,
+    timeout_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -223,6 +237,39 @@ const CREATE_TABLES_SQL = [
     action ENUM('approve','reject','merge','register','revoke') NOT NULL,
     agent_id BIGINT UNSIGNED NULL,
     reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS task_threads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(255),
+    status ENUM('open','closed','archived') DEFAULT 'open' NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS task_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT UNSIGNED NOT NULL,
+    thread_id BIGINT UNSIGNED,
+    from_agent_id BIGINT UNSIGNED,
+    to_agent_id BIGINT UNSIGNED,
+    event_type ENUM('dispatch','ack','progress','working','result','error','timeout','cancel','system') DEFAULT 'system' NOT NULL,
+    content TEXT,
+    metadata TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS task_artifacts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT UNSIGNED NOT NULL,
+    agent_id BIGINT UNSIGNED,
+    type VARCHAR(50) NOT NULL,
+    name VARCHAR(255),
+    content TEXT,
+    json_payload TEXT,
+    mime_type VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 

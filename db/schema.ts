@@ -416,6 +416,47 @@ export const taskMessages = mysqlTable("task_messages", {
 export type TaskMessage = typeof taskMessages.$inferSelect;
 export type InsertTaskMessage = typeof taskMessages.$inferInsert;
 
+// ─── A2A-lite v0.1: Mailbox Messages (agent-addressed message bus) ───
+export const mailboxMessages = mysqlTable("mailbox_messages", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }),
+  threadId: bigint("thread_id", { mode: "number", unsigned: true }),
+  fromAgentId: bigint("from_agent_id", { mode: "number", unsigned: true }),
+  fromMailboxId: varchar("from_mailbox_id", { length: 20 }).notNull(),
+  toAgentId: bigint("to_agent_id", { mode: "number", unsigned: true }).notNull(),
+  toMailboxId: varchar("to_mailbox_id", { length: 20 }).notNull(),
+  type: mysqlEnum("mailbox_type", [
+    "direct",
+    "mention",
+    "question",
+    "review_request",
+    "subtask",
+    "handoff",
+    "result_notice",
+  ]).default("direct").notNull(),
+  status: mysqlEnum("mailbox_status", [
+    "unread",
+    "acknowledged",
+    "working",
+    "replied",
+    "resolved",
+    "failed",
+  ]).default("unread").notNull(),
+  subject: varchar("subject", { length: 255 }),
+  body: text("body"),
+  payloadJson: text("payload_json"),
+  replyToMessageId: bigint("reply_to_message_id", { mode: "number", unsigned: true }),
+  artifactId: bigint("artifact_id", { mode: "number", unsigned: true }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  repliedAt: timestamp("replied_at"),
+  resolvedAt: timestamp("resolved_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type MailboxMessage = typeof mailboxMessages.$inferSelect;
+export type InsertMailboxMessage = typeof mailboxMessages.$inferInsert;
+
 // ─── A2A-lite v0.1: Task Artifacts ───
 export const taskArtifacts = mysqlTable("task_artifacts", {
   id: serial("id").primaryKey(),

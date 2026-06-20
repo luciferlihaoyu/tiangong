@@ -191,6 +191,28 @@ export async function migrateV2(force = false): Promise<string[]> {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+      `CREATE TABLE IF NOT EXISTS mailbox_messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_id BIGINT UNSIGNED NULL,
+        thread_id BIGINT UNSIGNED NULL,
+        from_agent_id BIGINT UNSIGNED NULL,
+        from_mailbox_id VARCHAR(20) NOT NULL,
+        to_agent_id BIGINT UNSIGNED NOT NULL,
+        to_mailbox_id VARCHAR(20) NOT NULL,
+        type ENUM('direct','mention','question','review_request','subtask','handoff','result_notice') DEFAULT 'direct' NOT NULL,
+        status ENUM('unread','acknowledged','working','replied','resolved','failed') DEFAULT 'unread' NOT NULL,
+        subject VARCHAR(255),
+        body TEXT,
+        payload_json TEXT,
+        reply_to_message_id BIGINT UNSIGNED NULL,
+        artifact_id BIGINT UNSIGNED NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        acknowledged_at TIMESTAMP NULL,
+        replied_at TIMESTAMP NULL,
+        resolved_at TIMESTAMP NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
       `CREATE TABLE IF NOT EXISTS token_usage (
         id INT AUTO_INCREMENT PRIMARY KEY,
         model VARCHAR(100) NOT NULL,

@@ -220,6 +220,18 @@ function report(name, ok, detail) {
     schema.includes("task_artifacts"),
     "task_artifacts table defined"
   );
+
+  report(
+    "Schema 有 mailbox_messages 表",
+    schema.includes("mailbox_messages") && schema.includes("from_mailbox_id") && schema.includes("to_mailbox_id"),
+    "mailbox_messages table uses stable mailbox ids"
+  );
+
+  report(
+    "Mailbox 类型覆盖 DM/mention/subtask/handoff",
+    ["direct", "mention", "question", "review_request", "subtask", "handoff", "result_notice"].every((value) => schema.includes(`\"${value}\"`)),
+    "mailbox message types support Message Bus v0.1"
+  );
 }
 
 // ─── Check 4: connector.mjs has A2A dispatch/ack/result flow ───
@@ -299,6 +311,11 @@ function report(name, ok, detail) {
     router.includes("a2a:") && router.includes("a2aRouter"),
     "a2a router registered in appRouter"
   );
+  report(
+    "mailbox router 被注册到 appRouter",
+    router.includes("mailbox:") && router.includes("mailboxRouter"),
+    "mailbox router registered in appRouter"
+  );
 }
 
 // ─── Check 8: task-router returns thread messages and artifacts ───
@@ -343,6 +360,56 @@ function report(name, ok, detail) {
     "A2A router 线程消息记录 lifecycleStatus",
     a2a.includes("lifecycleStatus: nextStatus") || a2a.includes("lifecycleStatus: \"submitted\""),
     "task messages include lifecycle status in metadata"
+  );
+}
+
+// ─── Check 11: Mailbox v0.1 stable agent-id message bus ───
+{
+  const mailbox = readFileSync(resolve(root, "api/mailbox-router.ts"), "utf-8");
+  const pkg = readFileSync(resolve(root, "package.json"), "utf-8");
+  const autoMigrate = readFileSync(resolve(root, "api/lib/auto-migrate.ts"), "utf-8");
+  const migrateV2 = readFileSync(resolve(root, "api/lib/migrate-v2.ts"), "utf-8");
+
+  report(
+    "Mailbox 通过 agents.agentId 解析稳定地址",
+    mailbox.includes("resolveMailbox") && mailbox.includes("eq(agents.agentId, normalized)"),
+    "mailboxId must resolve by stable agents.agentId"
+  );
+
+  report(
+    "Mailbox 不按 displayName/name 路由",
+    !mailbox.includes("displayName") && !mailbox.includes("agents.name"),
+    "mailbox routing must not use mutable display names"
+  );
+
+  report(
+    "Mailbox 有 send/inbox/get/ack/reply/resolve API",
+    ["send:", "inbox:", "get:", "ack:", "reply:", "resolve:"].every((value) => mailbox.includes(value)),
+    "mailbox v0.1 API surface exists"
+  );
+
+  report(
+    "Mailbox ACK/读取校验收件人或参与者",
+    mailbox.includes("assertRecipient") && mailbox.includes("assertParticipant"),
+    "mailbox operations enforce recipient/participant access"
+  );
+
+  report(
+    "Mailbox 写入 TaskThread 审计事件",
+    mailbox.includes("recordMailboxEvent") && mailbox.includes("taskMessages") && mailbox.includes('channel: "mailbox"'),
+    "task-linked mailbox actions write taskMessages audit events"
+  );
+
+  report(
+    "package.json 有 smoke:mailbox 脚本",
+    pkg.includes("smoke:mailbox") && pkg.includes("mailbox-static-smoke"),
+    "mailbox smoke script is registered"
+  );
+
+  report(
+    "启动迁移会创建 mailbox_messages 表",
+    autoMigrate.includes("CREATE TABLE IF NOT EXISTS mailbox_messages") && migrateV2.includes("CREATE TABLE IF NOT EXISTS mailbox_messages"),
+    "auto-migrate and migrate-v2 create mailbox_messages in production"
   );
 }
 

@@ -15,6 +15,7 @@ import { fusionRouter } from "./fusion-router";
 import { planRouter } from "./plan-router";
 import { githubRouter } from "./github-router";
 import { a2aRouter } from "./a2a-router";
+import { mailboxRouter } from "./mailbox-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -36,6 +37,7 @@ export const appRouter = createRouter({
   plan: planRouter,
   github: githubRouter,
   a2a: a2aRouter,
+  mailbox: mailboxRouter,
 });
 
 export type AppRouter = typeof appRouter;

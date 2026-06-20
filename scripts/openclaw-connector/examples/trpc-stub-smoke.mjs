@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+/**
+ * ⚠️  已过时 (OUTDATED) — 保留供参考，不再推荐用于新验证。
+ *
+ * 该 stub 仅覆盖 P2 command bridge 基础心跳 + task.updateProgress done，
+ * 未覆盖 A2A-lite v0.1 完整生命周期（dispatch / ack / submitResult / artifact / usage）。
+ *
+ * 请使用第二轮端到端 smoke 脚本替代：
+ *   npm run smoke:connector
+ *   或 node scripts/smoke/connector-a2a-e2e.mjs
+ *
+ * 原说明：
+ *   Verify connector command mode with stdin prompt and result writeback
+ */
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
 

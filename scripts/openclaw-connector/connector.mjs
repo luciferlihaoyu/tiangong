@@ -925,18 +925,8 @@ async function executeTaskWithProgress(cfg, task) {
     });
     if (!submitR.ok) {
       L.warn(`A2A submitResult failed: ${submitR.error}`);
-    }
-
-    // Final update: mark completed
-    r = await trpcCall(cfg, "a2a.review", {
-      taskId: task.id,
-      approved: true,
-      note: `Task completed by ${cfg.agentName}`,
-    });
-    if (!r.ok) {
-      L.warn(`报告完成失败: ${r.error}`);
     } else {
-      L.info(`✅ 任务 ${task.name} 已标记为 completed`);
+      L.info(`✅ 任务 ${task.name} 已完成 (artifactId=${submitR.data?.artifactId})`);
     }
 
     // P9: Report usage after completion

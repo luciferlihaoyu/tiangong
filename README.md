@@ -307,3 +307,43 @@ Security notes:
 - `/api/runner/status` only exposes safe booleans/host/agent diagnostics; it never returns tokens, full URLs, prompts, command args, or env values.
 - The OpenClaw Gateway chat-completions endpoint must be enabled intentionally and protected by private ingress or bearer auth.
 - Roll back by setting `TIANGONG_TASK_RUNNER_MODE=mock`.
+
+---
+
+## Smoke Test — 本地端到端验证（第二轮）
+
+不启动生产服务、不连接 Zeabur、不泄露真实 token，在纯本地环境验证 **Connector → A2A-lite 完整生命周期**：
+
+```bash
+# 1. 安装依赖
+npm install
+
+# 2. 运行端到端 smoke（~15 秒）
+npm run smoke:connector
+```
+
+该脚本会：
+1. 启动本地 tRPC + WebSocket stub（模拟天宫后端）
+2. 以 `command` 模式启动 connector，runner 为 `echo-runner.mjs`
+3. 验证完整链路：
+   - `agent.claimTask` 返回任务
+   - `a2a.dispatch` 投递任务
+   - `a2a.ack` 确认收到
+   - `task.updateProgress` 10% → 25% → 50% → 75%
+   - `a2a.submitResult` 提交结果并生成 artifact
+   - `usage.record` 上报用量
+4. 断言最终状态为 `done/completed/progress=100/artifact=1`
+5. 断言 **没有冗余调用 `a2a.review`**（`submitResult` 已是最终完成态）
+
+覆盖范围：
+- ✅ Connector 心跳、Inbox 处理、任务认领
+- ✅ A2A-lite v0.1 三段式状态（dispatch / ack / submitResult）
+- ✅ echo-runner 实际执行 stdin prompt 并回传 stdout
+- ❌ 不覆盖真实 OpenClaw Gateway 调用（由 P7 / runner.mjs 单独验证）
+- ❌ 不覆盖数据库持久化（stub 为内存模拟）
+
+如需查看 connector 详细输出：
+
+```bash
+SMOKE_VERBOSE=1 npm run smoke:connector
+```

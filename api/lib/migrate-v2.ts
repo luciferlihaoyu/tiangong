@@ -74,6 +74,36 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
 
 ];
 
+async function migrateMailboxColumns(conn: mysql.Connection, logs: string[]) {
+  const columnPairs = [
+    {
+      oldName: "type",
+      newName: "mailbox_type",
+      definition: "ENUM('direct','mention','question','review_request','subtask','handoff','result_notice') DEFAULT 'direct' NOT NULL",
+    },
+    {
+      oldName: "status",
+      newName: "mailbox_status",
+      definition: "ENUM('unread','acknowledged','working','replied','resolved','failed') DEFAULT 'unread' NOT NULL",
+    },
+  ];
+
+  for (const column of columnPairs) {
+    try {
+      await conn.execute(
+        `ALTER TABLE mailbox_messages CHANGE COLUMN \`${column.oldName}\` \`${column.newName}\` ${column.definition}`
+      );
+      logs.push(`mailbox_messages.${column.oldName} -> ${column.newName}: OK`);
+    } catch (e: any) {
+      if (e?.code === "ER_BAD_FIELD_ERROR") {
+        logs.push(`mailbox_messages.${column.newName}: already OK`);
+      } else {
+        logs.push(`mailbox_messages.${column.oldName} migration: ${e.message?.slice(0, 80)}`);
+      }
+    }
+  }
+}
+
 export async function migrateV2(force = false): Promise<string[]> {
   const logs: string[] = [];
   console.log("migrate-v2: DATABASE_URL present =", !!env.databaseUrl);
@@ -199,8 +229,8 @@ export async function migrateV2(force = false): Promise<string[]> {
         from_mailbox_id VARCHAR(20) NOT NULL,
         to_agent_id BIGINT UNSIGNED NOT NULL,
         to_mailbox_id VARCHAR(20) NOT NULL,
-        type ENUM('direct','mention','question','review_request','subtask','handoff','result_notice') DEFAULT 'direct' NOT NULL,
-        status ENUM('unread','acknowledged','working','replied','resolved','failed') DEFAULT 'unread' NOT NULL,
+        mailbox_type ENUM('direct','mention','question','review_request','subtask','handoff','result_notice') DEFAULT 'direct' NOT NULL,
+        mailbox_status ENUM('unread','acknowledged','working','replied','resolved','failed') DEFAULT 'unread' NOT NULL,
         subject VARCHAR(255),
         body TEXT,
         payload_json TEXT,
@@ -247,6 +277,8 @@ export async function migrateV2(force = false): Promise<string[]> {
         console.warn(`  ⚠️  New table failed:`, e.message?.slice(0, 80));
       }
     }
+
+    await migrateMailboxColumns(conn, logs);
 
     // P8.1: migrate type enum to include 'ack' value
     try {

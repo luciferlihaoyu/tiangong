@@ -411,6 +411,17 @@ function report(name, ok, detail) {
     autoMigrate.includes("CREATE TABLE IF NOT EXISTS mailbox_messages") && migrateV2.includes("CREATE TABLE IF NOT EXISTS mailbox_messages"),
     "auto-migrate and migrate-v2 create mailbox_messages in production"
   );
+
+  report(
+    "迁移列名匹配 Drizzle mailbox schema",
+    autoMigrate.includes("mailbox_type ENUM") && autoMigrate.includes("mailbox_status ENUM") &&
+      migrateV2.includes("mailbox_type ENUM") && migrateV2.includes("mailbox_status ENUM") &&
+      autoMigrate.includes("oldName: \"type\"") && autoMigrate.includes("newName: \"mailbox_type\"") &&
+      migrateV2.includes("oldName: \"status\"") && migrateV2.includes("newName: \"mailbox_status\"") &&
+      autoMigrate.includes("ALTER TABLE mailbox_messages CHANGE COLUMN") &&
+      migrateV2.includes("ALTER TABLE mailbox_messages CHANGE COLUMN"),
+    "production migrations use mailbox_type/mailbox_status and repair old type/status columns"
+  );
 }
 
 // ─── Summary ───

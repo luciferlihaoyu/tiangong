@@ -143,12 +143,12 @@ function EventRow({
               #{event.traceId.slice(0, 12)}
             </span>
           )}
-          {event.payload?.model && (
+          {!!event.payload?.model && (
             <span style={{ color: "var(--text-secondary)" }} className="truncate max-w-24">
               {event.payload.model as string}
             </span>
           )}
-          {event.payload?.name && (
+          {!!event.payload?.name && (
             <span style={{ color: "var(--text-secondary)" }} className="truncate max-w-24">
               {(event.payload.name as string).slice(0, 20)}
             </span>
@@ -158,7 +158,7 @@ function EventRow({
           {event.sourceAgentId && (
             <span style={{ color: "var(--text-muted)" }}>#{event.sourceAgentId}</span>
           )}
-          {event.payload?.costCents && (
+          {!!event.payload?.costCents && (
             <span style={{ color: "var(--accent-gold)" }}>
               ${(Number(event.payload.costCents) / 100).toFixed(2)}
             </span>

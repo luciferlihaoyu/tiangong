@@ -538,7 +538,7 @@ class TaskRunner {
   private executeCommand(
     prompt: string,
     timeoutMs: number
-  ): Promise<{ output: string; error: string | null; success: boolean }> {
+  ): Promise<{ output: string; error: string | null; success: boolean; awaitingResult?: boolean }> {
     return new Promise((resolve) => {
       let child;
       let diagExecMode: string;

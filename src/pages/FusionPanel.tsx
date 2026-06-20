@@ -399,11 +399,11 @@ export default function FusionPanel() {
                         submitMutation.mutate({ subject, content, reviewerCount });
                       }
                     }}
-                    disabled={!subject || !content || submitMutation.isLoading}
+                    disabled={!subject || !content || submitMutation.isPending}
                     className="px-4 py-2 rounded text-xs font-mono disabled:opacity-40"
                     style={{ background: "var(--accent-cyan)", color: "#000" }}
                   >
-                    {submitMutation.isLoading ? "提交中..." : "提交审查"}
+                    {submitMutation.isPending ? "提交中..." : "提交审查"}
                   </button>
                   <button
                     onClick={() => setShowSubmit(false)}

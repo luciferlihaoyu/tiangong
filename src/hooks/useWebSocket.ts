@@ -9,6 +9,8 @@ export interface UseWebSocketReturn {
   connected: boolean;
   lastMessage: WSMessage | null;
   send: (data: object) => void;
+  addEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
+  removeEventListener: (type: string, listener: (event: MessageEvent) => void) => void;
 }
 
 /**
@@ -26,6 +28,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const listenersRef = useRef(new Map<string, Set<EventListener>>());
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -37,6 +40,9 @@ export function useWebSocket(): UseWebSocketReturn {
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+      listenersRef.current.forEach((listeners, type) => {
+        listeners.forEach((listener) => ws.addEventListener(type, listener));
+      });
 
       ws.onopen = () => {
         if (!mountedRef.current) return;
@@ -94,6 +100,20 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const addEventListener = useCallback((type: string, listener: (event: MessageEvent) => void) => {
+    const eventListener = listener as EventListener;
+    const listeners = listenersRef.current.get(type) ?? new Set<EventListener>();
+    listeners.add(eventListener);
+    listenersRef.current.set(type, listeners);
+    wsRef.current?.addEventListener(type, eventListener);
+  }, []);
+
+  const removeEventListener = useCallback((type: string, listener: (event: MessageEvent) => void) => {
+    const eventListener = listener as EventListener;
+    listenersRef.current.get(type)?.delete(eventListener);
+    wsRef.current?.removeEventListener(type, eventListener);
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     connect();
@@ -104,11 +124,14 @@ export function useWebSocket(): UseWebSocketReturn {
         clearTimeout(reconnectTimerRef.current);
       }
       if (wsRef.current) {
+        listenersRef.current.forEach((listeners, type) => {
+          listeners.forEach((listener) => wsRef.current?.removeEventListener(type, listener));
+        });
         wsRef.current.close();
         wsRef.current = null;
       }
     };
   }, [connect]);
 
-  return { connected, lastMessage, send };
+  return { connected, lastMessage, send, addEventListener, removeEventListener };
 }

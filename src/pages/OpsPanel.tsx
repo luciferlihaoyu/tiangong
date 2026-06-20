@@ -479,7 +479,7 @@ export default function OpsPanel() {
 
   const overview = overviewQuery.data as TodayOverview | undefined;
   const agents = (agentStatusQuery.data as AgentStatus[]) || [];
-  const taskStats = (taskStatsQuery.data as TaskStats) || {
+  const taskStats = (taskStatsQuery.data as unknown as TaskStats) || {
     queued: 0, pending: 0, running: 0, done: 0, failed: 0,
   };
   const recentTasks = (recentTasksQuery.data as RecentTask[]) || [];

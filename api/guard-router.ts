@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { modelAllowlist, highCostModelAuth, agents } from "@db/schema";
+import { modelAllowlist, highCostModelAuth, agents, tokenUsage } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, or, type SQL } from "drizzle-orm";
 
 /**

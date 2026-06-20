@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mailbox v0.1 static smoke.
+ * Mailbox static smoke.
  * Verifies the minimal contract without touching production DB.
  */
 
@@ -38,12 +38,16 @@ check("router resolves mailbox through agents.agentId", router.includes("eq(agen
 check("router rejects unknown mailbox", router.includes("Mailbox not found"));
 check("router does not route by displayName", !router.includes("displayName") && !router.includes("agents.name"));
 check("router has send/inbox/get/ack/reply/resolve", ["send:", "inbox:", "get:", "ack:", "reply:", "resolve:"].every((value) => router.includes(value)));
+check("router has v0.2 mention/subtask/handoff endpoints", ["mention:", "createSubtask:", "handoff:"].every((value) => router.includes(value)));
 check("ack requires recipient mailbox", router.includes("assertRecipient") && router.includes("Mailbox is not the recipient"));
 check("get/resolve enforce participant access", router.includes("assertParticipant") && router.includes("Mailbox is not a participant"));
 check("reply creates reverse message", router.includes("replyToMessageId: message.id") && router.includes("toMailboxId: toAgent.agentId"));
 check("task-linked operations write taskMessages audit", router.includes("recordMailboxEvent") && router.includes("taskMessages") && router.includes('channel: "mailbox"'));
+check("subtask creates child task and mailbox message", router.includes("parentTaskId") && router.includes("subtask_created") && router.includes("childTaskKey"));
+check("handoff reassigns task and records dispatch", router.includes("Only the current task assignee can hand off") && router.includes("lifecycleStatus: \"dispatched\"") && router.includes("previousAgentId"));
+check("mention requires a real task", router.includes("Mention:") && router.includes("Task not found"));
 check("router broadcasts mailbox events", router.includes("mailbox_message_sent") && router.includes("mailbox_message_replied"));
 check("app router registers mailbox", appRouter.includes("mailboxRouter") && appRouter.includes("mailbox:"));
 
-console.log(`\nMailbox v0.1 static smoke: ${passed} passed / ${passed + failed} total`);
+console.log(`\nMailbox static smoke: ${passed} passed / ${passed + failed} total`);
 if (failed > 0) process.exit(1);

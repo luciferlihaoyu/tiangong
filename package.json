@@ -19,6 +19,7 @@
     "db:migrate": "drizzle-kit migrate",
     "smoke:connector": "node scripts/smoke/connector-a2a-e2e.mjs",
     "smoke:mailbox": "node scripts/smoke/mailbox-static-smoke.mjs",
+    "smoke:mailbox:online": "node scripts/smoke/mailbox-online-smoke.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

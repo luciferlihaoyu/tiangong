@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, mailboxMessages, taskMessages } from "@db/schema";
+import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 
@@ -26,6 +26,7 @@ const mailboxStatusEnum = z.enum([
 
 type AgentRow = typeof agents.$inferSelect;
 type MailboxMessageRow = typeof mailboxMessages.$inferSelect;
+type MailboxType = typeof mailboxMessages.$inferInsert["type"];
 
 function normalizeMailboxId(mailboxId: string) {
   return mailboxId.trim();
@@ -78,6 +79,7 @@ function assertParticipant(message: MailboxMessageRow, mailboxId: string) {
 
 async function recordMailboxEvent(input: {
   taskId?: number | null;
+  threadId?: number | null;
   fromAgentId?: number | null;
   toAgentId?: number | null;
   action: string;
@@ -89,6 +91,7 @@ async function recordMailboxEvent(input: {
   const db = getDb();
   await db.insert(taskMessages).values({
     taskId: input.taskId,
+    threadId: input.threadId ?? null,
     fromAgentId: input.fromAgentId ?? null,
     toAgentId: input.toAgentId ?? null,
     eventType: "system",
@@ -118,6 +121,88 @@ function serializeMessage(message: MailboxMessageRow) {
   };
 }
 
+async function createMailboxMessage(input: {
+  fromAgent?: AgentRow | null;
+  fromMailboxId: string;
+  toAgent: AgentRow;
+  type: MailboxType;
+  taskId?: number | null;
+  threadId?: number | null;
+  subject?: string | null;
+  body?: string | null;
+  payload?: Record<string, unknown>;
+  replyToMessageId?: number | null;
+  artifactId?: number | null;
+  eventAction?: string;
+  eventContent?: string | null;
+  eventMetadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const result = await db.insert(mailboxMessages).values({
+    taskId: input.taskId ?? null,
+    threadId: input.threadId ?? null,
+    fromAgentId: input.fromAgent?.id ?? null,
+    fromMailboxId: input.fromMailboxId,
+    toAgentId: input.toAgent.id,
+    toMailboxId: input.toAgent.agentId,
+    type: input.type,
+    status: "unread",
+    subject: input.subject ?? null,
+    body: input.body ?? null,
+    payloadJson: input.payload ? JSON.stringify(input.payload) : null,
+    replyToMessageId: input.replyToMessageId ?? null,
+    artifactId: input.artifactId ?? null,
+  });
+
+  let messageId = (result as any).insertId as number | undefined;
+  if (!messageId) {
+    const row = await db
+      .select({ id: mailboxMessages.id })
+      .from(mailboxMessages)
+      .where(and(
+        eq(mailboxMessages.toMailboxId, input.toAgent.agentId),
+        eq(mailboxMessages.fromMailboxId, input.fromMailboxId),
+      ))
+      .orderBy(desc(mailboxMessages.createdAt))
+      .limit(1)
+      .then((r) => r[0]);
+    messageId = row?.id;
+  }
+  if (!messageId) throw new Error("Mailbox message insert did not return an id");
+
+  await recordMailboxEvent({
+    taskId: input.taskId,
+    threadId: input.threadId,
+    fromAgentId: input.fromAgent?.id ?? null,
+    toAgentId: input.toAgent.id,
+    action: input.eventAction ?? "send",
+    mailboxMessageId: messageId,
+    content: input.eventContent ?? input.subject ?? input.body ?? `Mailbox message sent to ${input.toAgent.agentId}`,
+    metadata: {
+      type: input.type,
+      fromMailboxId: input.fromMailboxId,
+      toMailboxId: input.toAgent.agentId,
+      ...input.eventMetadata,
+    },
+  });
+
+  wsManager.broadcastToDashboard({
+    type: "mailbox_message_sent",
+    messageId,
+    fromMailboxId: input.fromMailboxId,
+    toMailboxId: input.toAgent.agentId,
+    taskId: input.taskId ?? null,
+    messageType: input.type,
+    timestamp: new Date().toISOString(),
+  });
+
+  return { messageId, toMailboxId: input.toAgent.agentId, toAgentId: input.toAgent.id };
+}
+
+function makeTaskKey(prefix = "TGMB") {
+  return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
 export const mailboxRouter = createRouter({
   send: publicQuery
     .input(z.object({
@@ -138,57 +223,198 @@ export const mailboxRouter = createRouter({
       const fromAgent = await resolveOptionalSender(input);
       const fromMailboxId = fromAgent?.agentId ?? (input.fromMailboxId ? normalizeMailboxId(input.fromMailboxId) : "system");
 
-      const result = await db.insert(mailboxMessages).values({
-        taskId: input.taskId ?? null,
-        fromAgentId: fromAgent?.id ?? null,
+      const created = await createMailboxMessage({
+        fromAgent,
         fromMailboxId,
-        toAgentId: toAgent.id,
-        toMailboxId: toAgent.agentId,
+        toAgent,
+        taskId: input.taskId ?? null,
         type: input.type,
-        status: "unread",
         subject: input.subject ?? null,
         body: input.body ?? null,
-        payloadJson: input.payload ? JSON.stringify(input.payload) : null,
+        payload: input.payload,
         replyToMessageId: input.replyToMessageId ?? null,
         artifactId: input.artifactId ?? null,
       });
-      let messageId = (result as any).insertId as number | undefined;
-      if (!messageId) {
-        const row = await db
-          .select({ id: mailboxMessages.id })
-          .from(mailboxMessages)
-          .where(and(
-            eq(mailboxMessages.toMailboxId, toAgent.agentId),
-            eq(mailboxMessages.fromMailboxId, fromMailboxId),
-          ))
-          .orderBy(desc(mailboxMessages.createdAt))
-          .limit(1)
-          .then((r) => r[0]);
-        messageId = row?.id;
-      }
-      if (!messageId) throw new Error("Mailbox message insert did not return an id");
 
-      await recordMailboxEvent({
-        taskId: input.taskId,
-        fromAgentId: fromAgent?.id ?? null,
+      return { success: true, ...created };
+    }),
+
+  mention: publicQuery
+    .input(z.object({
+      fromMailboxId: z.string().min(1).max(20),
+      toMailboxId: z.string().min(1).max(20),
+      taskId: z.number(),
+      threadId: z.number().optional(),
+      subject: z.string().max(255).optional(),
+      body: z.string().max(10000).optional(),
+      payload: z.record(z.string(), z.any()).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const fromAgent = await resolveMailbox(input.fromMailboxId);
+      const toAgent = await resolveMailbox(input.toMailboxId);
+      const db = getDb();
+      const task = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!task) throw new Error("Task not found");
+
+      const created = await createMailboxMessage({
+        fromAgent,
+        fromMailboxId: fromAgent.agentId,
+        toAgent,
+        type: "mention",
+        taskId: task.id,
+        threadId: input.threadId ?? null,
+        subject: input.subject ?? `Mention: ${fromAgent.agentId} → ${toAgent.agentId}`,
+        body: input.body ?? null,
+        payload: input.payload,
+        eventAction: "mention",
+        eventContent: input.body ?? `${fromAgent.agentId} mentioned ${toAgent.agentId}`,
+      });
+
+      return { success: true, ...created, type: "mention" };
+    }),
+
+  createSubtask: publicQuery
+    .input(z.object({
+      fromMailboxId: z.string().min(1).max(20),
+      toMailboxId: z.string().min(1).max(20),
+      parentTaskId: z.number(),
+      title: z.string().min(1).max(255),
+      description: z.string().max(10000).optional(),
+      input: z.string().max(10000).optional(),
+      priority: z.number().int().optional(),
+      subject: z.string().max(255).optional(),
+      body: z.string().max(10000).optional(),
+      payload: z.record(z.string(), z.any()).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const fromAgent = await resolveMailbox(input.fromMailboxId);
+      const toAgent = await resolveMailbox(input.toMailboxId);
+      const parent = await db.select().from(tasks).where(eq(tasks.id, input.parentTaskId)).then((r) => r[0]);
+      if (!parent) throw new Error("Parent task not found");
+
+      const taskKey = makeTaskKey("TGST");
+      await db.insert(tasks).values({
+        taskId: taskKey,
+        name: input.title,
+        agentId: toAgent.id,
+        description: input.description ?? null,
+        input: input.input ?? null,
+        priority: input.priority ?? 0,
+        status: "queued",
+        lifecycleStatus: "queued",
+        parentTaskId: parent.id,
+        dispatcherAgentId: fromAgent.id,
+      });
+      const child = await db.select().from(tasks).where(eq(tasks.taskId, taskKey)).then((r) => r[0]);
+      if (!child) throw new Error("Failed to create subtask");
+
+      await db.insert(taskMessages).values({
+        taskId: parent.id,
+        fromAgentId: fromAgent.id,
         toAgentId: toAgent.id,
-        action: "send",
-        mailboxMessageId: messageId,
-        content: input.subject ?? input.body ?? `Mailbox message sent to ${toAgent.agentId}`,
-        metadata: { type: input.type, fromMailboxId, toMailboxId: toAgent.agentId },
+        eventType: "system",
+        content: input.body ?? `Subtask created for ${toAgent.agentId}: ${input.title}`,
+        metadata: JSON.stringify({
+          channel: "mailbox",
+          action: "subtask_created",
+          childTaskId: child.id,
+          childTaskKey: child.taskId,
+          fromMailboxId: fromAgent.agentId,
+          toMailboxId: toAgent.agentId,
+        }),
+      });
+
+      const created = await createMailboxMessage({
+        fromAgent,
+        fromMailboxId: fromAgent.agentId,
+        toAgent,
+        type: "subtask",
+        taskId: child.id,
+        subject: input.subject ?? `Subtask: ${input.title}`,
+        body: input.body ?? input.description ?? null,
+        payload: {
+          ...(input.payload ?? {}),
+          parentTaskId: parent.id,
+          childTaskId: child.id,
+          childTaskKey: child.taskId,
+        },
+        eventAction: "subtask",
+        eventContent: input.body ?? `Subtask assigned to ${toAgent.agentId}: ${input.title}`,
+        eventMetadata: { parentTaskId: parent.id, childTaskId: child.id, childTaskKey: child.taskId },
       });
 
       wsManager.broadcastToDashboard({
-        type: "mailbox_message_sent",
-        messageId,
-        fromMailboxId,
-        toMailboxId: toAgent.agentId,
-        taskId: input.taskId ?? null,
-        messageType: input.type,
+        type: "task_update",
+        action: "created",
+        id: child.id,
+        taskId: child.taskId,
+        name: child.name,
+        status: child.status,
+        agentId: child.agentId,
+        parentTaskId: parent.id,
         timestamp: new Date().toISOString(),
       });
 
-      return { success: true, messageId, toMailboxId: toAgent.agentId, toAgentId: toAgent.id };
+      return { success: true, taskId: child.id, taskKey: child.taskId, mailboxMessageId: created.messageId, toMailboxId: created.toMailboxId };
+    }),
+
+  handoff: publicQuery
+    .input(z.object({
+      fromMailboxId: z.string().min(1).max(20),
+      toMailboxId: z.string().min(1).max(20),
+      taskId: z.number(),
+      reason: z.string().max(10000).optional(),
+      subject: z.string().max(255).optional(),
+      payload: z.record(z.string(), z.any()).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const fromAgent = await resolveMailbox(input.fromMailboxId);
+      const toAgent = await resolveMailbox(input.toMailboxId);
+      const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!task) throw new Error("Task not found");
+      if (task.agentId !== fromAgent.id) {
+        throw new Error("Only the current task assignee can hand off this task");
+      }
+      if (["done", "failed"].includes(task.status) || ["completed", "failed", "timeout", "cancelled"].includes(task.lifecycleStatus ?? "")) {
+        throw new Error("Cannot hand off a terminal task");
+      }
+
+      await db.update(tasks).set({
+        agentId: toAgent.id,
+        lifecycleStatus: "dispatched",
+        status: "running",
+        dispatcherAgentId: fromAgent.id,
+        dispatchedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(tasks.id, task.id));
+
+      const created = await createMailboxMessage({
+        fromAgent,
+        fromMailboxId: fromAgent.agentId,
+        toAgent,
+        type: "handoff",
+        taskId: task.id,
+        subject: input.subject ?? `Handoff: ${task.name}`,
+        body: input.reason ?? null,
+        payload: { ...(input.payload ?? {}), taskId: task.id, previousAgentId: fromAgent.id, nextAgentId: toAgent.id },
+        eventAction: "handoff",
+        eventContent: input.reason ?? `Task handed off from ${fromAgent.agentId} to ${toAgent.agentId}`,
+        eventMetadata: { previousAgentId: fromAgent.id, nextAgentId: toAgent.id, lifecycleStatus: "dispatched" },
+      });
+
+      wsManager.broadcastToDashboard({
+        type: "a2a_dispatch",
+        taskId: task.taskId,
+        taskDbId: task.id,
+        targetAgentId: toAgent.id,
+        targetAgentName: toAgent.name,
+        lifecycleStatus: "dispatched",
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, taskId: task.id, fromMailboxId: fromAgent.agentId, toMailboxId: toAgent.agentId, mailboxMessageId: created.messageId, lifecycleStatus: "dispatched" };
     }),
 
   inbox: publicQuery

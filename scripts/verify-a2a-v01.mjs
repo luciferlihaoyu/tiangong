@@ -422,6 +422,30 @@ function report(name, ok, detail) {
       migrateV2.includes("ALTER TABLE mailbox_messages CHANGE COLUMN"),
     "production migrations use mailbox_type/mailbox_status and repair old type/status columns"
   );
+
+  report(
+    "Mailbox v0.2 有 mention/subtask/handoff API",
+    ["mention:", "createSubtask:", "handoff:"].every((value) => mailbox.includes(value)),
+    "mailbox v0.2 API surface exists"
+  );
+
+  report(
+    "Mailbox v0.2 subtask 创建子任务并关联 mailbox",
+    mailbox.includes("parentTaskId") && mailbox.includes("childTaskKey") && mailbox.includes("subtask_created") && mailbox.includes("type: \"subtask\""),
+    "subtask creates child task and sends mailbox message"
+  );
+
+  report(
+    "Mailbox v0.2 handoff 更新任务责任人",
+    mailbox.includes("Only the current task assignee can hand off") && mailbox.includes("agentId: toAgent.id") && mailbox.includes("lifecycleStatus: \"dispatched\""),
+    "handoff must update task agentId and lifecycle"
+  );
+
+  report(
+    "package.json 有线上 mailbox smoke 脚本",
+    pkg.includes("smoke:mailbox:online") && pkg.includes("mailbox-online-smoke"),
+    "online smoke script is registered"
+  );
 }
 
 // ─── Summary ───

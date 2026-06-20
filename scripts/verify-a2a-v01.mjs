@@ -110,6 +110,17 @@ function report(name, ok, detail) {
   );
 
   report(
+    "A2A submitResult 完成任务并保留 artifact",
+    a2a.includes("submitResult")
+      && a2a.includes('const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "completed"')
+      && a2a.includes('status: "done"')
+      && a2a.includes("progress: 100")
+      && a2a.includes("completedAt: new Date()")
+      && a2a.includes("recordArtifact"),
+    "final result should mark task completed/done and create artifact"
+  );
+
+  report(
     "A2A router 有 getThread endpoint 返回 messages/artifacts",
     a2a.includes("getThread") && (a2a.includes("messages:") || a2a.includes("threads:")) && a2a.includes("artifacts"),
     "getThread returns thread data"

@@ -316,10 +316,13 @@ export const a2aRouter = createRouter({
         return { success: false, error: "Agent is not the assigned executor of this task" };
       }
 
-      const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "submitted";
+      const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "completed";
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
+        status: "done",
+        progress: 100,
         output: input.output ?? task.output,
+        completedAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(tasks.id, input.taskId));
 

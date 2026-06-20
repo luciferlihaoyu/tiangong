@@ -152,7 +152,21 @@ export const mailboxRouter = createRouter({
         replyToMessageId: input.replyToMessageId ?? null,
         artifactId: input.artifactId ?? null,
       });
-      const messageId = (result as any).insertId as number;
+      let messageId = (result as any).insertId as number | undefined;
+      if (!messageId) {
+        const row = await db
+          .select({ id: mailboxMessages.id })
+          .from(mailboxMessages)
+          .where(and(
+            eq(mailboxMessages.toMailboxId, toAgent.agentId),
+            eq(mailboxMessages.fromMailboxId, fromMailboxId),
+          ))
+          .orderBy(desc(mailboxMessages.createdAt))
+          .limit(1)
+          .then((r) => r[0]);
+        messageId = row?.id;
+      }
+      if (!messageId) throw new Error("Mailbox message insert did not return an id");
 
       await recordMailboxEvent({
         taskId: input.taskId,
@@ -274,7 +288,22 @@ export const mailboxRouter = createRouter({
         replyToMessageId: message.id,
         artifactId: input.artifactId ?? null,
       });
-      const replyMessageId = (result as any).insertId as number;
+      let replyMessageId = (result as any).insertId as number | undefined;
+      if (!replyMessageId) {
+        const row = await db
+          .select({ id: mailboxMessages.id })
+          .from(mailboxMessages)
+          .where(and(
+            eq(mailboxMessages.replyToMessageId, message.id),
+            eq(mailboxMessages.fromMailboxId, fromAgent.agentId),
+            eq(mailboxMessages.toMailboxId, toAgent.agentId),
+          ))
+          .orderBy(desc(mailboxMessages.createdAt))
+          .limit(1)
+          .then((r) => r[0]);
+        replyMessageId = row?.id;
+      }
+      if (!replyMessageId) throw new Error("Mailbox reply insert did not return an id");
 
       await db.update(mailboxMessages).set({
         status: "replied",

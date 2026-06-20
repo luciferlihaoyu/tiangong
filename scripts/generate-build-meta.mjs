@@ -9,7 +9,7 @@
  */
 
 import { execSync } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,16 +19,50 @@ const outPath = resolve(root, "api", "commit.ts");
 
 function run(cmd, fallback = null) {
   try {
-    return execSync(cmd, { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    const output = execSync(cmd, { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    return output || fallback;
   } catch {
     return fallback;
   }
 }
 
-const commit = run("git rev-parse HEAD", null);
+function firstEnv(names) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+const commit =
+  firstEnv([
+    "COMMIT_SHA",
+    "SOURCE_COMMIT",
+    "ZBPACK_COMMIT_SHA",
+    "ZEABUR_GIT_COMMIT_SHA",
+    "ZEABUR_COMMIT_SHA",
+    "VERCEL_GIT_COMMIT_SHA",
+    "GITHUB_SHA",
+    "CF_PAGES_COMMIT_SHA",
+    "RAILWAY_GIT_COMMIT_SHA",
+    "RENDER_GIT_COMMIT",
+  ]) ?? run("git rev-parse HEAD", null);
 const shortCommit = commit ? commit.slice(0, 7) : null;
-const branch = run("git rev-parse --abbrev-ref HEAD", null);
-const buildTime = new Date().toISOString();
+const branch =
+  firstEnv([
+    "BRANCH",
+    "GIT_BRANCH",
+    "SOURCE_BRANCH",
+    "ZBPACK_BRANCH",
+    "ZEABUR_GIT_BRANCH",
+    "ZEABUR_BRANCH",
+    "VERCEL_GIT_COMMIT_REF",
+    "GITHUB_REF_NAME",
+    "CF_PAGES_BRANCH",
+    "RAILWAY_GIT_BRANCH",
+    "RENDER_GIT_BRANCH",
+  ]) ?? run("git rev-parse --abbrev-ref HEAD", null);
+const buildTime = firstEnv(["BUILD_TIME", "VERCEL_BUILD_TIME", "ZEABUR_DEPLOY_TIME", "DEPLOYED_AT"]) ?? new Date().toISOString();
 
 const lines = [
   "// 此文件由构建脚本自动生成，不要手动修改",

@@ -8,7 +8,7 @@
  *   3. connector 调用 a2a.ack
  *   4. connector 调用 task.updateProgress working (25%, 50%, 75%)
  *   5. connector 调用 a2a.submitResult
- *   6. stub 模拟 submitResult 后 final 状态为 done/completed/progress=100/artifact=1
+ *   6. stub 模拟 submitResult 后状态为 running/submitted/progress<100/artifact=1，review 后完成
  *   7. usage.record 被调用
  *   8. 脚本最终输出 PASS / FAIL
  *
@@ -66,6 +66,7 @@ const taskState = {
   completedAt: null,
   artifactCount: 0,
 };
+let submitResultState = null; // snapshot after submitResult
 
 // ─── HTTP / tRPC stub ───
 const server = createServer(async (req, res) => {
@@ -148,15 +149,21 @@ const server = createServer(async (req, res) => {
       }
       case "a2a.submitResult": {
         artifactId = 1;
-        taskState.status = "done";
-        taskState.lifecycleStatus = "completed";
-        taskState.progress = 100;
-        taskState.completedAt = new Date().toISOString();
+        taskState.status = "running";
+        taskState.lifecycleStatus = "submitted";
+        taskState.progress = 95;
         taskState.artifactCount = 1;
-        sendJson(res, { success: true, lifecycleStatus: "completed", artifactId });
+        submitResultState = { ...taskState };
+        sendJson(res, { success: true, lifecycleStatus: "submitted", artifactId });
         return;
       }
       case "a2a.review": {
+        if (input.approved) {
+          taskState.lifecycleStatus = "completed";
+          taskState.completedAt = new Date().toISOString();
+        } else {
+          taskState.lifecycleStatus = "reviewing";
+        }
         sendJson(res, { success: true, lifecycleStatus: input.approved ? "completed" : "reviewing" });
         return;
       }
@@ -366,16 +373,28 @@ async function main() {
     submitInput ? `artifactType=${submitInput.artifactType}` : "无 submitResult input"
   );
 
-  // Check 6: final state verification (done/completed/progress=100/completedAt/artifact=1)
+  // Check 6: submitResult leaves task submitted (not completed)
   report(
-    "submitResult 触发 final 状态 done/completed/progress=100/artifact=1",
-    taskState.status === "done"
-      && taskState.lifecycleStatus === "completed"
-      && taskState.progress === 100
-      && Boolean(taskState.completedAt)
-      && taskState.artifactCount === 1
-      && artifactId === 1,
-    JSON.stringify(taskState)
+    "submitResult 触发 running/submitted（不是 done/completed）",
+    submitResultState?.status === "running"
+      && submitResultState?.lifecycleStatus === "submitted"
+      && submitResultState?.progress < 100
+      && !submitResultState?.completedAt
+      && submitResultState?.artifactCount === 1,
+    JSON.stringify(submitResultState)
+  );
+
+  // Check 6b: review completes the task
+  report(
+    "a2a.review 被调用以完成 submitted 任务",
+    reviewCalls.length > 0,
+    reviewCalls.length > 0 ? `review called ${reviewCalls.length} time(s)` : "review never called"
+  );
+  const reviewInput = reviewCalls[0]?.input;
+  report(
+    "review 将任务从 submitted 推进到 completed",
+    reviewInput?.approved === true && taskState.lifecycleStatus === "completed" && Boolean(taskState.completedAt),
+    `review.approved=${reviewInput?.approved}, lifecycle=${taskState.lifecycleStatus}, completedAt=${taskState.completedAt}`
   );
 
   // Check 7: usage.record
@@ -385,12 +404,11 @@ async function main() {
     usageCalls.length > 0 ? `called ${usageCalls.length} time(s)` : "从未调用"
   );
 
-  // Check 8: no duplicate review after submitResult (A2A-lite: submitResult is final)
-  // After connector fix, review should NOT be called after submitResult
+  // Check 8: review is required to complete after submitResult
   report(
-    "a2a.review 未被冗余调用（submitResult 已是最终完成）",
-    reviewCalls.length === 0,
-    reviewCalls.length > 0 ? `review called ${reviewCalls.length} time(s) — redundant!` : "review not called (correct)"
+    "a2a.review 被调用以完成 submitted 任务（生命周期严格语义）",
+    reviewCalls.length > 0,
+    reviewCalls.length > 0 ? `review called ${reviewCalls.length} time(s)` : "review not called"
   );
 
   // Check 9: heartbeat

@@ -39,15 +39,17 @@ app.use("/api/trpc/*", async (c) => {
 
 // P11.4: 版本信息端点（读取部署环境变量或构建时注入的 commit，无运行时 .git 依赖）
 app.get("/api/version", async (c) => {
-  let buildCommitSha: string | null = null;
+  let buildMeta: Record<string, string | null> = {};
   try {
     const commitMod = await import('./commit.js');
-    buildCommitSha = commitMod.COMMIT_SHA ?? null;
+    buildMeta = commitMod.BUILD_META ?? {};
   } catch {
-    buildCommitSha = null;
+    buildMeta = {};
   }
 
   let sha: string | null = null;
+  let shortCommit: string | null = null;
+  let branch: string | null = null;
   let source = "unknown";
 
   const envSha =
@@ -59,13 +61,16 @@ app.get("/api/version", async (c) => {
 
   if (envSha) {
     sha = envSha;
+    shortCommit = envSha.slice(0, 7);
     source = "env";
-  } else if (buildCommitSha) {
-    sha = buildCommitSha;
+  } else if (buildMeta.commit && buildMeta.commit !== "unknown") {
+    sha = buildMeta.commit;
+    shortCommit = buildMeta.shortCommit;
+    branch = buildMeta.branch;
     source = "build";
   }
 
-  let buildTime = process.env.BUILD_TIME || process.env.VERCEL_BUILD_TIME || null;
+  let buildTime = process.env.BUILD_TIME || process.env.VERCEL_BUILD_TIME || buildMeta.buildTime || null;
   if (!buildTime) {
     // Generate a build timestamp if not provided
     buildTime = new Date().toISOString();
@@ -75,7 +80,8 @@ app.get("/api/version", async (c) => {
     ok: true,
     version: process.env.npm_package_version || "0.0.0",
     commit: sha,
-    shortCommit: sha ? sha.slice(0, 7) : null,
+    shortCommit: shortCommit ?? (sha ? sha.slice(0, 7) : null),
+    branch: branch ?? "unknown",
     buildTime,
     deployedAt: process.env.DEPLOYED_AT || process.env.ZEABUR_DEPLOY_TIME || null,
     source,

@@ -355,22 +355,35 @@ class TaskRunner {
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) awaiting final result (gateway returned started only)`
         );
       } else if (result.success) {
-        // A2A-lite: submit result then mark completed
+        // A2A-lite: submit result first; completion happens only after explicit review/auto-review
+        await db
+          .update(tasks)
+          .set({
+            status: "running",
+            lifecycleStatus: "submitted",
+            progress: 95,
+            output: outputText,
+            error: errorText ?? null,
+            updatedAt: new Date() as any,
+          })
+          .where(eq(tasks.id, task.id));
+
+        await this.recordEvent(task.id, "result", outputText, { artifactType: "task_result", lifecycleStatus: "submitted" }, task.agentId ?? undefined);
+        await this.recordArtifact(task.id, "task_result", outputText, task.agentId ?? undefined);
+
+        // Auto-review: since this is an automated runner, complete the task immediately after submitted is recorded
         await db
           .update(tasks)
           .set({
             status: "done",
             lifecycleStatus: "completed",
             progress: 100,
-            output: outputText,
-            error: errorText ?? null,
             completedAt: new Date(),
             updatedAt: new Date() as any,
           })
           .where(eq(tasks.id, task.id));
 
-        await this.recordEvent(task.id, "result", outputText, { artifactType: "task_result" }, task.agentId ?? undefined);
-        await this.recordArtifact(task.id, "task_result", outputText, task.agentId ?? undefined);
+        await this.recordEvent(task.id, "system", "Task auto-reviewed and completed by runner", { previousStatus: "submitted", lifecycleStatus: "completed" }, task.agentId ?? undefined);
 
         wsManager.broadcastToDashboard({
           type: "task_update",

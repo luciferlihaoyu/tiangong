@@ -77,13 +77,31 @@ async function recordArtifact(
   return { artifactId: (result as any).insertId as number };
 }
 
-/** 安全地更新 lifecycleStatus（允许向前流转，禁止非法回退） */
+/** 安全地更新 lifecycleStatus（严格向前流转，禁止非法回退和跳跃） */
 function isValidLifecycleTransition(from: string, to: string): boolean {
   // terminal states 不可逆
   if (["completed", "failed", "timeout", "cancelled"].includes(from)) {
     return false;
   }
-  // 基本允许任何非终端向前流转；后续可收紧
+  // 已到达 submitted 后不能回退到 working/dispatched/accepted/claimed 等
+  if (from === "submitted" && !["reviewing", "completed", "failed", "timeout", "cancelled"].includes(to)) {
+    return false;
+  }
+  if (from === "reviewing" && !["completed", "failed", "timeout", "cancelled"].includes(to)) {
+    return false;
+  }
+  // completed 只能从 submitted 或 reviewing 进入
+  if (to === "completed" && !["submitted", "reviewing"].includes(from)) {
+    return false;
+  }
+  // submitted 只能从 awaiting_result、working、dispatched、accepted、claimed 或 created/queued 进入
+  if (to === "submitted" && !["awaiting_result", "working", "dispatched", "accepted", "claimed", "queued", "created"].includes(from)) {
+    return false;
+  }
+  // reviewing 只能从 submitted 进入
+  if (to === "reviewing" && from !== "submitted") {
+    return false;
+  }
   return true;
 }
 
@@ -173,7 +191,7 @@ export const a2aRouter = createRouter({
         toAgentId: input.targetAgentId,
         eventType: "dispatch",
         content: input.payload ?? `Task dispatched to Agent#${input.targetAgentId} (${agent.name})`,
-        metadata: { targetAgentId: input.targetAgentId, dispatcherAgentId: input.dispatcherAgentId },
+        metadata: { targetAgentId: input.targetAgentId, dispatcherAgentId: input.dispatcherAgentId, lifecycleStatus: nextStatus },
       });
 
       // 广播
@@ -222,6 +240,7 @@ export const a2aRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "ack",
         content: input.note ?? "Agent acknowledged task receipt",
+        metadata: { lifecycleStatus: nextStatus },
       });
 
       wsManager.broadcastToDashboard({
@@ -261,7 +280,7 @@ export const a2aRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "working",
         content: input.note ?? "Agent reports working on task",
-        metadata: { progress: input.progress },
+        metadata: { progress: input.progress, lifecycleStatus: nextStatus },
       });
 
       return { success: true, lifecycleStatus: nextStatus };
@@ -290,7 +309,7 @@ export const a2aRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "system",
         content: input.note ?? "Task is awaiting final result from agent",
-        metadata: { previousStatus: task.lifecycleStatus },
+        metadata: { previousStatus: task.lifecycleStatus, lifecycleStatus: nextStatus },
       });
 
       return { success: true, lifecycleStatus: nextStatus };
@@ -316,13 +335,16 @@ export const a2aRouter = createRouter({
         return { success: false, error: "Agent is not the assigned executor of this task" };
       }
 
-      const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "completed";
+      const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "submitted";
+      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
-        status: "done",
-        progress: 100,
+        status: "running",
+        progress: Math.max(task.progress ?? 0, 95),
         output: input.output ?? task.output,
-        completedAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(tasks.id, input.taskId));
 
@@ -332,7 +354,7 @@ export const a2aRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "result",
         content: input.output ?? "Agent submitted result",
-        metadata: { artifactType: input.artifactType },
+        metadata: { artifactType: input.artifactType, lifecycleStatus: nextStatus },
       });
 
       // 保存 artifact
@@ -367,7 +389,16 @@ export const a2aRouter = createRouter({
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
 
+      // 只能从 submitted 或 reviewing 进入 review
+      if (!["submitted", "reviewing"].includes(task.lifecycleStatus ?? "")) {
+        return { success: false, error: `Cannot review task from status ${task.lifecycleStatus}. Must be submitted or reviewing.` };
+      }
+
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = input.approved ? "completed" : "reviewing";
+      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
         status: input.approved ? "done" : task.status,
@@ -380,7 +411,7 @@ export const a2aRouter = createRouter({
         taskId: input.taskId,
         eventType: input.approved ? "result" : "system",
         content: input.note ?? (input.approved ? "Task reviewed and approved" : "Task under review"),
-        metadata: { approved: input.approved },
+        metadata: { approved: input.approved, previousStatus: task.lifecycleStatus, lifecycleStatus: nextStatus },
       });
 
       if (input.approved) {
@@ -404,6 +435,10 @@ export const a2aRouter = createRouter({
       if (!task) throw new Error("Task not found");
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "failed";
+      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
         status: "failed",
@@ -417,6 +452,7 @@ export const a2aRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "error",
         content: input.error ?? "Task marked as failed",
+        metadata: { lifecycleStatus: nextStatus },
       });
 
       wsManager.broadcastToDashboard({
@@ -438,6 +474,10 @@ export const a2aRouter = createRouter({
       if (!task) throw new Error("Task not found");
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "timeout";
+      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
         status: "failed",
@@ -449,6 +489,7 @@ export const a2aRouter = createRouter({
         taskId: input.taskId,
         eventType: "timeout",
         content: input.note ?? "Task timed out",
+        metadata: { lifecycleStatus: nextStatus },
       });
 
       return { success: true, lifecycleStatus: nextStatus };
@@ -462,6 +503,10 @@ export const a2aRouter = createRouter({
       if (!task) throw new Error("Task not found");
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "cancelled";
+      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
         updatedAt: new Date(),
@@ -471,6 +516,7 @@ export const a2aRouter = createRouter({
         taskId: input.taskId,
         eventType: "cancel",
         content: input.note ?? "Task cancelled",
+        metadata: { lifecycleStatus: nextStatus },
       });
 
       return { success: true, lifecycleStatus: nextStatus };

@@ -924,9 +924,20 @@ async function executeTaskWithProgress(cfg, task) {
       artifactName: `result-${task.taskId}`,
     });
     if (!submitR.ok) {
-      L.warn(`A2A submitResult failed: ${submitR.error}`);
+      throw new Error(`A2A submitResult failed: ${submitR.error}`);
+    }
+    L.info(`✅ 任务 ${task.name} 已提交结果 (artifactId=${submitR.data?.artifactId})`);
+
+    // A2A-lite: review / complete the task only after successful submission
+    const reviewR = await trpcCall(cfg, "a2a.review", {
+      taskId: task.id,
+      approved: true,
+      note: "Connector auto-approved after successful execution",
+    });
+    if (!reviewR.ok) {
+      L.warn(`A2A review failed: ${reviewR.error}`);
     } else {
-      L.info(`✅ 任务 ${task.name} 已完成 (artifactId=${submitR.data?.artifactId})`);
+      L.info(`✅ 任务 ${task.name} 已审核完成`);
     }
 
     // P9: Report usage after completion

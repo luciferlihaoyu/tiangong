@@ -52,18 +52,26 @@ function report(name, ok, detail) {
 
   // Must NOT go directly from running->done without lifecycleStatus
   const hasDone = runner.includes('status: "done"') || runner.includes("status: 'done'");
-  const doneWithLifecycle = runner.includes('lifecycleStatus: "completed"') || runner.includes("lifecycleStatus: 'completed'");
+  const hasSubmitted = runner.includes('lifecycleStatus: "submitted"') || runner.includes("lifecycleStatus: 'submitted'");
+  const hasCompleted = runner.includes('lifecycleStatus: "completed"') || runner.includes("lifecycleStatus: 'completed'");
   const hasFailed = runner.includes('status: "failed"') || runner.includes("status: 'failed'");
   const failedWithLifecycle = runner.includes('lifecycleStatus: "failed"') || runner.includes("lifecycleStatus: 'failed'");
   report(
-    "done 状态同步设置 lifecycleStatus=completed",
-    (hasDone && doneWithLifecycle) || !hasDone,
-    `done blocks have lifecycleStatus=completed`
+    "done 状态先设置 lifecycleStatus=submitted，再 completed",
+    (hasDone && hasSubmitted && hasCompleted) || !hasDone,
+    `done blocks should transition through submitted before completed`
   );
   report(
     "failed 状态同步设置 lifecycleStatus=failed",
     (hasFailed && failedWithLifecycle) || !hasFailed,
     `failed blocks have lifecycleStatus=failed`
+  );
+
+  // Must not directly jump to completed without submitted
+  report(
+    "TaskRunner 不直接跳过 submitted 到 completed",
+    runner.includes('lifecycleStatus: "submitted"'),
+    "runner must set submitted before completed"
   );
 
   // Must handle awaiting_result
@@ -110,14 +118,30 @@ function report(name, ok, detail) {
   );
 
   report(
-    "A2A submitResult 完成任务并保留 artifact",
+    "A2A submitResult 设置 submitted 并保留 artifact",
     a2a.includes("submitResult")
-      && a2a.includes('const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "completed"')
-      && a2a.includes('status: "done"')
-      && a2a.includes("progress: 100")
-      && a2a.includes("completedAt: new Date()")
+      && a2a.includes('const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "submitted"')
+      && a2a.includes('status: "running"')
+      && a2a.includes("Math.max(task.progress ?? 0, 95)")
+      && !a2a.includes('completedAt: new Date()')
       && a2a.includes("recordArtifact"),
-    "final result should mark task completed/done and create artifact"
+    "submitResult should mark task submitted/running (not done/completed) and create artifact"
+  );
+
+  report(
+    "A2A review 负责 submitted→completed 转换",
+    a2a.includes("review:")
+      && a2a.includes('"submitted"')
+      && a2a.includes('"reviewing"')
+      && a2a.includes('"completed"')
+      && a2a.includes("isValidLifecycleTransition"),
+    "review mutation handles approval and completion"
+  );
+
+  report(
+    "A2A 有严格生命周期转换校验",
+    a2a.includes("to === \"completed\"") && a2a.includes("to === \"submitted\"") && a2a.includes("to === \"reviewing\"") && a2a.includes("isValidLifecycleTransition"),
+    "lifecycle transitions enforce strict ordering"
   );
 
   report(
@@ -221,6 +245,12 @@ function report(name, ok, detail) {
   );
 
   report(
+    "Connector 使用 a2a.review 完成 submitted 任务",
+    conn.includes("a2a.review") && conn.includes("approved: true"),
+    "connector calls review after submitResult to complete task"
+  );
+
+  report(
     "Connector 使用 lifecycleStatus",
     conn.includes("lifecycleStatus"),
     "connector sets lifecycle status"
@@ -278,6 +308,41 @@ function report(name, ok, detail) {
     "Task getById 返回 threadMessages 和 artifacts",
     tr.includes("threadMessages") && tr.includes("artifacts"),
     "task getById returns A2A thread data"
+  );
+}
+
+// ─── Check 9: version metadata is generated from real git/build env ───
+{
+  const commit = readFileSync(resolve(root, "api/commit.ts"), "utf-8");
+  const boot = readFileSync(resolve(root, "api/boot.ts"), "utf-8");
+  const pkg = readFileSync(resolve(root, "package.json"), "utf-8");
+
+  report(
+    "api/commit.ts 由构建脚本生成",
+    commit.includes("BUILD_TIME") && commit.includes("COMMIT_SHA") && commit.includes("BRANCH"),
+    "commit.ts contains generated build metadata"
+  );
+
+  report(
+    "/api/version 使用 BUILD_META 字段",
+    boot.includes("BUILD_META") && boot.includes("shortCommit") && boot.includes("branch"),
+    "version endpoint uses generated build metadata"
+  );
+
+  report(
+    "package.json 有 prebuild/precheck 脚本生成元数据",
+    pkg.includes("prebuild") && pkg.includes("precheck") && pkg.includes("generate-build-meta"),
+    "build scripts invoke metadata generation"
+  );
+}
+
+// ─── Check 10: thread messages record lifecycle events ───
+{
+  const a2a = readFileSync(resolve(root, "api/a2a-router.ts"), "utf-8");
+  report(
+    "A2A router 线程消息记录 lifecycleStatus",
+    a2a.includes("lifecycleStatus: nextStatus") || a2a.includes("lifecycleStatus: \"submitted\""),
+    "task messages include lifecycle status in metadata"
   );
 }
 

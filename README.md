@@ -233,6 +233,10 @@ docker build -t tiangong .
 docker run -p 3000:3000 --env-file .env tiangong
 ```
 
+### 构建元数据
+
+`api/commit.ts` 由 `scripts/generate-build-meta.mjs` 在构建前自动生成，包含当前 git commit、分支和构建时间。`npm run build` / `npm run check` 会自动调用该脚本。部署环境（如 Zeabur）无需额外配置，只需确保构建时执行 `prebuild` 即可。
+
 ---
 
 ## 设计风格

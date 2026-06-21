@@ -65,6 +65,34 @@ export const agents = mysqlTable("agents", {
 export type Agent = typeof agents.$inferSelect;
 export type InsertAgent = typeof agents.$inferInsert;
 
+export type AgentCard = {
+  capabilities: {
+    category: string;
+    items: string[];
+    level: "expert" | "advanced" | "intermediate" | "beginner";
+  }[];
+  permissions: {
+    canModifyTiangongCore: boolean;
+    canSendExternalMessage: boolean;
+    canExecuteCode: boolean;
+    canAccessFiles: boolean;
+    canAccessNetwork: boolean;
+  };
+  collaboration: {
+    supportsTaskExecution: boolean;
+    supportsReview: boolean;
+    supportsSubtask: boolean;
+    supportsHandoff: boolean;
+  };
+  openclaw: {
+    agentId: string;
+    sessionKey: string;
+    model: string;
+    runtime: "acp" | "subagent";
+  } | null;
+  metadata?: Record<string, unknown>;
+};
+
 // ─── Tasks ───
 export const tasks = mysqlTable("tasks", {
   id: serial("id").primaryKey(),
@@ -95,6 +123,20 @@ export const tasks = mysqlTable("tasks", {
   completedAt: timestamp("completed_at"),
   failedAt: timestamp("failed_at"),
   timeoutAt: timestamp("timeout_at"),
+  // ── Phase 2: Taskboard status machine ──
+  boardStatus: varchar("board_status", { length: 20 }).default("triage"),
+  boardLabels: text("board_labels"), // JSON array of strings
+  boardNotes: text("board_notes"),
+  sourceUrl: varchar("source_url", { length: 500 }),
+  lastHeartbeatAt: timestamp("last_heartbeat_at"),
+  heartbeatIntervalMs: int("heartbeat_interval_ms").default(300000),
+  reviewerId: bigint("reviewer_id", { mode: "number", unsigned: true }),
+  reviewResult: varchar("review_result", { length: 30 }),
+  triagedAt: timestamp("triaged_at"),
+  backloggedAt: timestamp("backlogged_at"),
+  readyAt: timestamp("ready_at"),
+  reviewAt: timestamp("review_at"),
+  blockedAt: timestamp("blocked_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });

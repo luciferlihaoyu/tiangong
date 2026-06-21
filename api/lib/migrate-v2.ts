@@ -71,6 +71,20 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "completed_at", def: "TIMESTAMP NULL" },
   { table: "tasks", col: "failed_at", def: "TIMESTAMP NULL" },
   { table: "tasks", col: "timeout_at", def: "TIMESTAMP NULL" },
+  // Phase 2: Taskboard status machine
+  { table: "tasks", col: "board_status", def: "VARCHAR(20) DEFAULT 'triage'" },
+  { table: "tasks", col: "board_labels", def: "TEXT" },
+  { table: "tasks", col: "board_notes", def: "TEXT" },
+  { table: "tasks", col: "source_url", def: "VARCHAR(500)" },
+  { table: "tasks", col: "last_heartbeat_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "heartbeat_interval_ms", def: "INT DEFAULT 300000" },
+  { table: "tasks", col: "reviewer_id", def: "BIGINT UNSIGNED" },
+  { table: "tasks", col: "review_result", def: "VARCHAR(30)" },
+  { table: "tasks", col: "triaged_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "backlogged_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "ready_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "review_at", def: "TIMESTAMP NULL" },
+  { table: "tasks", col: "blocked_at", def: "TIMESTAMP NULL" },
 
 ];
 
@@ -137,6 +151,36 @@ export async function migrateV2(force = false): Promise<string[]> {
           console.warn(`  ⚠️  ${table}.${col} failed:`, e.message?.slice(0, 80));
         }
       }
+    }
+
+    // Phase 2: 将现有 lifecycle_status 映射到 board_status
+    const LIFECYCLE_TO_BOARD: Record<string, string> = {
+      created: "triage",
+      queued: "todo",
+      claimed: "ready",
+      dispatched: "ready",
+      accepted: "running",
+      working: "running",
+      awaiting_result: "running",
+      submitted: "review",
+      reviewing: "review",
+      completed: "done",
+      failed: "failed",
+      timeout: "failed",
+      cancelled: "cancelled",
+    };
+    try {
+      for (const [from, to] of Object.entries(LIFECYCLE_TO_BOARD)) {
+        await conn.execute(
+          `UPDATE tasks SET board_status = ? WHERE lifecycle_status = ? AND (board_status IS NULL OR board_status = 'triage')`,
+          [to, from]
+        );
+      }
+      logs.push("tasks: lifecycle_status -> board_status mapped");
+      console.log("  ✅ tasks lifecycle_status -> board_status mapped");
+    } catch (e: any) {
+      logs.push(`tasks lifecycle mapping: ${e.message?.slice(0, 80)}`);
+      console.warn("  ⚠️  tasks lifecycle_status mapping failed:", e.message?.slice(0, 80));
     }
 
     // 修复 organizations 表：如果 budget 列存在但 budget_cents 不存在，改名

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, tasks, modelAllowlist } from "@db/schema";
+import { agents, tasks, modelAllowlist, type AgentCard } from "@db/schema";
 import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
 
 export const agentRouter = createRouter({
@@ -382,6 +382,86 @@ export const agentRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
       await db.delete(agents).where(eq(agents.id, input.id));
+      return { success: true };
+    }),
+
+  card: publicQuery
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const rows = await db.select().from(agents).where(eq(agents.id, input.agentId));
+      const agent = rows[0];
+      if (!agent) return null;
+
+      // Parse existing agentCard
+      if (agent.agentCard) {
+        try {
+          const parsed = JSON.parse(agent.agentCard) as AgentCard;
+          return parsed;
+        } catch {
+          // Fall through to default generation
+        }
+      }
+
+      // Auto-generate default AgentCard from existing fields
+      const capItems: string[] = [];
+      if (agent.capabilities) {
+        try {
+          const parsedCap = JSON.parse(agent.capabilities);
+          if (Array.isArray(parsedCap)) capItems.push(...parsedCap);
+          else capItems.push(agent.capabilities);
+        } catch {
+          capItems.push(...agent.capabilities.split(/[,;]/).map((s) => s.trim()).filter(Boolean));
+        }
+      }
+
+      const defaultCard: AgentCard = {
+        capabilities: [
+          {
+            category: agent.role || "general",
+            items: capItems.length > 0 ? capItems : ["general"],
+            level: "intermediate",
+          },
+        ],
+        permissions: {
+          canModifyTiangongCore: agent.canModifyTiangongCore === "true",
+          canSendExternalMessage: agent.canSendExternalMessage === "true",
+          canExecuteCode: false,
+          canAccessFiles: false,
+          canAccessNetwork: false,
+        },
+        collaboration: {
+          supportsTaskExecution: true,
+          supportsReview: false,
+          supportsSubtask: false,
+          supportsHandoff: false,
+        },
+        openclaw: agent.openclawAgent
+          ? {
+              agentId: agent.openclawAgent,
+              sessionKey: "",
+              model: agent.model || "",
+              runtime: "acp",
+            }
+          : null,
+      };
+
+      return defaultCard;
+    }),
+
+  updateCard: publicQuery
+    .input(
+      z.object({
+        agentId: z.number(),
+        card: z.record(z.string(), z.any()),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db
+        .update(agents)
+        .set({ agentCard: JSON.stringify(input.card) })
+        .where(eq(agents.id, input.agentId));
       return { success: true };
     }),
 });

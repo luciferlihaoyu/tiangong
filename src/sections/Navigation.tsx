@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router';
 import { useTheme } from '@/hooks/useTheme';
 import { useVersion } from '@/hooks/useVersion';
-import { ClipboardList, Target, BarChart3, Shield, Activity, Scale, Radio, GitBranch, Github } from 'lucide-react';
+import { ClipboardList, Target, BarChart3, Shield, Activity, Scale, Radio, GitBranch, Github, Layout } from 'lucide-react';
 
 function SunIcon() {
   return (
@@ -73,6 +73,11 @@ export default function Navigation() {
         {/* 任务指挥中心 */}
         <button onClick={() => navigate('/task-center')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务指挥中心">
           <Target size={14} /> 指挥中心
+        </button>
+
+        {/* 任务板 */}
+        <button onClick={() => navigate('/taskboard')} className="flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors" style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }} title="任务板">
+          <Layout size={14} /> 任务板
         </button>
 
         {/* 记事板 */}

@@ -379,6 +379,149 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
+  updateStatus: publicQuery
+    .input(
+      z.object({
+        taskId: z.number(),
+        agentId: z.number(),
+        boardStatus: z.enum([
+          "triage",
+          "backlog",
+          "todo",
+          "ready",
+          "running",
+          "review",
+          "blocked",
+          "done",
+          "failed",
+          "cancelled",
+        ]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      const from = row.boardStatus || "triage";
+      const to = input.boardStatus;
+      if (from === to) return { success: true };
+      if (!validateBoardTransition(from, to)) {
+        throw new Error(`Invalid transition from ${from} to ${to}`);
+      }
+      const updateFields: Record<string, unknown> = { boardStatus: to };
+      if (to === "done") {
+        updateFields.completedAt = new Date();
+        updateFields.status = "done";
+      } else if (to === "failed") {
+        updateFields.failedAt = new Date();
+        updateFields.status = "failed";
+      } else if (to === "running") {
+        updateFields.status = "running";
+      }
+      await db.update(tasks).set(updateFields).where(eq(tasks.id, input.taskId));
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        fromAgentId: input.agentId,
+        eventType: "system",
+        content: `Status changed from ${from} to ${to}`,
+        metadata: stringifyJson({ action: "updateStatus", agentId: input.agentId, previousBoardStatus: from, newBoardStatus: to }),
+      });
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "status_changed",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: to,
+        agentId: input.agentId,
+        timestamp: new Date().toISOString(),
+      });
+      return { success: true };
+    }),
+
+  approve: publicQuery
+    .input(
+      z.object({
+        taskId: z.number(),
+        agentId: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
+      await db
+        .update(tasks)
+        .set({
+          boardStatus: "done",
+          status: "done",
+          completedAt: new Date(),
+          reviewerId: input.agentId,
+          reviewResult: "approved",
+        })
+        .where(eq(tasks.id, input.taskId));
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        fromAgentId: input.agentId,
+        eventType: "system",
+        content: `Task approved by agent ${input.agentId}`,
+        metadata: stringifyJson({ action: "approve", agentId: input.agentId, previousBoardStatus: row.boardStatus }),
+      });
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "approved",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: "done",
+        agentId: input.agentId,
+        timestamp: new Date().toISOString(),
+      });
+      return { success: true };
+    }),
+
+  reject: publicQuery
+    .input(
+      z.object({
+        taskId: z.number(),
+        agentId: z.number(),
+        reason: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
+      await db
+        .update(tasks)
+        .set({
+          boardStatus: "running",
+          status: "running",
+          reviewResult: "rejected",
+        })
+        .where(eq(tasks.id, input.taskId));
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        fromAgentId: input.agentId,
+        eventType: "system",
+        content: input.reason ? `Rejected: ${input.reason}` : `Task rejected by agent ${input.agentId}, returned to running`,
+        metadata: stringifyJson({ action: "reject", agentId: input.agentId, previousBoardStatus: row.boardStatus }),
+      });
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "rejected",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: "running",
+        agentId: input.agentId,
+        timestamp: new Date().toISOString(),
+      });
+      return { success: true };
+    }),
+
   comment: publicQuery
     .input(
       z.object({

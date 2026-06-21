@@ -186,6 +186,7 @@ async function createMailboxMessage(input: {
     },
   });
 
+  // Notify dashboard clients
   wsManager.broadcastToDashboard({
     type: "mailbox_message_sent",
     messageId,
@@ -194,6 +195,25 @@ async function createMailboxMessage(input: {
     taskId: input.taskId ?? null,
     messageType: input.type,
     timestamp: new Date().toISOString(),
+  });
+
+  // Notify target agent via WebSocket (real-time push to connector)
+  wsManager.sendToAgent(input.toAgent.id, {
+    type: "mailbox_message",
+    message: {
+      id: messageId,
+      fromMailboxId: input.fromMailboxId,
+      fromAgentId: input.fromAgent?.id ?? null,
+      toMailboxId: input.toAgent.agentId,
+      toAgentId: input.toAgent.id,
+      type: input.type,
+      subject: input.subject ?? null,
+      body: input.body ?? null,
+      status: "unread",
+      taskId: input.taskId ?? null,
+      threadId: input.threadId ?? null,
+      timestamp: new Date().toISOString(),
+    },
   });
 
   return { messageId, toMailboxId: input.toAgent.agentId, toAgentId: input.toAgent.id };
@@ -555,6 +575,25 @@ export const mailboxRouter = createRouter({
         toMailboxId: toAgent.agentId,
         taskId: message.taskId ?? null,
         timestamp: new Date().toISOString(),
+      });
+
+      // Notify original sender (toAgent) via WebSocket
+      wsManager.sendToAgent(toAgent.id, {
+        type: "mailbox_message",
+        message: {
+          id: replyMessageId,
+          fromMailboxId: fromAgent.agentId,
+          fromAgentId: fromAgent.id,
+          toMailboxId: toAgent.agentId,
+          toAgentId: toAgent.id,
+          type: "result_notice",
+          subject: input.subject ?? (message.subject ? `Re: ${message.subject}` : null),
+          body: input.body ?? null,
+          status: "unread",
+          taskId: message.taskId ?? null,
+          replyToMessageId: message.id,
+          timestamp: new Date().toISOString(),
+        },
       });
 
       return { success: true, messageId: message.id, replyMessageId, status: "replied" };

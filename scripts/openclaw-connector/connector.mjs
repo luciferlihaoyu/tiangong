@@ -583,6 +583,38 @@ function buildTaskPrompt(cfg, task) {
   return lines.join("\n");
 }
 
+/**
+ * Build a prompt for mailbox message processing.
+ * Similar to buildTaskPrompt but tailored for mailbox conversations.
+ *
+ * @param {Config} cfg
+ * @param {{ id: number, fromMailboxId: string, toMailboxId: string, subject?: string, body?: string, type?: string }} msg
+ * @returns {string}
+ */
+function buildMailboxPrompt(cfg, msg) {
+  const lines = [
+    `=== Tiangong Mailbox Message ===`,
+    `Message ID: ${msg.id}`,
+    `From: ${msg.fromMailboxId}`,
+    `To: ${cfg.agentName}`,
+    `Type: ${msg.type || "direct"}`,
+  ];
+  if (msg.subject) {
+    lines.push(`Subject: ${msg.subject}`);
+  }
+  if (msg.body) {
+    lines.push(``);
+    lines.push(`--- Message Body ---`);
+    lines.push(msg.body);
+    lines.push(`--- End of Message ---`);
+  }
+  lines.push(``);
+  lines.push(`You are ${cfg.agentName}, an AI agent in the Tiangong multi-agent platform.`);
+  lines.push(`You received a message from ${msg.fromMailboxId}. Please respond naturally.`);
+  lines.push(`Your reply will be sent back via the Tiangong mailbox system.`);
+  return lines.join("\n");
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  P9.1: Cost guard — model selection for recurring tasks
 // ═══════════════════════════════════════════════════════════════
@@ -1219,6 +1251,49 @@ async function handleWSMessage(cfg, inbox, data) {
         L.debug(`⏭️ 消息 #${msg.id} 已处理过，跳过`);
       }
 
+      break;
+    }
+
+    case "mailbox_message": {
+      const msg = data.message || {};
+      L.info(`📬 Mailbox: ${msg.fromMailboxId} → ${msg.toMailboxId}: ${(msg.body || msg.subject || "").slice(0, 160)}`);
+
+      // In command mode: process via runner (OpenClaw gateway call)
+      if (cfg.execMode === "command" && msg.body && msg.fromMailboxId) {
+        const prompt = buildMailboxPrompt(cfg, msg);
+        L.info(`🧠 处理 Mailbox 消息: ${(msg.body || "").slice(0, 100)}`);
+
+        executeCommand(cfg, {
+          id: msg.id,
+          taskId: `MB-${msg.id}`,
+          name: `Mailbox: ${msg.fromMailboxId} → ${cfg.agentName}`,
+          description: msg.body || "",
+          input: msg.body || "",
+        }, prompt).then(async (result) => {
+          L.info(`✅ Mailbox 回复完成 (${result.length} chars)`);
+          // Send reply back via mailbox.reply
+          const r = await trpcCall(cfg, "mailbox.reply", {
+            messageId: msg.id,
+            fromMailboxId: cfg.agentName,
+            body: result.slice(0, cfg.resultMaxChars),
+          });
+          if (r.ok) {
+            L.info(`📤 Mailbox 回复已发送`);
+          } else {
+            L.warn(`Mailbox 回复失败: ${r.error}`);
+          }
+        }).catch((err) => {
+          L.error(`❌ Mailbox 处理失败: ${err.message}`);
+        });
+      } else if (cfg.execMode === "mock") {
+        // Mock mode: auto-ACK and send a simple reply
+        const ackContent = `[${cfg.agentName}] ACK: 已收到来自 ${msg.fromMailboxId} 的消息`;
+        trpcCall(cfg, "mailbox.reply", {
+          messageId: msg.id,
+          fromMailboxId: cfg.agentName,
+          body: ackContent,
+        }).catch((e) => L.warn(`Mailbox mock reply failed: ${e.message}`));
+      }
       break;
     }
 

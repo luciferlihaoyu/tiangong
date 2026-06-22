@@ -7,7 +7,8 @@ import { TaskDetailModal } from "@/components/taskboard/TaskDetailModal";
 import { CreateTaskModal } from "@/components/taskboard/CreateTaskModal";
 import type { Task, TaskDetail, Agent, BoardStatus } from "@/components/taskboard/types";
 import { BOARD_STATUSES, BOARD_STATUS_CONFIG } from "@/components/taskboard/types";
-import { Plus, RefreshCw, Search, Layout } from "lucide-react";
+import { toast } from "sonner";
+import { Plus, RefreshCw, Search, Layout, Shield } from "lucide-react";
 
 export default function TaskBoard() {
   const navigate = useNavigate();
@@ -35,6 +36,15 @@ export default function TaskBoard() {
   );
   const detailTask = (detailQuery.data || null) as TaskDetail | null;
 
+  const firstAgent = agents.find((a) => a.status === "online");
+  const currentAgentId = firstAgent?.id ?? agents[0]?.id;
+
+  const reviewTasksQuery = trpc.taskboard.listReviewTasks.useQuery(
+    { agentId: currentAgentId ?? 0 },
+    { enabled: currentAgentId !== undefined, retry: 1, staleTime: 5000 }
+  );
+  const myReviewTasks = (reviewTasksQuery.data || []) as Task[];
+
   // WebSocket updates
   const { lastMessage } = useWebSocket();
   useEffect(() => {
@@ -45,7 +55,30 @@ export default function TaskBoard() {
         utils.taskboard.get.invalidate({ id: detailTaskId });
       }
     }
-  }, [lastMessage, utils, detailTaskId]);
+    if (lastMessage.type === "task_notification") {
+      const { taskName, fromStatus, toStatus, changedBy } = lastMessage;
+      const fromLabel = BOARD_STATUS_CONFIG[fromStatus as BoardStatus]?.label || fromStatus;
+      const toLabel = BOARD_STATUS_CONFIG[toStatus as BoardStatus]?.label || toStatus;
+      const byAgent = agents.find((a) => a.id === changedBy);
+      const byName = byAgent ? byAgent.name : `Agent #${changedBy}`;
+      toast.info(`「${taskName}」 ${fromLabel} → ${toLabel} by ${byName}`, {
+        duration: 4000,
+      });
+      utils.taskboard.list.invalidate();
+      if (currentAgentId) {
+        utils.taskboard.listReviewTasks.invalidate({ agentId: currentAgentId });
+      }
+    }
+    if (lastMessage.type === "mailbox_message_sent") {
+      const { subject, fromMailboxId, toMailboxId } = lastMessage as any;
+      if (toMailboxId && currentAgentId) {
+        const toAgent = agents.find((a) => a.agentId === toMailboxId);
+        if (toAgent?.id === currentAgentId) {
+          toast.info(`新消息: ${subject || "Mailbox message"}`, { duration: 5000 });
+        }
+      }
+    }
+  }, [lastMessage, utils, detailTaskId, agents, currentAgentId]);
 
   // Group tasks by boardStatus
   const groupedTasks = useMemo(() => {
@@ -164,11 +197,12 @@ export default function TaskBoard() {
         {/* Stats row */}
         <div className="flex flex-wrap gap-3 mb-4">
           {[
-            { key: "total", label: "全部", color: "var(--text-primary)", bg: "rgba(255,255,255,0.02)" },
-            { key: "running", label: "执行中", color: "#4a9eff", bg: "rgba(74,158,255,0.05)" },
-            { key: "review", label: "审核中", color: "#c9a84c", bg: "rgba(201,168,76,0.05)" },
-            { key: "blocked", label: "阻塞", color: "#c23a30", bg: "rgba(194,58,48,0.05)" },
-            { key: "done", label: "已完成", color: "#4caf7d", bg: "rgba(76,175,125,0.05)" },
+            { key: "total", label: "全部", color: "var(--text-primary)", bg: "rgba(255,255,255,0.02)", icon: null },
+            { key: "running", label: "执行中", color: "#4a9eff", bg: "rgba(74,158,255,0.05)", icon: null },
+            { key: "review", label: "审核中", color: "#c9a84c", bg: "rgba(201,168,76,0.05)", icon: null },
+            { key: "blocked", label: "阻塞", color: "#c23a30", bg: "rgba(194,58,48,0.05)", icon: null },
+            { key: "done", label: "已完成", color: "#4caf7d", bg: "rgba(76,175,125,0.05)", icon: null },
+            { key: "myReviews", label: "待我审核", color: "#c9a84c", bg: "rgba(201,168,76,0.08)", icon: Shield },
           ].map((s) => (
             <div
               key={s.key}
@@ -180,8 +214,9 @@ export default function TaskBoard() {
                 {s.label}
               </span>
               <span className="text-xs font-bold" style={{ color: s.color }}>
-                {stats[s.key as keyof typeof stats]}
+                {s.key === "myReviews" ? myReviewTasks.length : stats[s.key as keyof typeof stats]}
               </span>
+              {s.icon && <s.icon size={10} style={{ color: s.color }} />}
             </div>
           ))}
         </div>

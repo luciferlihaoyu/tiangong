@@ -183,7 +183,7 @@ export function parseLabels(raw: string | null): string[] {
 export interface StatusAction {
   label: string;
   to: BoardStatus;
-  api: "claim" | "submit" | "approve" | "reject" | "block" | "unblock" | "updateStatus";
+  api: "claim" | "submit" | "approve" | "requestChanges" | "reject" | "block" | "unblock" | "updateStatus";
   needsReason?: boolean;
   needsAgent?: boolean;
 }
@@ -217,9 +217,9 @@ export const STATUS_ACTIONS: Record<BoardStatus, StatusAction[]> = {
   ],
   review: [
     { label: "✓ Approve", to: "done", api: "approve" },
-    { label: "↻ Reject", to: "running", api: "reject" },
+    { label: "↻ Request Changes", to: "running", api: "requestChanges" },
+    { label: "✗ Reject", to: "failed", api: "reject" },
     { label: "→ Blocked", to: "blocked", api: "block", needsReason: true },
-    { label: "→ Failed", to: "failed", api: "updateStatus" },
     { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
   ],
   blocked: [

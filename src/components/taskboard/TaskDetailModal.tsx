@@ -17,6 +17,10 @@ import {
   FileText,
   AlertTriangle,
   ChevronRight,
+  Link,
+  CheckCircle,
+  RotateCcw,
+  Shield,
 } from "lucide-react";
 import type { Task, TaskDetail, Agent, BoardStatus } from "./types";
 import {
@@ -44,6 +48,7 @@ export function TaskDetailModal({
 }: TaskDetailModalProps) {
   const [blockReason, setBlockReason] = useState("");
   const [showBlockInput, setShowBlockInput] = useState(false);
+  const [reviewComment, setReviewComment] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actingAgentId, setActingAgentId] = useState<number | null>(null);
 
@@ -69,6 +74,12 @@ export function TaskDetailModal({
   const currentStatus = (task?.boardStatus || "triage") as BoardStatus;
   const statusConfig = BOARD_STATUS_CONFIG[currentStatus];
   const actions = STATUS_ACTIONS[currentStatus] || [];
+
+  const isCurrentAgentReviewer = useMemo(() => {
+    if (!task?.reviewerId) return false;
+    const agentId = getEffectiveAgentId();
+    return agentId === task.reviewerId;
+  }, [task?.reviewerId, actingAgentId, task?.agentId, agents]);
 
   const updateStatusMutation = trpc.taskboard.updateStatus.useMutation({
     onSuccess: () => {
@@ -101,6 +112,7 @@ export function TaskDetailModal({
     onSuccess: () => {
       utils.taskboard.list.invalidate();
       utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
+      setReviewComment("");
       setActionError(null);
     },
     onError: (err) => setActionError(err.message),
@@ -110,6 +122,17 @@ export function TaskDetailModal({
     onSuccess: () => {
       utils.taskboard.list.invalidate();
       utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
+      setReviewComment("");
+      setActionError(null);
+    },
+    onError: (err) => setActionError(err.message),
+  });
+
+  const requestChangesMutation = trpc.taskboard.requestChanges.useMutation({
+    onSuccess: () => {
+      utils.taskboard.list.invalidate();
+      utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
+      setReviewComment("");
       setActionError(null);
     },
     onError: (err) => setActionError(err.message),
@@ -134,6 +157,11 @@ export function TaskDetailModal({
     },
     onError: (err) => setActionError(err.message),
   });
+
+  const dependencyChainQuery = trpc.taskboard.getDependencyChain.useQuery(
+    { taskId: task?.id ?? 0 },
+    { enabled: task?.id !== undefined && task?.id !== null, retry: 1 }
+  );
 
   const getEffectiveAgentId = (): number | null => {
     if (actingAgentId) return actingAgentId;
@@ -165,11 +193,15 @@ export function TaskDetailModal({
       return;
     }
     if (action.api === "approve") {
-      approveMutation.mutate({ taskId: task.id, agentId });
+      approveMutation.mutate({ taskId: task.id, agentId, comment: reviewComment || undefined });
       return;
     }
     if (action.api === "reject") {
-      rejectMutation.mutate({ taskId: task.id, agentId });
+      rejectMutation.mutate({ taskId: task.id, agentId, reason: reviewComment || undefined });
+      return;
+    }
+    if (action.api === "requestChanges") {
+      requestChangesMutation.mutate({ taskId: task.id, agentId, reason: reviewComment || undefined });
       return;
     }
     if (action.api === "unblock") {
@@ -198,10 +230,13 @@ export function TaskDetailModal({
     submitMutation.isPending ||
     approveMutation.isPending ||
     rejectMutation.isPending ||
+    requestChangesMutation.isPending ||
     blockMutation.isPending ||
     unblockMutation.isPending;
 
   if (!open || !task) return null;
+
+  const dependencyChain = dependencyChainQuery.data;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -280,25 +315,35 @@ export function TaskDetailModal({
                               ? "rgba(76,175,125,0.1)"
                               : action.api === "reject"
                                 ? "rgba(194,58,48,0.1)"
-                                : action.api === "block"
-                                  ? "rgba(194,58,48,0.08)"
-                                  : "rgba(180,200,255,0.04)",
+                                : action.api === "requestChanges"
+                                  ? "rgba(201,168,76,0.1)"
+                                  : action.api === "block"
+                                    ? "rgba(194,58,48,0.08)"
+                                    : "rgba(180,200,255,0.04)",
                         color:
                           action.api === "claim"
                             ? "var(--accent-cyan)"
                             : action.api === "approve"
                               ? "var(--success)"
-                              : action.api === "reject" || action.api === "block"
+                              : action.api === "reject"
                                 ? "var(--accent-red)"
-                                : "var(--text-secondary)",
+                                : action.api === "requestChanges"
+                                  ? "var(--accent-gold)"
+                                  : action.api === "block"
+                                    ? "var(--accent-red)"
+                                    : "var(--text-secondary)",
                         border: `1px solid ${
                           action.api === "claim"
                             ? "rgba(74,158,255,0.2)"
                             : action.api === "approve"
                               ? "rgba(76,175,125,0.2)"
-                              : action.api === "reject" || action.api === "block"
+                              : action.api === "reject"
                                 ? "rgba(194,58,48,0.2)"
-                                : "var(--border-default)"
+                                : action.api === "requestChanges"
+                                  ? "rgba(201,168,76,0.2)"
+                                  : action.api === "block"
+                                    ? "rgba(194,58,48,0.2)"
+                                    : "var(--border-default)"
                         }`,
                       }}
                     >
@@ -306,6 +351,23 @@ export function TaskDetailModal({
                     </button>
                   ))}
                 </div>
+                {/* Review comment textarea for review actions */}
+                {task.boardStatus === "review" && (
+                  <div className="mb-2">
+                    <textarea
+                      value={reviewComment}
+                      onChange={(e) => setReviewComment(e.target.value)}
+                      placeholder="输入审核意见（可选）..."
+                      rows={2}
+                      className="w-full px-3 py-1.5 rounded text-xs outline-none resize-none"
+                      style={{
+                        background: "rgba(0,0,0,0.2)",
+                        border: "1px solid var(--border-default)",
+                        color: "var(--text-primary)",
+                      }}
+                    />
+                  </div>
+                )}
                 {showBlockInput && (
                   <div className="flex items-center gap-2 mb-2">
                     <input
@@ -380,6 +442,18 @@ export function TaskDetailModal({
                     </select>
                   </div>
                 )}
+                {/* Reviewer indicator */}
+                {task.boardStatus === "review" && reviewer && (
+                  <div className="flex items-center gap-2 mt-2 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    <Shield size={10} />
+                    <span>审核者: {reviewer.name}</span>
+                    {isCurrentAgentReviewer && (
+                      <span className="px-1 py-0.5 rounded" style={{ background: "rgba(74,158,255,0.1)", color: "var(--accent-cyan)" }}>
+                        当前 Agent 是审核人
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -445,6 +519,35 @@ export function TaskDetailModal({
                   <div className="col-span-2">
                     <span style={{ color: "var(--text-muted)" }}>备注:</span>{" "}
                     <span style={{ color: "var(--text-secondary)" }}>{task.boardNotes}</span>
+                  </div>
+                )}
+                {task.reviewResult && (
+                  <div className="col-span-2 flex items-center gap-2">
+                    <span style={{ color: "var(--text-muted)" }}>审核结果:</span>
+                    <span
+                      className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      style={{
+                        background:
+                          task.reviewResult === "approved"
+                            ? "rgba(76,175,125,0.1)"
+                            : task.reviewResult === "changes_requested"
+                              ? "rgba(201,168,76,0.1)"
+                              : "rgba(194,58,48,0.1)",
+                        color:
+                          task.reviewResult === "approved"
+                            ? "var(--success)"
+                            : task.reviewResult === "changes_requested"
+                              ? "var(--accent-gold)"
+                              : "var(--accent-red)",
+                      }}
+                    >
+                      {task.reviewResult}
+                    </span>
+                    {reviewer && (
+                      <span style={{ color: "var(--text-secondary)" }}>
+                        by {reviewer.name}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -628,6 +731,84 @@ export function TaskDetailModal({
                 >
                   {task.error}
                 </pre>
+              </div>
+            )}
+
+            {/* Dependency Chain */}
+            {dependencyChain && (dependencyChain.blocks.length > 0 || dependencyChain.blockedBy.length > 0) && (
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Link size={12} style={{ color: "var(--text-muted)" }} />
+                  <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    依赖链
+                  </span>
+                  <Separator className="flex-1" style={{ background: "var(--border-default)" }} />
+                </div>
+                <div
+                  className="p-3 rounded text-xs font-mono"
+                  style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}
+                >
+                  {dependencyChain.blocks.length > 0 && (
+                    <div className="mb-2">
+                      <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>
+                        阻塞了以下任务:
+                      </div>
+                      <div className="space-y-1">
+                        {dependencyChain.blocks.map((b) => {
+                          const t = b.task;
+                          const sc = t ? BOARD_STATUS_CONFIG[t.boardStatus as BoardStatus] || BOARD_STATUS_CONFIG.triage : null;
+                          return (
+                            <div key={b.dependencyId} className="flex items-center gap-2">
+                              <ChevronRight size={10} style={{ color: "var(--text-muted)" }} />
+                              <span style={{ color: "var(--text-primary)" }}>{t?.name || "未知任务"}</span>
+                              <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                                {t?.taskId || ""}
+                              </span>
+                              {sc && (
+                                <span
+                                  className="text-[9px] px-1 py-0.5 rounded"
+                                  style={{ background: sc.bgColor, color: sc.color, border: `1px solid ${sc.borderColor}` }}
+                                >
+                                  {sc.label}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {dependencyChain.blockedBy.length > 0 && (
+                    <div>
+                      <div className="text-[10px] mb-1" style={{ color: "var(--text-muted)" }}>
+                        被以下任务阻塞:
+                      </div>
+                      <div className="space-y-1">
+                        {dependencyChain.blockedBy.map((b) => {
+                          const t = b.task;
+                          const sc = t ? BOARD_STATUS_CONFIG[t.boardStatus as BoardStatus] || BOARD_STATUS_CONFIG.triage : null;
+                          return (
+                            <div key={b.dependencyId} className="flex items-center gap-2">
+                              <ChevronRight size={10} style={{ color: "var(--text-muted)" }} />
+                              <span style={{ color: "var(--text-primary)" }}>{t?.name || "未知任务"}</span>
+                              <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                                {t?.taskId || ""}
+                              </span>
+                              {sc && (
+                                <span
+                                  className="text-[9px] px-1 py-0.5 rounded"
+                                  style={{ background: sc.bgColor, color: sc.color, border: `1px solid ${sc.borderColor}` }}
+                                >
+                                  {sc.label}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

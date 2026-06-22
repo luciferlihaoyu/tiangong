@@ -2,9 +2,10 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts } from "@db/schema";
-import { eq, and, or, like, desc, asc } from "drizzle-orm";
+import { eq, and, or, like, desc, asc, inArray } from "drizzle-orm";
 import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-validator";
 import { wsManager } from "./ws-manager";
+import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -229,9 +230,20 @@ export const taskboardRouter = createRouter({
       if (row.agentId !== input.agentId) throw new Error("Task is not assigned to this agent");
       if (row.boardStatus !== "running") throw new Error(`Task is not running (current: ${row.boardStatus})`);
 
+      // Determine reviewer: parent task agent > dispatcher > null
+      let reviewerId: number | null = null;
+      if (row.parentTaskId) {
+        const parent = await db.select().from(tasks).where(eq(tasks.id, row.parentTaskId)).then((r) => r[0]);
+        if (parent?.agentId) reviewerId = parent.agentId;
+      }
+      if (!reviewerId && row.dispatcherAgentId) {
+        reviewerId = row.dispatcherAgentId;
+      }
+
       const updateFields: Record<string, unknown> = {
         boardStatus: "review",
         reviewAt: new Date(),
+        reviewerId,
       };
       if (input.output !== undefined) updateFields.output = input.output;
 
@@ -242,7 +254,7 @@ export const taskboardRouter = createRouter({
         fromAgentId: input.agentId,
         eventType: "system",
         content: input.output || `Task submitted by agent ${input.agentId}`,
-        metadata: stringifyJson({ action: "submit", agentId: input.agentId, previousBoardStatus: row.boardStatus }),
+        metadata: stringifyJson({ action: "submit", agentId: input.agentId, previousBoardStatus: row.boardStatus, reviewerId }),
       });
 
       if (input.artifactType && input.artifactPayload) {
@@ -264,6 +276,25 @@ export const taskboardRouter = createRouter({
         agentId: input.agentId,
         timestamp: new Date().toISOString(),
       });
+
+      await broadcastTaskNotification({
+        taskId: input.taskId,
+        taskName: row.name,
+        fromStatus: "running",
+        toStatus: "review",
+        changedBy: input.agentId,
+      });
+
+      if (reviewerId) {
+        await sendMailboxNotification({
+          fromAgentId: input.agentId,
+          toAgentId: reviewerId,
+          taskId: input.taskId,
+          type: "review_request",
+          subject: `Review requested: ${row.name}`,
+          body: `Task "${row.name}" has been submitted by agent ${input.agentId} and is awaiting review.`,
+        });
+      }
 
       return { success: true };
     }),
@@ -436,6 +467,17 @@ export const taskboardRouter = createRouter({
         agentId: input.agentId,
         timestamp: new Date().toISOString(),
       });
+      await broadcastTaskNotification({
+        taskId: input.taskId,
+        taskName: row.name,
+        fromStatus: from,
+        toStatus: to,
+        changedBy: input.agentId,
+      });
+      if (to === "done" || to === "failed") {
+        await autoPromoteParentTask(input.taskId);
+        await checkAndUnblockDependencies(input.taskId);
+      }
       return { success: true };
     }),
 
@@ -444,6 +486,7 @@ export const taskboardRouter = createRouter({
       z.object({
         taskId: z.number(),
         agentId: z.number(),
+        comment: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -451,6 +494,9 @@ export const taskboardRouter = createRouter({
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
       if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
+      if (row.reviewerId && row.reviewerId !== input.agentId) {
+        throw new Error("Only the assigned reviewer can approve this task");
+      }
       await db
         .update(tasks)
         .set({
@@ -465,8 +511,8 @@ export const taskboardRouter = createRouter({
         taskId: input.taskId,
         fromAgentId: input.agentId,
         eventType: "system",
-        content: `Task approved by agent ${input.agentId}`,
-        metadata: stringifyJson({ action: "approve", agentId: input.agentId, previousBoardStatus: row.boardStatus }),
+        content: input.comment ? `Approved: ${input.comment}` : `Task approved by agent ${input.agentId}`,
+        metadata: stringifyJson({ action: "approve", agentId: input.agentId, previousBoardStatus: row.boardStatus, comment: input.comment }),
       });
       wsManager.broadcastToDashboard({
         type: "task_update",
@@ -478,6 +524,25 @@ export const taskboardRouter = createRouter({
         agentId: input.agentId,
         timestamp: new Date().toISOString(),
       });
+      await broadcastTaskNotification({
+        taskId: input.taskId,
+        taskName: row.name,
+        fromStatus: "review",
+        toStatus: "done",
+        changedBy: input.agentId,
+      });
+      if (row.agentId) {
+        await sendMailboxNotification({
+          fromAgentId: input.agentId,
+          toAgentId: row.agentId,
+          taskId: input.taskId,
+          type: "result_notice",
+          subject: `Task approved: ${row.name}`,
+          body: input.comment ? `Your task "${row.name}" has been approved. Comment: ${input.comment}` : `Your task "${row.name}" has been approved.`,
+        });
+      }
+      await autoPromoteParentTask(input.taskId);
+      await checkAndUnblockDependencies(input.taskId);
       return { success: true };
     }),
 
@@ -494,20 +559,25 @@ export const taskboardRouter = createRouter({
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
       if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
+      if (row.reviewerId && row.reviewerId !== input.agentId) {
+        throw new Error("Only the assigned reviewer can reject this task");
+      }
       await db
         .update(tasks)
         .set({
-          boardStatus: "running",
-          status: "running",
+          boardStatus: "failed",
+          status: "failed",
+          failedAt: new Date(),
           reviewResult: "rejected",
+          reviewerId: input.agentId,
         })
         .where(eq(tasks.id, input.taskId));
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,
         eventType: "system",
-        content: input.reason ? `Rejected: ${input.reason}` : `Task rejected by agent ${input.agentId}, returned to running`,
-        metadata: stringifyJson({ action: "reject", agentId: input.agentId, previousBoardStatus: row.boardStatus }),
+        content: input.reason ? `Rejected: ${input.reason}` : `Task rejected by agent ${input.agentId}`,
+        metadata: stringifyJson({ action: "reject", agentId: input.agentId, previousBoardStatus: row.boardStatus, reason: input.reason }),
       });
       wsManager.broadcastToDashboard({
         type: "task_update",
@@ -515,11 +585,159 @@ export const taskboardRouter = createRouter({
         id: input.taskId,
         taskId: row.taskId,
         name: row.name,
+        status: "failed",
+        agentId: input.agentId,
+        timestamp: new Date().toISOString(),
+      });
+      await broadcastTaskNotification({
+        taskId: input.taskId,
+        taskName: row.name,
+        fromStatus: "review",
+        toStatus: "failed",
+        changedBy: input.agentId,
+      });
+      if (row.agentId) {
+        await sendMailboxNotification({
+          fromAgentId: input.agentId,
+          toAgentId: row.agentId,
+          taskId: input.taskId,
+          type: "result_notice",
+          subject: `Task rejected: ${row.name}`,
+          body: input.reason ? `Your task "${row.name}" has been rejected. Reason: ${input.reason}` : `Your task "${row.name}" has been rejected.`,
+        });
+      }
+      await autoPromoteParentTask(input.taskId);
+      await checkAndUnblockDependencies(input.taskId);
+      return { success: true };
+    }),
+
+  requestChanges: publicQuery
+    .input(
+      z.object({
+        taskId: z.number(),
+        agentId: z.number(),
+        reason: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
+      if (row.reviewerId && row.reviewerId !== input.agentId) {
+        throw new Error("Only the assigned reviewer can request changes on this task");
+      }
+      await db
+        .update(tasks)
+        .set({
+          boardStatus: "running",
+          status: "running",
+          reviewResult: "changes_requested",
+          reviewerId: input.agentId,
+        })
+        .where(eq(tasks.id, input.taskId));
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        fromAgentId: input.agentId,
+        eventType: "system",
+        content: input.reason ? `Changes requested: ${input.reason}` : `Changes requested by agent ${input.agentId}`,
+        metadata: stringifyJson({ action: "requestChanges", agentId: input.agentId, previousBoardStatus: row.boardStatus, reason: input.reason }),
+      });
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "changes_requested",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
         status: "running",
         agentId: input.agentId,
         timestamp: new Date().toISOString(),
       });
+      await broadcastTaskNotification({
+        taskId: input.taskId,
+        taskName: row.name,
+        fromStatus: "review",
+        toStatus: "running",
+        changedBy: input.agentId,
+      });
+      if (row.agentId) {
+        await sendMailboxNotification({
+          fromAgentId: input.agentId,
+          toAgentId: row.agentId,
+          taskId: input.taskId,
+          type: "result_notice",
+          subject: `Changes requested: ${row.name}`,
+          body: input.reason ? `Changes requested for "${row.name}". Reason: ${input.reason}` : `Changes requested for "${row.name}".`,
+        });
+      }
       return { success: true };
+    }),
+
+  listReviewTasks: publicQuery
+    .input(
+      z.object({
+        agentId: z.number(),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = getDb();
+      return db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.boardStatus, "review"), eq(tasks.reviewerId, input.agentId)))
+        .orderBy(desc(tasks.priority), asc(tasks.createdAt))
+        .limit(200);
+    }),
+
+  getDependencyChain: publicQuery
+    .input(z.object({ taskId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const { taskDependencies } = await import("@db/schema");
+
+      const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!task) return null;
+
+      const blocks = await db
+        .select()
+        .from(taskDependencies)
+        .where(eq(taskDependencies.taskId, input.taskId));
+      const blockedBy = await db
+        .select()
+        .from(taskDependencies)
+        .where(eq(taskDependencies.dependsOnTaskId, input.taskId));
+
+      const relatedIds = [
+        ...blocks.map((b) => b.dependsOnTaskId),
+        ...blockedBy.map((b) => b.taskId),
+      ];
+
+      const relatedTasks =
+        relatedIds.length > 0
+          ? await db
+              .select({ id: tasks.id, taskId: tasks.taskId, name: tasks.name, boardStatus: tasks.boardStatus })
+              .from(tasks)
+              .where(inArray(tasks.id, relatedIds))
+          : [];
+
+      const taskMap = new Map(relatedTasks.map((t) => [t.id, t]));
+
+      return {
+        taskId: input.taskId,
+        taskKey: task.taskId,
+        name: task.name,
+        boardStatus: task.boardStatus,
+        blocks: blocks.map((b) => ({
+          dependencyId: b.id,
+          taskId: b.dependsOnTaskId,
+          task: taskMap.get(b.dependsOnTaskId) ?? null,
+        })),
+        blockedBy: blockedBy.map((b) => ({
+          dependencyId: b.id,
+          taskId: b.taskId,
+          task: taskMap.get(b.taskId) ?? null,
+        })),
+      };
     }),
 
   comment: publicQuery

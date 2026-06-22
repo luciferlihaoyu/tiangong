@@ -22,6 +22,7 @@ import {
 const EXCHANGE_RATE = 7.2;
 
 type Currency = "USD" | "CNY";
+type DisplayMode = "compact" | "raw";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -35,22 +36,27 @@ function fmtDateTime(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function fmtTokens(n: number): string {
+function fmtTokens(n: number, mode: DisplayMode = "compact"): string {
+  if (mode === "raw") return String(n);
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function fmtCost(cents: number, currency: Currency): string {
+function fmtCost(cents: number, currency: Currency, mode: DisplayMode = "compact"): string {
+  const usd = cents / 100;
   if (currency === "CNY") {
-    const cny = (cents / 100) * EXCHANGE_RATE;
+    const cny = usd * EXCHANGE_RATE;
+    if (mode === "raw") return `¥${cny.toFixed(6)}`;
     return `¥${cny.toFixed(2)}`;
   }
-  if (cents >= 100) return `$${(cents / 100).toFixed(2)}`;
+  if (mode === "raw") return `$${usd.toFixed(6)}`;
+  if (cents >= 100) return `$${usd.toFixed(2)}`;
   return `${cents}¢`;
 }
 
-function fmtUsd(usd: number): string {
+function fmtUsd(usd: number, mode: DisplayMode = "compact"): string {
+  if (mode === "raw") return `$${usd.toFixed(6)}`;
   if (usd >= 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(4)}`;
 }
@@ -64,10 +70,12 @@ function OverviewCards({
   byModel,
   cacheStats,
   currency,
+  displayMode,
 }: {
   byModel: { totalTokens: number; callCount: number; costCents: number }[];
   cacheStats: { overall?: { cacheHitRate: number; cachedPromptTokens: number; uncachedPromptTokens: number; costCents: number } } | undefined;
   currency: Currency;
+  displayMode: DisplayMode;
 }) {
   const totals = byModel.reduce(
     (acc, m) => ({
@@ -86,14 +94,14 @@ function OverviewCards({
   const cards = [
     {
       label: currency === "CNY" ? "总花费 (CNY)" : "总花费 (USD)",
-      value: currency === "CNY" ? fmtCny(costUsd) : fmtUsd(costUsd),
-      sub: currency === "CNY" ? fmtUsd(costUsd) : fmtCny(costUsd),
+      value: currency === "CNY" ? fmtCny(costUsd) : fmtUsd(costUsd, displayMode),
+      sub: currency === "CNY" ? fmtUsd(costUsd, displayMode) : fmtCny(costUsd),
       color: "var(--accent-gold)",
       icon: <DollarSign size={16} />,
     },
     {
       label: "总 Token",
-      value: fmtTokens(totals.totalTokens),
+      value: fmtTokens(totals.totalTokens, displayMode),
       color: "var(--accent-cyan)",
       icon: <Database size={16} />,
     },
@@ -105,7 +113,7 @@ function OverviewCards({
     },
     {
       label: "缓存节省",
-      value: fmtUsd(savedUsd),
+      value: fmtUsd(savedUsd, displayMode),
       sub: fmtCny(savedUsd),
       color: "var(--warning)",
       icon: <ShieldCheck size={16} />,
@@ -137,7 +145,7 @@ function OverviewCards({
 }
 
 /** 按模型分组表 */
-function ModelTable({ byModel, loading, currency }: { byModel: any[]; loading: boolean; currency: Currency }) {
+function ModelTable({ byModel, loading, currency, displayMode }: { byModel: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byModel.length === 0) return <EmptyState title="暂无模型数据" desc="通过 Connector 或 API 上报后可见" />;
 
@@ -158,12 +166,12 @@ function ModelTable({ byModel, loading, currency }: { byModel: any[]; loading: b
             <tr key={m.model} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
               <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-primary)" }}>{m.model}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{m.provider}</td>
-              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{fmtTokens(m.promptTokens)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(m.completionTokens)}</td>
-              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(m.totalTokens)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{fmtTokens(m.promptTokens, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(m.completionTokens, displayMode)}</td>
+              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(m.totalTokens, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{m.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents, currency)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(m.cachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents, currency, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(m.cachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3">
                 <div className="flex items-center gap-2">
                   <div className="progress-track flex-1" style={{ height: "4px", maxWidth: "60px" }}>
@@ -181,7 +189,7 @@ function ModelTable({ byModel, loading, currency }: { byModel: any[]; loading: b
 }
 
 /** 按 Agent 统计表 */
-function AgentTable({ byAgent, loading, currency }: { byAgent: any[]; loading: boolean; currency: Currency }) {
+function AgentTable({ byAgent, loading, currency, displayMode }: { byAgent: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byAgent.length === 0) return <EmptyState title="暂无 Agent 数据" desc="任务执行后自动生成" />;
 
@@ -201,13 +209,13 @@ function AgentTable({ byAgent, loading, currency }: { byAgent: any[]; loading: b
               <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-primary)" }}>
                 {a.agentName ?? `Agent#${a.agentId}`}
               </td>
-              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{fmtTokens(a.promptTokens)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(a.completionTokens)}</td>
-              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(a.totalTokens)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(a.cachedPromptTokens ?? 0)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{fmtTokens(a.uncachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{fmtTokens(a.promptTokens, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(a.completionTokens, displayMode)}</td>
+              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(a.totalTokens, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(a.cachedPromptTokens ?? 0, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{fmtTokens(a.uncachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{a.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(a.costCents, currency)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(a.costCents, currency, displayMode)}</td>
             </tr>
           ))}
         </tbody>
@@ -217,7 +225,7 @@ function AgentTable({ byAgent, loading, currency }: { byAgent: any[]; loading: b
 }
 
 /** Agent × Model 交叉表 */
-function CrossTable({ byAgentAndModel, loading, currency }: { byAgentAndModel: any[]; loading: boolean; currency: Currency }) {
+function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAgentAndModel: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byAgentAndModel.length === 0) return <EmptyState title="暂无交叉数据" desc="多 Agent 多模型使用后可见" />;
 
@@ -236,10 +244,10 @@ function CrossTable({ byAgentAndModel, loading, currency }: { byAgentAndModel: a
             <tr key={i} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
               <td className="py-2 px-3 truncate max-w-32" style={{ color: "var(--text-primary)" }}>{row.agentName ?? `Agent#${row.agentId}`}</td>
               <td className="py-2 px-3 truncate max-w-32" style={{ color: "var(--text-secondary)" }}>{row.model}</td>
-              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(row.totalTokens)}</td>
-              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(row.cachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(row.totalTokens, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(row.cachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{row.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(row.costCents, currency)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(row.costCents, currency, displayMode)}</td>
             </tr>
           ))}
         </tbody>
@@ -249,7 +257,7 @@ function CrossTable({ byAgentAndModel, loading, currency }: { byAgentAndModel: a
 }
 
 /** 缓存命中率图表 */
-function CacheChart({ cacheStats, loading }: { cacheStats: any; loading: boolean }) {
+function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: any; loading: boolean; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (!cacheStats || cacheStats.byModel.length === 0) return <EmptyState title="暂无缓存数据" desc="Connector 上报缓存信息后可分析" />;
 
@@ -290,13 +298,13 @@ function CacheChart({ cacheStats, loading }: { cacheStats: any; loading: boolean
             {cacheStats.overall?.cacheHitRate ?? 0}%
           </div>
           <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
-            {fmtTokens(cacheStats.overall?.cachedPromptTokens ?? 0)} / {fmtTokens(cacheStats.overall?.totalPromptTokens ?? 0)} tokens
+            {fmtTokens(cacheStats.overall?.cachedPromptTokens ?? 0, displayMode)} / {fmtTokens(cacheStats.overall?.totalPromptTokens ?? 0, displayMode)} tokens
           </div>
         </div>
         <div className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
           <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>缓存节省估算</div>
           <div className="text-xl font-bold font-mono" style={{ color: "var(--accent-gold)" }}>
-            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000)}
+            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000, displayMode)}
           </div>
           <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
             基于平均输入价差
@@ -308,7 +316,7 @@ function CacheChart({ cacheStats, loading }: { cacheStats: any; loading: boolean
 }
 
 /** 日趋势图 */
-function DailyTrend({ byDay, loading, currency }: { byDay: any[]; loading: boolean; currency: Currency }) {
+function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byDay.length === 0) return null;
 
@@ -332,7 +340,7 @@ function DailyTrend({ byDay, loading, currency }: { byDay: any[]; loading: boole
               return (
                 <div key={i} className="flex-1 flex flex-col items-center group relative" style={{ minWidth: "20px" }}>
                   <div className="absolute -top-5 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap" style={{ color: "var(--accent-cyan)" }}>
-                    {fmtTokens(d.totalTokens)}
+                    {fmtTokens(d.totalTokens, displayMode)}
                   </div>
                   <div
                     className="w-full rounded-t transition-all"
@@ -359,7 +367,7 @@ function DailyTrend({ byDay, loading, currency }: { byDay: any[]; loading: boole
               return (
                 <div key={i} className="flex-1 flex flex-col items-center group relative" style={{ minWidth: "20px" }}>
                   <div className="absolute -top-4 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap" style={{ color: "var(--accent-gold)" }}>
-                    {fmtCost(d.costCents ?? 0, currency)}
+                    {fmtCost(d.costCents ?? 0, currency, displayMode)}
                   </div>
                   <div
                     className="w-full rounded-t"
@@ -387,7 +395,7 @@ function DailyTrend({ byDay, loading, currency }: { byDay: any[]; loading: boole
 }
 
 /** 详细记录列表 */
-function RecordList({ records, loading, currency }: { records: any[]; loading: boolean; currency: Currency }) {
+function RecordList({ records, loading, currency, displayMode }: { records: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (records.length === 0) return <div className="text-xs py-4" style={{ color: "var(--text-muted)" }}>暂无详细记录</div>;
 
@@ -407,16 +415,16 @@ function RecordList({ records, loading, currency }: { records: any[]; loading: b
               )}
               {(r.cachedPromptTokens ?? 0) > 0 && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)" }}>
-                  缓存 {fmtTokens(r.cachedPromptTokens)}
+                  缓存 {fmtTokens(r.cachedPromptTokens, displayMode)}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-4 flex-shrink-0">
-              <span className="font-mono text-[10px]" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(r.totalTokens)} tok</span>
+              <span className="font-mono text-[10px]" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(r.totalTokens, displayMode)} tok</span>
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
                 {r.promptTokens}+{r.completionTokens}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents, currency)}</span>
+              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents, currency, displayMode)}</span>
               {r.sessionKey && (
                 <span className="text-[9px] font-mono truncate max-w-24" style={{ color: "var(--text-muted)" }} title={r.sessionKey}>{r.sessionKey.split(":").pop()}</span>
               )}
@@ -454,6 +462,7 @@ export default function UsagePanel() {
   const [source, setSource] = useState("");
   const [agentId, setAgentId] = useState<number | undefined>(undefined);
   const [currency, setCurrency] = useState<Currency>("USD");
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("compact");
   const [activeTab, setActiveTab] = useState<"overview" | "agent" | "cross" | "cache">("overview");
 
   const timeRange = { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined };
@@ -635,7 +644,7 @@ export default function UsagePanel() {
         </div>
 
         {/* Overview cards */}
-        <OverviewCards byModel={byModel} cacheStats={cacheStats} currency={currency} />
+        <OverviewCards byModel={byModel} cacheStats={cacheStats} currency={currency} displayMode={displayMode} />
 
         {/* Tab navigation */}
         <div className="flex items-center gap-1 mb-4 overflow-x-auto custom-scrollbar">
@@ -667,7 +676,7 @@ export default function UsagePanel() {
               <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                 按模型统计 · BY MODEL
               </div>
-              <ModelTable byModel={byModel} loading={loading} currency={currency} />
+              <ModelTable byModel={byModel} loading={loading} currency={currency} displayMode={displayMode} />
             </div>
 
             {bySource.length > 0 && (
@@ -679,10 +688,10 @@ export default function UsagePanel() {
                   {bySource.map((s) => (
                     <div key={s.source || "unknown"} className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
                       <div className="text-xs font-bold font-mono mb-1" style={{ color: "var(--accent-cyan)" }}>{s.source || "unknown"}</div>
-                      <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens)} tok</div>
+                      <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens, displayMode)} tok</div>
                       <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{s.callCount} 次</div>
                       {s.costCents > 0 && (
-                        <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents, currency)}</div>
+                        <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents, currency, displayMode)}</div>
                       )}
                     </div>
                   ))}
@@ -690,10 +699,10 @@ export default function UsagePanel() {
               </div>
             )}
 
-            <DailyTrend byDay={byDay} loading={byDayQuery.isLoading} currency={currency} />
+            <DailyTrend byDay={byDay} loading={byDayQuery.isLoading} currency={currency} displayMode={displayMode} />
 
             <div className="glass-panel p-4 sci-border mt-6">
-              <RecordList records={records} loading={listQuery.isLoading} currency={currency} />
+              <RecordList records={records} loading={listQuery.isLoading} currency={currency} displayMode={displayMode} />
             </div>
           </>
         )}
@@ -703,7 +712,7 @@ export default function UsagePanel() {
             <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               按 Agent 统计 · BY AGENT
             </div>
-            <AgentTable byAgent={byAgent} loading={byAgentQuery.isLoading} currency={currency} />
+            <AgentTable byAgent={byAgent} loading={byAgentQuery.isLoading} currency={currency} displayMode={displayMode} />
           </div>
         )}
 
@@ -712,7 +721,7 @@ export default function UsagePanel() {
             <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               Agent × 模型交叉统计 · CROSS MATRIX
             </div>
-            <CrossTable byAgentAndModel={byAgentAndModel} loading={byAgentAndModelQuery.isLoading} currency={currency} />
+            <CrossTable byAgentAndModel={byAgentAndModel} loading={byAgentAndModelQuery.isLoading} currency={currency} displayMode={displayMode} />
           </div>
         )}
 
@@ -721,7 +730,7 @@ export default function UsagePanel() {
             <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               缓存命中率分析 · CACHE ANALYTICS
             </div>
-            <CacheChart cacheStats={cacheStats} loading={cacheStatsQuery.isLoading} />
+            <CacheChart cacheStats={cacheStats} loading={cacheStatsQuery.isLoading} displayMode={displayMode} />
           </div>
         )}
       </div>

@@ -17,6 +17,13 @@ export const env = {
 
   isProduction: process.env.NODE_ENV === "production",
 
+  // P7: Remote OpenClaw Gateway Runner
+  openclawGatewayUrl: optional("TIANGONG_OPENCLAW_GATEWAY_URL"),
+  openclawGatewayToken: optional("TIANGONG_OPENCLAW_GATEWAY_TOKEN"),
+  openclawGatewayAgent: optional("TIANGONG_OPENCLAW_GATEWAY_AGENT", "codemaster"),
+  openclawGatewayModel: optional("TIANGONG_OPENCLAW_GATEWAY_MODEL"),
+  openclawGatewaySessionPrefix: optional("TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX", "tiangong"),
+
   // P11: GitHub App Integration
   githubAppId: optional("GITHUB_APP_ID"),
   githubAppPrivateKeyPath: optional("GITHUB_APP_PRIVATE_KEY_PATH"),

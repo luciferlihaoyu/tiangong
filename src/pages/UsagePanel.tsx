@@ -22,7 +22,7 @@ import {
 const EXCHANGE_RATE = 7.2;
 
 type Currency = "USD" | "CNY";
-type DisplayMode = "compact" | "raw";
+type DisplayMode = "m" | "raw";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -36,14 +36,13 @@ function fmtDateTime(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function fmtTokens(n: number, mode: DisplayMode = "compact"): string {
+function fmtTokens(n: number, mode: DisplayMode = "m"): string {
   if (mode === "raw") return String(n);
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function fmtCost(cents: number, currency: Currency, mode: DisplayMode = "compact"): string {
+function fmtCost(cents: number, currency: Currency, mode: DisplayMode = "m"): string {
   const usd = cents / 100;
   if (currency === "CNY") {
     const cny = usd * EXCHANGE_RATE;
@@ -55,7 +54,7 @@ function fmtCost(cents: number, currency: Currency, mode: DisplayMode = "compact
   return `${cents}¢`;
 }
 
-function fmtUsd(usd: number, mode: DisplayMode = "compact"): string {
+function fmtUsd(usd: number, mode: DisplayMode = "m"): string {
   if (mode === "raw") return `$${usd.toFixed(6)}`;
   if (usd >= 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(4)}`;
@@ -462,7 +461,7 @@ export default function UsagePanel() {
   const [source, setSource] = useState("");
   const [agentId, setAgentId] = useState<number | undefined>(undefined);
   const [currency, setCurrency] = useState<Currency>("USD");
-  const [displayMode, setDisplayMode] = useState<DisplayMode>("compact");
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("m");
   const [activeTab, setActiveTab] = useState<"overview" | "agent" | "cross" | "cache">("overview");
 
   const timeRange = { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined };
@@ -543,6 +542,23 @@ export default function UsagePanel() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Display mode toggle */}
+            <div className="flex items-center rounded overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
+              <button
+                onClick={() => setDisplayMode("m")}
+                className="text-xs px-2 py-1 font-mono transition-colors"
+                style={{ background: displayMode === "m" ? "var(--accent-red)" : "transparent", color: displayMode === "m" ? "#fff" : "var(--text-muted)" }}
+              >
+                M
+              </button>
+              <button
+                onClick={() => setDisplayMode("raw")}
+                className="text-xs px-2 py-1 font-mono transition-colors"
+                style={{ background: displayMode === "raw" ? "var(--accent-red)" : "transparent", color: displayMode === "raw" ? "#fff" : "var(--text-muted)" }}
+              >
+                原始
+              </button>
+            </div>
             {/* Currency toggle */}
             <div className="flex items-center rounded overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
               <button

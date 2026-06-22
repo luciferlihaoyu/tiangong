@@ -847,13 +847,8 @@ function getExecutor(cfg) {
 }
 
 /**
- * P9: Report token usage to Tiangong after task execution.
+ * P9 + P13: Report token usage to Tiangong after task execution.
  * Simulated usage based on task complexity and execution mode.
- *
- * @param {Config} cfg
- * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
- * @param {string} result
- * @param {boolean} success
  */
 async function reportUsage(cfg, task, result, success) {
   const model = cfg.execMode === "command" ? "openclaw-connector" : "mock-executor";
@@ -865,7 +860,12 @@ async function reportUsage(cfg, task, result, success) {
   const promptTokens = Math.max(10, Math.floor(inputLen / 3));
   const completionTokens = Math.max(5, Math.floor(outputLen / 2));
   const totalTokens = promptTokens + completionTokens;
-  const costCents = Math.round(totalTokens * 0.002 * 100) / 100; // ~$0.002/1K tokens
+
+  // P13: simulate cache — mock mode has no cache, command mode ~20% cache hit
+  const cachedPromptTokens = cfg.execMode === "command"
+    ? Math.floor(promptTokens * 0.2)
+    : 0;
+  const uncachedPromptTokens = promptTokens - cachedPromptTokens;
 
   try {
     const r = await trpcCall(cfg, "usage.record", {
@@ -874,13 +874,14 @@ async function reportUsage(cfg, task, result, success) {
       promptTokens,
       completionTokens,
       totalTokens,
+      cachedPromptTokens,
+      uncachedPromptTokens,
       callCount: 1,
-      costCents: Math.max(1, Math.round(costCents)),
       taskId: task.id,
       agentId: cfg.agentId,
     });
     if (r.ok) {
-      L.debug(`📊 用量上报: ${totalTokens} tokens (${promptTokens}+${completionTokens}), model=${model}`);
+      L.debug(`📊 用量上报: ${totalTokens} tokens (${cachedPromptTokens} cached + ${uncachedPromptTokens} uncached + ${completionTokens} completion), model=${model}`);
     } else {
       L.warn(`用量上报失败: ${r.error}`);
     }

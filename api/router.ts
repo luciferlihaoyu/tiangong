@@ -9,6 +9,7 @@ import { mcpRouter } from "./mcp/mcp-router";
 import { conversationRouter } from "./conversation-router";
 import { collaborationRouter } from "./collaboration-router";
 import { usageRouter } from "./usage-router";
+import { pricingRouter } from "./pricing-router";
 import { guardRouter } from "./guard-router";
 import { opsRouter } from "./ops-router";
 import { fusionRouter } from "./fusion-router";
@@ -32,6 +33,7 @@ export const appRouter = createRouter({
   conversation: conversationRouter,
   collab: collaborationRouter,
   usage: usageRouter,
+  pricing: pricingRouter,
   guard: guardRouter,
   ops: opsRouter,
   fusion: fusionRouter,

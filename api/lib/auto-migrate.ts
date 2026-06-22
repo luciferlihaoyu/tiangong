@@ -162,7 +162,19 @@ const CREATE_TABLES_SQL = [
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
-  // P9: Token 用量监测表（不存 key/secret/prompt/response）
+  // P13: Model pricing table
+  `CREATE TABLE IF NOT EXISTS model_pricing (
+    model VARCHAR(100) PRIMARY KEY,
+    provider VARCHAR(50) DEFAULT 'unknown',
+    input_price DECIMAL(10,8) NOT NULL DEFAULT 0,
+    output_price DECIMAL(10,8) NOT NULL DEFAULT 0,
+    cached_input_price DECIMAL(10,8),
+    currency VARCHAR(3) DEFAULT 'USD',
+    notes TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // P13: Token 用量监测表（含缓存区分 + 汇率）
   `CREATE TABLE IF NOT EXISTS token_usage (
     id INT AUTO_INCREMENT PRIMARY KEY,
     model VARCHAR(100) NOT NULL,
@@ -170,11 +182,20 @@ const CREATE_TABLES_SQL = [
     prompt_tokens INT DEFAULT 0 NOT NULL,
     completion_tokens INT DEFAULT 0 NOT NULL,
     total_tokens INT DEFAULT 0 NOT NULL,
+    cached_prompt_tokens INT DEFAULT 0,
+    uncached_prompt_tokens INT DEFAULT 0,
     call_count INT DEFAULT 1 NOT NULL,
     cost_cents INT DEFAULT 0 NOT NULL,
+    currency VARCHAR(3) DEFAULT 'USD',
+    exchange_rate DECIMAL(10,6) DEFAULT 1.0,
+    cost_display DECIMAL(12,4) DEFAULT 0,
     task_id BIGINT UNSIGNED NULL,
     agent_id BIGINT UNSIGNED NULL,
+    session_key VARCHAR(128),
+    source VARCHAR(20) DEFAULT 'manual',
+    trace_id VARCHAR(64),
     started_at TIMESTAMP NULL,
+    high_cost_model ENUM('true','false') DEFAULT 'false',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -340,6 +361,70 @@ async function migrateMailboxColumns(conn: mysql.Connection, logs: string[]) {
   }
 }
 
+async function migrateP13Columns(conn: mysql.Connection, logs: string[]) {
+  const p13Columns = [
+    { name: "cached_prompt_tokens", def: "INT DEFAULT 0" },
+    { name: "uncached_prompt_tokens", def: "INT DEFAULT 0" },
+    { name: "currency", def: "VARCHAR(3) DEFAULT 'USD'" },
+    { name: "exchange_rate", def: "DECIMAL(10,6) DEFAULT 1.0" },
+    { name: "cost_display", def: "DECIMAL(12,4) DEFAULT 0" },
+  ];
+
+  for (const col of p13Columns) {
+    try {
+      await conn.execute(
+        `ALTER TABLE token_usage ADD COLUMN \`${col.name}\` ${col.def}`
+      );
+      logs.push(`token_usage.${col.name}: ADDED`);
+    } catch (e: any) {
+      if (e?.code === "ER_DUP_FIELD_NAME" || e?.message?.includes("Duplicate column")) {
+        logs.push(`token_usage.${col.name}: already exists`);
+      } else {
+        logs.push(`token_usage.${col.name}: ${e.message?.slice(0, 80)}`);
+      }
+    }
+  }
+}
+
+async function seedModelPricing(conn: mysql.Connection, logs: string[]) {
+  const seeds = [
+    { model: "deepseek-v4-flash", provider: "deepseek-official", input_price: 0.0003, output_price: 0.0006, cached_input_price: 0.000075 },
+    { model: "deepseek-reasoner", provider: "deepseek-official", input_price: 0.002, output_price: 0.008, cached_input_price: 0.0005 },
+    { model: "deepseek-v3.2", provider: "zeabur-ai", input_price: 0.0005, output_price: 0.0015 },
+    { model: "deepseek-v4-pro", provider: "deepseek-official", input_price: 0.002, output_price: 0.008, cached_input_price: 0.0005 },
+    { model: "kimi-for-coding", provider: "kimi-code", input_price: 0.004, output_price: 0.012 },
+    { model: "MiniMax-M3", provider: "minimax-cn", input_price: 0.002, output_price: 0.008 },
+    { model: "MiniMax-M2.7", provider: "minimax-cn", input_price: 0.001, output_price: 0.004 },
+    { model: "claude-opus-4-8", provider: "anthropic", input_price: 0.015, output_price: 0.075, cached_input_price: 0.0075 },
+    { model: "claude-fable-5", provider: "anthropic", input_price: 0.003, output_price: 0.015, cached_input_price: 0.0003 },
+    { model: "ark-code-latest", provider: "volcengine-plan", input_price: 0.002, output_price: 0.008 },
+    { model: "qwen3.6-plus", provider: "bailian", input_price: 0.002, output_price: 0.008 },
+    { model: "doubao-seedream-5-0-260128", provider: "volcengine", input_price: 0.008, output_price: 0.024 },
+    { model: "gpt-4o", provider: "openai", input_price: 0.005, output_price: 0.015, cached_input_price: 0.0025 },
+    { model: "openclaw-connector", provider: "openclaw", input_price: 0.001, output_price: 0.002 },
+    { model: "mock-executor", provider: "tiangong-mock", input_price: 0, output_price: 0 },
+  ];
+
+  let inserted = 0;
+  let skipped = 0;
+  for (const s of seeds) {
+    try {
+      await conn.execute(
+        `INSERT INTO model_pricing (model, provider, input_price, output_price, cached_input_price) VALUES (?, ?, ?, ?, ?)`,
+        [s.model, s.provider, s.input_price, s.output_price, s.cached_input_price ?? null]
+      );
+      inserted++;
+    } catch (e: any) {
+      if (e?.code === "ER_DUP_ENTRY" || e?.message?.includes("Duplicate entry")) {
+        skipped++;
+      } else {
+        logs.push(`pricing seed ${s.model}: ${e.message?.slice(0, 80)}`);
+      }
+    }
+  }
+  logs.push(`Model pricing seeded: ${inserted} inserted, ${skipped} skipped`);
+}
+
 export async function autoMigrate(force = false): Promise<string[]> {
   const logs: string[] = [];
   console.log("auto-migrate: DATABASE_URL present =", !!env.databaseUrl);
@@ -376,6 +461,8 @@ export async function autoMigrate(force = false): Promise<string[]> {
     }
 
     await migrateMailboxColumns(conn, logs);
+    await migrateP13Columns(conn, logs);
+    await seedModelPricing(conn, logs);
 
     logs.push(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);
     console.log(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);

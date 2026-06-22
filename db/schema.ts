@@ -8,6 +8,7 @@ import {
   int,
   bigint,
   uniqueIndex,
+  decimal,
 } from "drizzle-orm/mysql-core";
 
 // ─── Users (内置认证) ───
@@ -274,7 +275,22 @@ export const mcpAuditLog = mysqlTable("mcp_audit_log", {
 export type McpAuditLogEntry = typeof mcpAuditLog.$inferSelect;
 export type InsertMcpAuditLogEntry = typeof mcpAuditLog.$inferInsert;
 
-// ─── Token Usage (P9: 用量监测) ───
+// ─── P13: Model Pricing ───
+export const modelPricing = mysqlTable("model_pricing", {
+  model: varchar("model", { length: 100 }).primaryKey(),
+  provider: varchar("provider", { length: 50 }).default("unknown"),
+  inputPrice: decimal("input_price", { precision: 10, scale: 8 }).notNull().default("0"),
+  outputPrice: decimal("output_price", { precision: 10, scale: 8 }).notNull().default("0"),
+  cachedInputPrice: decimal("cached_input_price", { precision: 10, scale: 8 }),
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type ModelPricing = typeof modelPricing.$inferSelect;
+export type InsertModelPricing = typeof modelPricing.$inferInsert;
+
+// ─── Token Usage (P9: 用量监测 + P13: 缓存区分) ───
 export const tokenUsage = mysqlTable("token_usage", {
   id: serial("id").primaryKey(),
   model: varchar("model", { length: 100 }).notNull(),
@@ -282,8 +298,15 @@ export const tokenUsage = mysqlTable("token_usage", {
   promptTokens: int("prompt_tokens").default(0).notNull(),
   completionTokens: int("completion_tokens").default(0).notNull(),
   totalTokens: int("total_tokens").default(0).notNull(),
+  // P13: cache split
+  cachedPromptTokens: int("cached_prompt_tokens").default(0),
+  uncachedPromptTokens: int("uncached_prompt_tokens").default(0),
   callCount: int("call_count").default(1).notNull(),
   costCents: int("cost_cents").default(0).notNull(),
+  // P13: currency + exchange
+  currency: varchar("currency", { length: 3 }).default("USD"),
+  exchangeRate: decimal("exchange_rate", { precision: 10, scale: 6 }).default("1.0"),
+  costDisplay: decimal("cost_display", { precision: 12, scale: 4 }).default("0"),
   taskId: bigint("task_id", { mode: "number", unsigned: true }),
   agentId: bigint("agent_id", { mode: "number", unsigned: true }),
   // Phase 1: 审计增强字段

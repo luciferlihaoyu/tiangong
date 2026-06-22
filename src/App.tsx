@@ -13,6 +13,7 @@ import NotFound from './pages/NotFound'
 import MissionLog from './pages/MissionLog'
 import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
+import PricingPanel from './pages/PricingPanel'
 import GuardPanel from './pages/GuardPanel'
 import OpsPanel from './pages/OpsPanel'
 import FusionPanel from './pages/FusionPanel'
@@ -80,6 +81,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <UsagePanel />
+          </ProtectedLayout>
+        } />
+        <Route path="/pricing" element={
+          <ProtectedLayout>
+            <Navigation />
+            <PricingPanel />
           </ProtectedLayout>
         } />
         <Route path="/guard" element={

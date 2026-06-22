@@ -1,8 +1,8 @@
 /**
- * 天宫 用量监测面板 — UsagePanel (P9)
+ * 天宫 成本分析面板 — UsagePanel (P13)
  *
- * 按模型统计 token 使用量、调用次数、时间范围
- * 不记录或展示密钥
+ * 多维度用量统计：按模型 / 按Agent / Agent×模型交叉 / 缓存命中率
+ * 双币种显示（USD / CNY），支持汇率切换
  */
 import { useState, useMemo } from "react";
 import { trpc } from "@/providers/trpc";
@@ -13,43 +13,15 @@ import {
   Calendar,
   TrendingUp,
   RefreshCw,
+  Users,
+  Layers,
+  ShieldCheck,
+  DollarSign,
 } from "lucide-react";
 
-interface UsageByModel {
-  model: string;
-  provider: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  callCount: number;
-  costCents: number;
-}
+const EXCHANGE_RATE = 7.2;
 
-interface UsageByDay {
-  date: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  callCount: number;
-}
-
-interface UsageRecord {
-  id: number;
-  model: string;
-  provider: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  callCount: number;
-  costCents: number;
-  taskId: number | null;
-  agentId: number | null;
-  // Phase 1: 审计增强字段
-  sessionKey: string | null;
-  source: string | null;
-  traceId: string | null;
-  createdAt: string;
-}
+type Currency = "USD" | "CNY";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -69,30 +41,81 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function fmtCost(cents: number): string {
+function fmtCost(cents: number, currency: Currency): string {
+  if (currency === "CNY") {
+    const cny = (cents / 100) * EXCHANGE_RATE;
+    return `¥${cny.toFixed(2)}`;
+  }
   if (cents >= 100) return `$${(cents / 100).toFixed(2)}`;
   return `${cents}¢`;
 }
 
-/** 顶部统计卡片行 */
-function StatsRow({ byModel }: { byModel: UsageByModel[] }) {
+function fmtUsd(usd: number): string {
+  if (usd >= 1) return `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(4)}`;
+}
+
+function fmtCny(usd: number): string {
+  return `¥${(usd * EXCHANGE_RATE).toFixed(2)}`;
+}
+
+/** 概览统计卡片 */
+function OverviewCards({
+  byModel,
+  cacheStats,
+  currency,
+}: {
+  byModel: { totalTokens: number; callCount: number; costCents: number }[];
+  cacheStats: { overall?: { cacheHitRate: number; cachedPromptTokens: number; uncachedPromptTokens: number; costCents: number } } | undefined;
+  currency: Currency;
+}) {
   const totals = byModel.reduce(
     (acc, m) => ({
       totalTokens: acc.totalTokens + m.totalTokens,
       callCount: acc.callCount + m.callCount,
       costCents: acc.costCents + m.costCents,
-      promptTokens: acc.promptTokens + m.promptTokens,
-      completionTokens: acc.completionTokens + m.completionTokens,
     }),
-    { totalTokens: 0, callCount: 0, costCents: 0, promptTokens: 0, completionTokens: 0 }
+    { totalTokens: 0, callCount: 0, costCents: 0 }
   );
 
+  const costUsd = totals.costCents / 100;
+  const savedUsd = cacheStats?.overall
+    ? (cacheStats.overall.cachedPromptTokens * 0.0015) / 1000 // rough estimate
+    : 0;
+
   const cards = [
-    { label: "总 Token", value: fmtTokens(totals.totalTokens), color: "var(--accent-cyan)", icon: <Database size={16} /> },
-    { label: "总调用次数", value: String(totals.callCount), color: "var(--success)", icon: <Zap size={16} /> },
-    { label: "估算成本", value: fmtCost(totals.costCents), color: "var(--accent-gold)", icon: <TrendingUp size={16} /> },
-    { label: "输入 Token", value: fmtTokens(totals.promptTokens), color: "var(--text-secondary)", icon: <BarChart3 size={16} /> },
-    { label: "输出 Token", value: fmtTokens(totals.completionTokens), color: "var(--warning)", icon: <BarChart3 size={16} /> },
+    {
+      label: currency === "CNY" ? "总花费 (CNY)" : "总花费 (USD)",
+      value: currency === "CNY" ? fmtCny(costUsd) : fmtUsd(costUsd),
+      sub: currency === "CNY" ? fmtUsd(costUsd) : fmtCny(costUsd),
+      color: "var(--accent-gold)",
+      icon: <DollarSign size={16} />,
+    },
+    {
+      label: "总 Token",
+      value: fmtTokens(totals.totalTokens),
+      color: "var(--accent-cyan)",
+      icon: <Database size={16} />,
+    },
+    {
+      label: "总调用次数",
+      value: String(totals.callCount),
+      color: "var(--success)",
+      icon: <Zap size={16} />,
+    },
+    {
+      label: "缓存节省",
+      value: fmtUsd(savedUsd),
+      sub: fmtCny(savedUsd),
+      color: "var(--warning)",
+      icon: <ShieldCheck size={16} />,
+    },
+    {
+      label: "缓存命中率",
+      value: cacheStats?.overall?.cacheHitRate != null ? `${cacheStats.overall.cacheHitRate}%` : "0%",
+      color: "var(--accent-gold-bright)",
+      icon: <TrendingUp size={16} />,
+    },
   ];
 
   return (
@@ -104,6 +127,7 @@ function StatsRow({ byModel }: { byModel: UsageByModel[] }) {
           </div>
           <div className="min-w-0">
             <div className="text-lg font-bold font-mono" style={{ color: c.color }}>{c.value}</div>
+            {c.sub && <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>{c.sub}</div>}
             <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{c.label}</div>
           </div>
         </div>
@@ -113,18 +137,9 @@ function StatsRow({ byModel }: { byModel: UsageByModel[] }) {
 }
 
 /** 按模型分组表 */
-function ModelTable({ byModel, loading }: { byModel: UsageByModel[]; loading: boolean }) {
+function ModelTable({ byModel, loading, currency }: { byModel: any[]; loading: boolean; currency: Currency }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
-
-  if (byModel.length === 0) {
-    return (
-      <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
-        <Database size={32} className="mx-auto mb-3 opacity-30" />
-        <div className="text-sm font-mono mb-1">暂无用量数据</div>
-        <div className="text-[10px]">通过 Connector Worker 或手动 API 上报后可见</div>
-      </div>
-    );
-  }
+  if (byModel.length === 0) return <EmptyState title="暂无模型数据" desc="通过 Connector 或 API 上报后可见" />;
 
   const maxTokens = Math.max(...byModel.map((m) => m.totalTokens), 1);
 
@@ -133,7 +148,7 @@ function ModelTable({ byModel, loading }: { byModel: UsageByModel[]; loading: bo
       <table className="w-full text-xs font-mono">
         <thead>
           <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
-            {["模型", "提供方", "输入 Token", "输出 Token", "总 Token", "调用次数", "成本", "占比"].map((h) => (
+            {["模型", "提供方", "输入 Token", "输出 Token", "总 Token", "调用次数", "成本", "缓存命中", "占比"].map((h) => (
               <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
             ))}
           </tr>
@@ -147,7 +162,8 @@ function ModelTable({ byModel, loading }: { byModel: UsageByModel[]; loading: bo
               <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(m.completionTokens)}</td>
               <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(m.totalTokens)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{m.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents, currency)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(m.cachedPromptTokens ?? 0)}</td>
               <td className="py-2 px-3">
                 <div className="flex items-center gap-2">
                   <div className="progress-track flex-1" style={{ height: "4px", maxWidth: "60px" }}>
@@ -164,13 +180,140 @@ function ModelTable({ byModel, loading }: { byModel: UsageByModel[]; loading: bo
   );
 }
 
-/** 按日趋势 */
-function DailyTrend({ byDay, loading }: { byDay: UsageByDay[]; loading: boolean }) {
+/** 按 Agent 统计表 */
+function AgentTable({ byAgent, loading, currency }: { byAgent: any[]; loading: boolean; currency: Currency }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
+  if (byAgent.length === 0) return <EmptyState title="暂无 Agent 数据" desc="任务执行后自动生成" />;
 
+  return (
+    <div className="overflow-x-auto custom-scrollbar">
+      <table className="w-full text-xs font-mono">
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+            {["Agent", "输入 Token", "输出 Token", "总 Token", "缓存命中", "未缓存", "调用次数", "成本"].map((h) => (
+              <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {byAgent.map((a) => (
+            <tr key={a.agentId ?? "null"} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-primary)" }}>
+                {a.agentName ?? `Agent#${a.agentId}`}
+              </td>
+              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{fmtTokens(a.promptTokens)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(a.completionTokens)}</td>
+              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(a.totalTokens)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(a.cachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{fmtTokens(a.uncachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{a.callCount}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(a.costCents, currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Agent × Model 交叉表 */
+function CrossTable({ byAgentAndModel, loading, currency }: { byAgentAndModel: any[]; loading: boolean; currency: Currency }) {
+  if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
+  if (byAgentAndModel.length === 0) return <EmptyState title="暂无交叉数据" desc="多 Agent 多模型使用后可见" />;
+
+  return (
+    <div className="overflow-x-auto custom-scrollbar">
+      <table className="w-full text-xs font-mono">
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+            {["Agent", "模型", "总 Token", "缓存命中", "调用次数", "成本"].map((h) => (
+              <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {byAgentAndModel.map((row, i) => (
+            <tr key={i} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <td className="py-2 px-3 truncate max-w-32" style={{ color: "var(--text-primary)" }}>{row.agentName ?? `Agent#${row.agentId}`}</td>
+              <td className="py-2 px-3 truncate max-w-32" style={{ color: "var(--text-secondary)" }}>{row.model}</td>
+              <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(row.totalTokens)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(row.cachedPromptTokens ?? 0)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{row.callCount}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(row.costCents, currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 缓存命中率图表 */
+function CacheChart({ cacheStats, loading }: { cacheStats: any; loading: boolean }) {
+  if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
+  if (!cacheStats || cacheStats.byModel.length === 0) return <EmptyState title="暂无缓存数据" desc="Connector 上报缓存信息后可分析" />;
+
+  const maxCached = Math.max(...cacheStats.byModel.map((m: any) => m.cachedPromptTokens), 1);
+
+  return (
+    <div className="space-y-4">
+      {/* By model bar chart */}
+      <div>
+        <div className="text-[10px] font-mono mb-2" style={{ color: "var(--text-muted)" }}>按模型缓存命中</div>
+        <div className="space-y-2">
+          {cacheStats.byModel.map((m: any) => {
+            const totalPrompt = (m.cachedPromptTokens ?? 0) + (m.uncachedPromptTokens ?? 0);
+            const rate = totalPrompt > 0 ? ((m.cachedPromptTokens ?? 0) / totalPrompt) * 100 : 0;
+            return (
+              <div key={m.model} className="flex items-center gap-2">
+                <div className="w-28 truncate text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{m.model}</div>
+                <div className="flex-1 flex items-center gap-2">
+                  <div className="flex-1 rounded overflow-hidden" style={{ height: "8px", background: "rgba(255,255,255,0.03)" }}>
+                    <div
+                      className="h-full rounded"
+                      style={{ width: `${Math.min(100, rate)}%`, background: "linear-gradient(90deg, var(--success), var(--accent-cyan))" }}
+                    />
+                  </div>
+                  <div className="w-12 text-right text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{rate.toFixed(1)}%</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Overall donut-like summary */}
+      <div className="grid grid-cols-2 gap-3 mt-4">
+        <div className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+          <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>总体缓存命中</div>
+          <div className="text-xl font-bold font-mono" style={{ color: "var(--success)" }}>
+            {cacheStats.overall?.cacheHitRate ?? 0}%
+          </div>
+          <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+            {fmtTokens(cacheStats.overall?.cachedPromptTokens ?? 0)} / {fmtTokens(cacheStats.overall?.totalPromptTokens ?? 0)} tokens
+          </div>
+        </div>
+        <div className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+          <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>缓存节省估算</div>
+          <div className="text-xl font-bold font-mono" style={{ color: "var(--accent-gold)" }}>
+            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000)}
+          </div>
+          <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+            基于平均输入价差
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 日趋势图 */
+function DailyTrend({ byDay, loading, currency }: { byDay: any[]; loading: boolean; currency: Currency }) {
+  if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byDay.length === 0) return null;
 
   const maxTokens = Math.max(...byDay.map((d) => d.totalTokens), 1);
+  const maxCost = Math.max(...byDay.map((d) => d.costCents ?? 0), 1);
   const chartHeight = 120;
 
   return (
@@ -179,7 +322,8 @@ function DailyTrend({ byDay, loading }: { byDay: UsageByDay[]; loading: boolean 
         日趋势 · DAILY TREND
       </div>
       <div className="glass-panel p-4 sci-border">
-        <div className="flex items-end gap-1" style={{ height: `${chartHeight}px` }}>
+        {/* Token bars */}
+        <div className="flex items-end gap-1 mb-3" style={{ height: `${chartHeight}px` }}>
           {byDay
             .slice()
             .reverse()
@@ -205,18 +349,47 @@ function DailyTrend({ byDay, loading }: { byDay: UsageByDay[]; loading: boolean 
               );
             })}
         </div>
+        {/* Cost mini bars */}
+        <div className="flex items-end gap-1" style={{ height: "40px" }}>
+          {byDay
+            .slice()
+            .reverse()
+            .map((d, i) => {
+              const h = Math.max(2, ((d.costCents ?? 0) / maxCost) * 40);
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center group relative" style={{ minWidth: "20px" }}>
+                  <div className="absolute -top-4 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap" style={{ color: "var(--accent-gold)" }}>
+                    {fmtCost(d.costCents ?? 0, currency)}
+                  </div>
+                  <div
+                    className="w-full rounded-t"
+                    style={{
+                      height: `${h}px`,
+                      background: "linear-gradient(180deg, var(--accent-gold), rgba(201,168,76,0.15))",
+                      opacity: 0.6,
+                    }}
+                  />
+                </div>
+              );
+            })}
+        </div>
+        <div className="flex items-center justify-between mt-2">
+          <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+            <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "var(--accent-cyan)" }} /> Token
+          </span>
+          <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+            <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "var(--accent-gold)" }} /> 成本
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
 /** 详细记录列表 */
-function RecordList({ records, loading }: { records: UsageRecord[]; loading: boolean }) {
+function RecordList({ records, loading, currency }: { records: any[]; loading: boolean; currency: Currency }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
-
-  if (records.length === 0) {
-    return <div className="text-xs py-4" style={{ color: "var(--text-muted)" }}>暂无详细记录</div>;
-  }
+  if (records.length === 0) return <div className="text-xs py-4" style={{ color: "var(--text-muted)" }}>暂无详细记录</div>;
 
   return (
     <div className="mt-4">
@@ -232,13 +405,18 @@ function RecordList({ records, loading }: { records: UsageRecord[]; loading: boo
               {r.source && r.source !== "manual" && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(255,200,50,0.1)", color: "var(--accent-gold)" }}>{r.source}</span>
               )}
+              {(r.cachedPromptTokens ?? 0) > 0 && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)" }}>
+                  缓存 {fmtTokens(r.cachedPromptTokens)}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-4 flex-shrink-0">
               <span className="font-mono text-[10px]" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(r.totalTokens)} tok</span>
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
                 {r.promptTokens}+{r.completionTokens}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents)}</span>
+              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents, currency)}</span>
               {r.sessionKey && (
                 <span className="text-[9px] font-mono truncate max-w-24" style={{ color: "var(--text-muted)" }} title={r.sessionKey}>{r.sessionKey.split(":").pop()}</span>
               )}
@@ -254,6 +432,16 @@ function RecordList({ records, loading }: { records: UsageRecord[]; loading: boo
   );
 }
 
+function EmptyState({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
+      <Database size={32} className="mx-auto mb-3 opacity-30" />
+      <div className="text-sm font-mono mb-1">{title}</div>
+      <div className="text-[10px]">{desc}</div>
+    </div>
+  );
+}
+
 export default function UsagePanel() {
   const now = new Date();
   const [from, setFrom] = useState(() => {
@@ -264,76 +452,114 @@ export default function UsagePanel() {
   const [to, setTo] = useState(() => now.toISOString().slice(0, 10));
   const [model, setModel] = useState("");
   const [source, setSource] = useState("");
-  const [sessionKey, setSessionKey] = useState("");
-  const [traceId, setTraceId] = useState("");
+  const [agentId, setAgentId] = useState<number | undefined>(undefined);
+  const [currency, setCurrency] = useState<Currency>("USD");
+  const [activeTab, setActiveTab] = useState<"overview" | "agent" | "cross" | "cache">("overview");
+
+  const timeRange = { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined };
 
   const byModelQuery = trpc.usage.byModel.useQuery(
-    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined, source: source || undefined },
+    { ...timeRange, source: source || undefined, agentId },
+    { retry: 1, staleTime: 10_000 }
+  );
+
+  const byAgentQuery = trpc.usage.byAgent.useQuery(
+    { ...timeRange, model: model || undefined, source: source || undefined },
+    { retry: 1, staleTime: 10_000 }
+  );
+
+  const byAgentAndModelQuery = trpc.usage.byAgentAndModel.useQuery(
+    { ...timeRange, model: model || undefined, agentId, source: source || undefined },
+    { retry: 1, staleTime: 10_000 }
+  );
+
+  const cacheStatsQuery = trpc.usage.cacheStats.useQuery(
+    { ...timeRange, agentId, model: model || undefined },
     { retry: 1, staleTime: 10_000 }
   );
 
   const byDayQuery = trpc.usage.byDay.useQuery(
-    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined, model: model || undefined },
+    { ...timeRange, model: model || undefined, agentId },
     { retry: 1, staleTime: 10_000 }
   );
 
   const bySourceQuery = trpc.usage.bySource.useQuery(
-    { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined },
+    { ...timeRange, agentId },
     { retry: 1, staleTime: 10_000 }
   );
 
   const listQuery = trpc.usage.list.useQuery(
     {
-      from: from ? `${from}T00:00:00Z` : undefined,
-      to: to ? `${to}T23:59:59Z` : undefined,
+      ...timeRange,
       model: model || undefined,
       source: source || undefined,
-      sessionKey: sessionKey || undefined,
-      traceId: traceId || undefined,
+      agentId,
       limit: 50,
     },
     { retry: 1, staleTime: 10_000 }
   );
 
-  const byModel = (byModelQuery.data as UsageByModel[]) || [];
-  const byDay = (byDayQuery.data as UsageByDay[]) || [];
-  const bySource = (bySourceQuery.data as { source: string | null; totalTokens: number; callCount: number; costCents: number }[]) || [];
-  const records = (listQuery.data as UsageRecord[]) || [];
-  const loading = byModelQuery.isLoading || byDayQuery.isLoading || bySourceQuery.isLoading || listQuery.isLoading;
+  const byModel = (byModelQuery.data as any[]) || [];
+  const byAgent = (byAgentQuery.data as any[]) || [];
+  const byAgentAndModel = (byAgentAndModelQuery.data as any[]) || [];
+  const cacheStats = cacheStatsQuery.data as any;
+  const byDay = (byDayQuery.data as any[]) || [];
+  const bySource = (bySourceQuery.data as any[]) || [];
+  const records = (listQuery.data as any[]) || [];
+  const loading = byModelQuery.isLoading || byDayQuery.isLoading;
 
-  // Extract unique model names for filter
   const modelNames = useMemo(() => Array.from(new Set(byModel.map((m) => m.model))), [byModel]);
+  const agentOptions = useMemo(() => Array.from(new Set(byAgent.map((a) => ({ id: a.agentId, name: a.agentName ?? `Agent#${a.agentId}` })))), [byAgent]);
 
   const handleRefresh = () => {
     byModelQuery.refetch();
+    byAgentQuery.refetch();
+    byAgentAndModelQuery.refetch();
+    cacheStatsQuery.refetch();
     byDayQuery.refetch();
     listQuery.refetch();
   };
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-24 pb-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-16">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-black tracking-wider" style={{ color: "var(--text-primary)" }}>
-              TOKEN 用量监测
+              成本分析
             </h1>
             <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>
-              按模型统计 · 安全监控 · 不记录密钥
+              TOKEN 用量 · 多维度统计 · 缓存分析 · 双币种
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
-            style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
-          >
-            <RefreshCw size={14} /> 刷新
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Currency toggle */}
+            <div className="flex items-center rounded overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
+              <button
+                onClick={() => setCurrency("USD")}
+                className="text-xs px-2 py-1 font-mono transition-colors"
+                style={{ background: currency === "USD" ? "var(--accent-red)" : "transparent", color: currency === "USD" ? "#fff" : "var(--text-muted)" }}
+              >
+                $
+              </button>
+              <button
+                onClick={() => setCurrency("CNY")}
+                className="text-xs px-2 py-1 font-mono transition-colors"
+                style={{ background: currency === "CNY" ? "var(--accent-red)" : "transparent", color: currency === "CNY" ? "#fff" : "var(--text-muted)" }}
+              >
+                ¥
+              </button>
+            </div>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
+              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+            >
+              <RefreshCw size={14} /> 刷新
+            </button>
+          </div>
         </div>
-
-        {/* Stats */}
-        <StatsRow byModel={byModel} />
 
         {/* Filters */}
         <div className="flex flex-wrap items-end gap-3 mb-4">
@@ -372,6 +598,20 @@ export default function UsagePanel() {
             </select>
           </div>
           <div>
+            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>Agent</label>
+            <select
+              value={agentId ?? ""}
+              onChange={(e) => setAgentId(e.target.value ? Number(e.target.value) : undefined)}
+              className="px-3 py-2 rounded text-xs outline-none"
+              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
+            >
+              <option value="">全部 Agent</option>
+              {agentOptions.map((a) => (
+                <option key={a.id ?? "null"} value={a.id ?? ""}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>来源</label>
             <select
               value={source}
@@ -388,70 +628,102 @@ export default function UsagePanel() {
               <option value="subagent">subagent</option>
             </select>
           </div>
-          <div>
-            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>Session Key</label>
-            <input
-              type="text"
-              value={sessionKey}
-              onChange={(e) => setSessionKey(e.target.value)}
-              placeholder="筛选 session..."
-              className="px-3 py-2 rounded text-xs outline-none"
-              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)", width: "160px" }}
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>Trace ID</label>
-            <input
-              type="text"
-              value={traceId}
-              onChange={(e) => setTraceId(e.target.value)}
-              placeholder="筛选 trace..."
-              className="px-3 py-2 rounded text-xs outline-none"
-              style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)", width: "160px" }}
-            />
-          </div>
           <div className="flex items-center gap-1 text-[10px] font-mono ml-2 self-center" style={{ color: "var(--text-muted)" }}>
             <Calendar size={12} />
             <span>最近 30 天</span>
           </div>
         </div>
 
-        {/* Model table */}
-        <div className="glass-panel p-4 sci-border mb-6">
-          <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-            按模型统计 · BY MODEL
-          </div>
-          <ModelTable byModel={byModel} loading={loading} />
+        {/* Overview cards */}
+        <OverviewCards byModel={byModel} cacheStats={cacheStats} currency={currency} />
+
+        {/* Tab navigation */}
+        <div className="flex items-center gap-1 mb-4 overflow-x-auto custom-scrollbar">
+          {[
+            { key: "overview", label: "概览", icon: <BarChart3 size={12} /> },
+            { key: "agent", label: "按 Agent", icon: <Users size={12} /> },
+            { key: "cross", label: "交叉统计", icon: <Layers size={12} /> },
+            { key: "cache", label: "缓存分析", icon: <ShieldCheck size={12} /> },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as any)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono whitespace-nowrap transition-colors"
+              style={{
+                background: activeTab === tab.key ? "rgba(180,200,255,0.06)" : "transparent",
+                color: activeTab === tab.key ? "var(--text-primary)" : "var(--text-muted)",
+                border: activeTab === tab.key ? "1px solid var(--border-hover)" : "1px solid transparent",
+              }}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* Source breakdown */}
-        {bySource.length > 0 && (
-          <div className="glass-panel p-4 sci-border mb-6">
-            <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-              按来源统计 · BY SOURCE
+        {/* Tab content */}
+        {activeTab === "overview" && (
+          <>
+            <div className="glass-panel p-4 sci-border mb-6">
+              <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                按模型统计 · BY MODEL
+              </div>
+              <ModelTable byModel={byModel} loading={loading} currency={currency} />
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {bySource.map((s) => (
-                <div key={s.source || "unknown"} className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-                  <div className="text-xs font-bold font-mono mb-1" style={{ color: "var(--accent-cyan)" }}>{s.source || "unknown"}</div>
-                  <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens)} tok</div>
-                  <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{s.callCount} 次</div>
-                  {s.costCents > 0 && (
-                    <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents)}</div>
-                  )}
+
+            {bySource.length > 0 && (
+              <div className="glass-panel p-4 sci-border mb-6">
+                <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  按来源统计 · BY SOURCE
                 </div>
-              ))}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {bySource.map((s) => (
+                    <div key={s.source || "unknown"} className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                      <div className="text-xs font-bold font-mono mb-1" style={{ color: "var(--accent-cyan)" }}>{s.source || "unknown"}</div>
+                      <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens)} tok</div>
+                      <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{s.callCount} 次</div>
+                      {s.costCents > 0 && (
+                        <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents, currency)}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <DailyTrend byDay={byDay} loading={byDayQuery.isLoading} currency={currency} />
+
+            <div className="glass-panel p-4 sci-border mt-6">
+              <RecordList records={records} loading={listQuery.isLoading} currency={currency} />
             </div>
+          </>
+        )}
+
+        {activeTab === "agent" && (
+          <div className="glass-panel p-4 sci-border">
+            <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              按 Agent 统计 · BY AGENT
+            </div>
+            <AgentTable byAgent={byAgent} loading={byAgentQuery.isLoading} currency={currency} />
           </div>
         )}
 
-        {/* Daily trend */}
-        <DailyTrend byDay={byDay} loading={loading} />
+        {activeTab === "cross" && (
+          <div className="glass-panel p-4 sci-border">
+            <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              Agent × 模型交叉统计 · CROSS MATRIX
+            </div>
+            <CrossTable byAgentAndModel={byAgentAndModel} loading={byAgentAndModelQuery.isLoading} currency={currency} />
+          </div>
+        )}
 
-        {/* Recent records */}
-        <div className="glass-panel p-4 sci-border mt-6">
-          <RecordList records={records} loading={loading} />
-        </div>
+        {activeTab === "cache" && (
+          <div className="glass-panel p-4 sci-border">
+            <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              缓存命中率分析 · CACHE ANALYTICS
+            </div>
+            <CacheChart cacheStats={cacheStats} loading={cacheStatsQuery.isLoading} />
+          </div>
+        )}
       </div>
     </div>
   );

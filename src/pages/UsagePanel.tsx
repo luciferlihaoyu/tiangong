@@ -541,41 +541,49 @@ export default function UsagePanel() {
               TOKEN 用量 · 多维度统计 · 缓存分析 · 双币种
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Display mode toggle */}
-            <div className="flex items-center rounded overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
-              <button
-                onClick={() => setDisplayMode("m")}
-                className="text-xs px-2 py-1 font-mono transition-colors"
-                style={{ background: displayMode === "m" ? "var(--accent-red)" : "transparent", color: displayMode === "m" ? "#fff" : "var(--text-muted)" }}
+          <div className="flex items-center gap-3">
+            {/* Display mode toggle switch */}
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <span className="text-[10px] font-mono" style={{ color: displayMode === "raw" ? "var(--text-muted)" : "var(--text-primary)" }}>M</span>
+              <div
+                onClick={() => setDisplayMode(displayMode === "m" ? "raw" : "m")}
+                className="relative w-8 h-4 rounded-full transition-colors cursor-pointer"
+                style={{
+                  background: displayMode === "raw" ? "var(--accent-red)" : "rgba(255,255,255,0.1)",
+                  border: "1px solid var(--border-default)",
+                }}
               >
-                M
-              </button>
-              <button
-                onClick={() => setDisplayMode("raw")}
-                className="text-xs px-2 py-1 font-mono transition-colors"
-                style={{ background: displayMode === "raw" ? "var(--accent-red)" : "transparent", color: displayMode === "raw" ? "#fff" : "var(--text-muted)" }}
+                <div
+                  className="absolute top-0.5 w-3 h-3 rounded-full transition-all duration-200"
+                  style={{
+                    background: "var(--text-primary)",
+                    left: displayMode === "raw" ? "19px" : "3px",
+                  }}
+                />
+              </div>
+              <span className="text-[10px] font-mono" style={{ color: displayMode === "m" ? "var(--text-muted)" : "var(--text-primary)" }}>原始</span>
+            </label>
+            {/* Currency toggle switch */}
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <span className="text-[10px] font-mono" style={{ color: currency === "CNY" ? "var(--text-muted)" : "var(--text-primary)" }}>$</span>
+              <div
+                onClick={() => setCurrency(currency === "USD" ? "CNY" : "USD")}
+                className="relative w-8 h-4 rounded-full transition-colors cursor-pointer"
+                style={{
+                  background: currency === "CNY" ? "var(--accent-red)" : "rgba(255,255,255,0.1)",
+                  border: "1px solid var(--border-default)",
+                }}
               >
-                原始
-              </button>
-            </div>
-            {/* Currency toggle */}
-            <div className="flex items-center rounded overflow-hidden" style={{ border: "1px solid var(--border-default)" }}>
-              <button
-                onClick={() => setCurrency("USD")}
-                className="text-xs px-2 py-1 font-mono transition-colors"
-                style={{ background: currency === "USD" ? "var(--accent-red)" : "transparent", color: currency === "USD" ? "#fff" : "var(--text-muted)" }}
-              >
-                $
-              </button>
-              <button
-                onClick={() => setCurrency("CNY")}
-                className="text-xs px-2 py-1 font-mono transition-colors"
-                style={{ background: currency === "CNY" ? "var(--accent-red)" : "transparent", color: currency === "CNY" ? "#fff" : "var(--text-muted)" }}
-              >
-                ¥
-              </button>
-            </div>
+                <div
+                  className="absolute top-0.5 w-3 h-3 rounded-full transition-all duration-200"
+                  style={{
+                    background: "var(--text-primary)",
+                    left: currency === "CNY" ? "19px" : "3px",
+                  }}
+                />
+              </div>
+              <span className="text-[10px] font-mono" style={{ color: currency === "USD" ? "var(--text-muted)" : "var(--text-primary)" }}>¥</span>
+            </label>
             <button
               onClick={handleRefresh}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"

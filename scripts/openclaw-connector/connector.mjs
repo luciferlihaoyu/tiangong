@@ -1258,41 +1258,34 @@ async function handleWSMessage(cfg, inbox, data) {
       const msg = data.message || {};
       L.info(`📬 Mailbox: ${msg.fromMailboxId} → ${msg.toMailboxId}: ${(msg.body || msg.subject || "").slice(0, 160)}`);
 
-      // In command mode: process via runner (OpenClaw gateway call)
+      // Use the message's toMailboxId as our mailboxId (the recipient)
+      const myMailboxId = msg.toMailboxId;
+
+      // Send an immediate ACK reply to confirm receipt
+      const ackContent = `[${myMailboxId}] 已收到您的消息，正在处理中...`;
+      trpcCall(cfg, "mailbox.reply", {
+        messageId: msg.id,
+        fromMailboxId: myMailboxId,
+        body: ackContent,
+      }).catch((e) => L.warn(`Mailbox ACK reply failed: ${e.message}`));
+
+      // In command mode: deliver to OpenClaw session via gateway for async processing
       if (cfg.execMode === "command" && msg.body && msg.fromMailboxId) {
         const prompt = buildMailboxPrompt(cfg, msg);
-        L.info(`🧠 处理 Mailbox 消息: ${(msg.body || "").slice(0, 100)}`);
+        L.info(`🧠 投递 Mailbox 消息到 OpenClaw: ${(msg.body || "").slice(0, 100)}`);
 
+        // Fire and forget — deliver to session, don't wait for result
         executeCommand(cfg, {
           id: msg.id,
           taskId: `MB-${msg.id}`,
-          name: `Mailbox: ${msg.fromMailboxId} → ${cfg.agentName}`,
+          name: `Mailbox: ${msg.fromMailboxId} → ${myMailboxId}`,
           description: msg.body || "",
           input: msg.body || "",
-        }, prompt).then(async (result) => {
-          L.info(`✅ Mailbox 回复完成 (${result.length} chars)`);
-          // Send reply back via mailbox.reply
-          const r = await trpcCall(cfg, "mailbox.reply", {
-            messageId: msg.id,
-            fromMailboxId: cfg.agentName,
-            body: result.slice(0, cfg.resultMaxChars),
-          });
-          if (r.ok) {
-            L.info(`📤 Mailbox 回复已发送`);
-          } else {
-            L.warn(`Mailbox 回复失败: ${r.error}`);
-          }
+        }, prompt).then((result) => {
+          L.info(`📨 Mailbox 消息已投递到 OpenClaw session`);
         }).catch((err) => {
-          L.error(`❌ Mailbox 处理失败: ${err.message}`);
+          L.warn(`Mailbox 投递失败: ${err.message}`);
         });
-      } else if (cfg.execMode === "mock") {
-        // Mock mode: auto-ACK and send a simple reply
-        const ackContent = `[${cfg.agentName}] ACK: 已收到来自 ${msg.fromMailboxId} 的消息`;
-        trpcCall(cfg, "mailbox.reply", {
-          messageId: msg.id,
-          fromMailboxId: cfg.agentName,
-          body: ackContent,
-        }).catch((e) => L.warn(`Mailbox mock reply failed: ${e.message}`));
       }
       break;
     }
@@ -1698,6 +1691,8 @@ async function main() {
   try {
     if (opts.configPath) {
       cfg = Config.fromConfigFile(opts.configPath, opts.agentName);
+      // Allow --token to override config file token
+      if (opts.token) cfg.token = opts.token;
     } else {
       cfg = new Config();
       if (opts.agentId) cfg.agentId = opts.agentId;

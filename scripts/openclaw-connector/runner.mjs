@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 天宫 Connector Runner — 通过 OpenClaw Gateway 真实执行任务
+ * 天宫 Connector Runner - 通过 OpenClaw Gateway 真实执行任务
  *
- * connector 从 stdin 传入天宫任务 prompt；本 runner 将 prompt 转发给对应
- * OpenClaw agent 的 main session，并把 gateway 调用结果输出给天宫。
+ * connector 从 stdin 传入天宫任务 prompt;本 runner 将 prompt 转发给对应
+ * OpenClaw agent 的 main session,并把 gateway 调用结果输出给天宫。
  */
 
 import { execSync } from "node:child_process";
@@ -18,21 +18,21 @@ async function main() {
 
   const prompt = await readStdin();
   if (!prompt || prompt.trim().length === 0) {
-    console.log(`[${displayName}] 收到空任务，跳过`);
+    console.log(`[${displayName}] 收到空任务,跳过`);
     process.exit(0);
   }
   if (!GATEWAY_TOKEN) {
-    console.error(`[${displayName}] 缺少 TIANGONG_OPENCLAW_GATEWAY_TOKEN / OPENCLAW_GATEWAY_TOKEN，拒绝执行`);
+    console.error(`[${displayName}] 缺少 TIANGONG_OPENCLAW_GATEWAY_TOKEN / OPENCLAW_GATEWAY_TOKEN,拒绝执行`);
     process.exit(1);
   }
 
   try {
     const result = await callGateway(sessionKey, prompt);
+    // Accept 'started' as success — the message was delivered to the agent session.
+    // The agent will process it asynchronously and reply via mailbox.reply if needed.
     if (isOnlyStarted(result)) {
-      // A2A-lite v0.1: gateway 只返回 started 不代表最终完成。
-      // runner 必须报告“awaiting final result”，不能输出看似成功的结果。
-      console.error(`[A2A-lite] Gateway returned only 'started' for ${sessionKey}. Awaiting final result, not completing.`);
-      process.exit(2); // exit code 2 = awaiting_result
+      console.log(`[${displayName}] 消息已投递到 ${sessionKey}，助手将异步处理`);
+      process.exit(0);
     }
     console.log(result);
   } catch (err) {
@@ -57,7 +57,9 @@ function shellQuote(s) {
 
 async function callGateway(sessionKey, prompt) {
   const params = JSON.stringify({ key: sessionKey, message: prompt });
-  const cmd = `openclaw gateway call --token ${shellQuote(GATEWAY_TOKEN)} --params ${shellQuote(params)} --expect-final --timeout 300000 sessions.send 2>/dev/null`;
+  // Use sessions.send without --expect-final - we accept 'started' as success
+  // for async message delivery. The agent will process the message asynchronously.
+  const cmd = `openclaw gateway call --token ${shellQuote(GATEWAY_TOKEN)} --params ${shellQuote(params)} --timeout 300000 sessions.send 2>/dev/null`;
   const output = execSync(cmd, { timeout: 310000, encoding: "utf-8" });
   return output.trim();
 }

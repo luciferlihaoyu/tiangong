@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, desc, asc, and, or, like, sql } from "drizzle-orm";
@@ -63,7 +63,7 @@ export const taskRouter = createRouter({
     return { taskId: `TG-${ts}${rand}` };
   }),
 
-  create: publicQuery
+  create: authedQuery
     .input(
       z.object({
         taskId: z.string().min(1).max(20),
@@ -110,7 +110,7 @@ export const taskRouter = createRouter({
       return { success: true };
     }),
 
-  updateProgress: publicQuery
+  updateProgress: authedQuery
     .input(
       z.object({
         id: z.number(),
@@ -157,7 +157,7 @@ export const taskRouter = createRouter({
    * P9: 提升/降低任务优先级
    * delta 为正提升，为负降低（最低 0）
    */
-  promote: publicQuery
+  promote: authedQuery
     .input(
       z.object({
         id: z.number(),
@@ -196,11 +196,98 @@ export const taskRouter = createRouter({
       return { success: true, oldPriority, newPriority };
     }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
       await db.delete(tasks).where(eq(tasks.id, input.id));
       return { success: true };
+    }),
+
+  /**
+   * P6: 提交审批 — 将 lifecycleStatus 改为 reviewing，status 保持 done
+   */
+  submitForReview: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.update(tasks).set({
+        lifecycleStatus: "reviewing",
+        updatedAt: new Date(),
+      }).where(eq(tasks.id, input.id));
+
+      const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "reviewing",
+        id: input.id,
+        taskId: t?.taskId,
+        name: t?.name,
+        lifecycleStatus: "reviewing",
+        agentId: t?.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, lifecycleStatus: "reviewing" };
+    }),
+
+  /**
+   * P6: 审批通过 — 将 lifecycleStatus 改为 completed，status 改为 done
+   */
+  approve: authedQuery
+    .input(z.object({ id: z.number(), comment: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.update(tasks).set({
+        lifecycleStatus: "completed",
+        status: "done",
+        progress: 100,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(tasks.id, input.id));
+
+      const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "approved",
+        id: input.id,
+        taskId: t?.taskId,
+        name: t?.name,
+        status: "done",
+        lifecycleStatus: "completed",
+        agentId: t?.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, lifecycleStatus: "completed" };
+    }),
+
+  /**
+   * P6: 审批驳回 — 将 status 改回 running，lifecycleStatus 改为 working
+   */
+  reject: authedQuery
+    .input(z.object({ id: z.number(), comment: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.update(tasks).set({
+        status: "running",
+        lifecycleStatus: "working",
+        updatedAt: new Date(),
+      }).where(eq(tasks.id, input.id));
+
+      const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "rejected",
+        id: input.id,
+        taskId: t?.taskId,
+        name: t?.name,
+        status: "running",
+        lifecycleStatus: "working",
+        agentId: t?.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, lifecycleStatus: "working", status: "running" };
     }),
 });

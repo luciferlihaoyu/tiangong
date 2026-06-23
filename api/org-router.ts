@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { organizations, departments, agents } from "@db/schema";
 import { eq, and } from "drizzle-orm";
@@ -19,7 +19,7 @@ export const orgRouter = createRouter({
       return rows[0] ?? null;
     }),
 
-  orgCreate: publicQuery
+  orgCreate: authedQuery
     .input(z.object({
       name: z.string().min(1).max(100),
       description: z.string().optional(),
@@ -37,7 +37,7 @@ export const orgRouter = createRouter({
       return { success: true };
     }),
 
-  orgUpdate: publicQuery
+  orgUpdate: authedQuery
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).max(100).optional(),
@@ -58,7 +58,7 @@ export const orgRouter = createRouter({
       return { success: true };
     }),
 
-  orgDelete: publicQuery
+  orgDelete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -75,7 +75,7 @@ export const orgRouter = createRouter({
     }),
 
   // ─── Departments ───
-  deptCreate: publicQuery
+  deptCreate: authedQuery
     .input(z.object({
       name: z.string().min(1).max(100),
       description: z.string().optional(),
@@ -93,7 +93,7 @@ export const orgRouter = createRouter({
       return { success: true };
     }),
 
-  deptUpdate: publicQuery
+  deptUpdate: authedQuery
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).max(100).optional(),
@@ -113,7 +113,7 @@ export const orgRouter = createRouter({
       return { success: true };
     }),
 
-  deptDelete: publicQuery
+  deptDelete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -130,7 +130,7 @@ export const orgRouter = createRouter({
       return db.select().from(agents).where(eq(agents.departmentId, input.deptId));
     }),
 
-  deptAssignAgent: publicQuery
+  deptAssignAgent: authedQuery
     .input(z.object({
       agentId: z.number(),
       deptId: z.number(),
@@ -146,7 +146,7 @@ export const orgRouter = createRouter({
       return { success: true };
     }),
 
-  deptUnassignAgent: publicQuery
+  deptUnassignAgent: authedQuery
     .input(z.object({ agentId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();

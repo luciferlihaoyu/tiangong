@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -224,7 +224,7 @@ function makeTaskKey(prefix = "TGMB") {
 }
 
 export const mailboxRouter = createRouter({
-  send: publicQuery
+  send: authedQuery
     .input(z.object({
       fromMailboxId: z.string().min(1).max(20).optional(),
       fromAgentId: z.number().optional(),
@@ -259,7 +259,7 @@ export const mailboxRouter = createRouter({
       return { success: true, ...created };
     }),
 
-  mention: publicQuery
+  mention: authedQuery
     .input(z.object({
       fromMailboxId: z.string().min(1).max(20),
       toMailboxId: z.string().min(1).max(20),
@@ -293,7 +293,7 @@ export const mailboxRouter = createRouter({
       return { success: true, ...created, type: "mention" };
     }),
 
-  createSubtask: publicQuery
+  createSubtask: authedQuery
     .input(z.object({
       fromMailboxId: z.string().min(1).max(20),
       toMailboxId: z.string().min(1).max(20),
@@ -379,7 +379,7 @@ export const mailboxRouter = createRouter({
       return { success: true, taskId: child.id, taskKey: child.taskId, mailboxMessageId: created.messageId, toMailboxId: created.toMailboxId };
     }),
 
-  handoff: publicQuery
+  handoff: authedQuery
     .input(z.object({
       fromMailboxId: z.string().min(1).max(20),
       toMailboxId: z.string().min(1).max(20),

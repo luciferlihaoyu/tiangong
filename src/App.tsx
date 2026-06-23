@@ -20,7 +20,7 @@ import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
 import DagPanel from './pages/DagPanel'
 import GitHubPanel from './pages/GitHubPanel'
-import TaskBoard from './pages/TaskBoard'
+import MailboxPanel from './pages/MailboxPanel'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -123,6 +123,12 @@ export default function App() {
           <ProtectedLayout>
             <Navigation />
             <TaskBoard />
+          </ProtectedLayout>
+        } />
+        <Route path="/mailbox" element={
+          <ProtectedLayout>
+            <Navigation />
+            <MailboxPanel />
           </ProtectedLayout>
         } />
         <Route path="/github" element={

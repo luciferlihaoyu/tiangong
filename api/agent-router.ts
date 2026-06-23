@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, modelAllowlist, type AgentCard } from "@db/schema";
 import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
@@ -25,7 +25,7 @@ export const agentRouter = createRouter({
       return db.select().from(agents).where(like(agents.source, `%${input.source}%`));
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(
       z.object({
         agentId: z.string().min(1).max(20),
@@ -98,7 +98,7 @@ export const agentRouter = createRouter({
       return { success: true, id: insertId };
     }),
 
-  update: publicQuery
+  update: authedQuery
     .input(
       z.object({
         id: z.number(),
@@ -169,7 +169,7 @@ export const agentRouter = createRouter({
       return { success: true };
     }),
 
-  updateStatus: publicQuery
+  updateStatus: authedQuery
     .input(
       z.object({
         id: z.number(),
@@ -377,7 +377,7 @@ export const agentRouter = createRouter({
     return { roots, agents: allAgents };
   }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -449,7 +449,7 @@ export const agentRouter = createRouter({
       return defaultCard;
     }),
 
-  updateCard: publicQuery
+  updateCard: authedQuery
     .input(
       z.object({
         agentId: z.number(),

@@ -332,9 +332,15 @@ const L = {
 async function trpcCall(cfg, procedure, input) {
   const url = `${cfg.httpBase}/api/trpc/${procedure}`;
   try {
+    const headers = {
+      "content-type": "application/json",
+    };
+    if (cfg.token) {
+      headers["x-mcp-key"] = cfg.token;
+    }
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(input),
     });
 
@@ -371,7 +377,11 @@ async function trpcQuery(cfg, procedure, input) {
   const qs = new URLSearchParams({ input: JSON.stringify(input) });
   const url = `${cfg.httpBase}/api/trpc/${procedure}?${qs.toString()}`;
   try {
-    const res = await fetch(url, { method: "GET" });
+    const headers = {};
+    if (cfg.token) {
+      headers["x-mcp-key"] = cfg.token;
+    }
+    const res = await fetch(url, { method: "GET", headers });
 
     if (!res.ok) {
       const text = await res.text();
@@ -848,13 +858,27 @@ function getExecutor(cfg) {
 
 /**
  * P9 + P13: Report token usage to Tiangong after task execution.
- * Simulated usage based on task complexity and execution mode.
+ * Enhanced: uses actual model name, includes source="connector".
+ *
+ * @param {Config} cfg
+ * @param {{ id: number, taskId: string, name: string }} task
+ * @param {string} result
+ * @param {boolean} success
  */
 async function reportUsage(cfg, task, result, success) {
-  const model = cfg.execMode === "command" ? "openclaw-connector" : "mock-executor";
+  // Resolve actual model from execArgs (--model flag)
+  let model = cfg.execMode === "command" ? "openclaw-connector" : "mock-executor";
+  if (cfg.execMode === "command" && cfg.execArgs) {
+    for (let i = 0; i < cfg.execArgs.length - 1; i++) {
+      if (cfg.execArgs[i] === "--model") {
+        model = cfg.execArgs[i + 1];
+        break;
+      }
+    }
+  }
   const provider = cfg.execMode === "command" ? "openclaw" : "tiangong-mock";
 
-  // Simulate token counts based on task content
+  // Estimate token counts based on task content
   const inputLen = (task.description?.length ?? 0) + (task.input?.length ?? 0) + 100;
   const outputLen = result?.length ?? 0;
   const promptTokens = Math.max(10, Math.floor(inputLen / 3));
@@ -879,9 +903,10 @@ async function reportUsage(cfg, task, result, success) {
       callCount: 1,
       taskId: task.id,
       agentId: cfg.agentId,
+      source: "connector",
     });
     if (r.ok) {
-      L.debug(`📊 用量上报: ${totalTokens} tokens (${cachedPromptTokens} cached + ${uncachedPromptTokens} uncached + ${completionTokens} completion), model=${model}`);
+      L.debug(`📊 用量上报: ${totalTokens} tokens (${cachedPromptTokens} cached + ${uncachedPromptTokens} uncached + ${completionTokens} completion), model=${model}, source=connector`);
     } else {
       L.warn(`用量上报失败: ${r.error}`);
     }
@@ -973,7 +998,22 @@ async function executeTaskWithProgress(cfg, task) {
       L.info(`✅ 任务 ${task.name} 已审核完成`);
     }
 
-    // P9: Report usage after completion
+    // P3: Final write-back — ensure task output and status are persisted
+    const finalOutput = truncateOutput(result, cfg.resultMaxChars);
+    const updateR = await trpcCall(cfg, "task.updateProgress", {
+      id: task.id,
+      progress: 100,
+      status: "done",
+      lifecycleStatus: "completed",
+      output: finalOutput,
+    });
+    if (!updateR.ok) {
+      L.warn(`任务最终回写失败: ${updateR.error}`);
+    } else {
+      L.info(`✅ 任务 ${task.name} 结果已回写 (${finalOutput.length} chars)`);
+    }
+
+    // P9 + P5: Report usage after completion
     await reportUsage(cfg, task, result, true);
   } catch (err) {
     const errMsg = err.message || String(err);
@@ -999,9 +1039,21 @@ async function executeTaskWithProgress(cfg, task) {
       } else {
         L.info(`⚠️ 任务 ${task.name} 已标记为 failed`);
       }
+
+      // P3: Final write-back on failure — ensure error and failed status are persisted
+      const failWriteR = await trpcCall(cfg, "task.updateProgress", {
+        id: task.id,
+        progress: 0,
+        status: "failed",
+        lifecycleStatus: "failed",
+        error: truncateOutput(errMsg, cfg.resultMaxChars),
+      });
+      if (!failWriteR.ok) {
+        L.warn(`任务失败回写失败: ${failWriteR.error}`);
+      }
     }
 
-    // P9: Report usage even on failure
+    // P9 + P5: Report usage even on failure
     await reportUsage(cfg, task, errMsg, false);
   }
 }
@@ -1275,15 +1327,24 @@ async function handleWSMessage(cfg, inbox, data) {
         const prompt = buildMailboxPrompt(cfg, msg);
         L.info(`🧠 投递 Mailbox 消息到 OpenClaw: ${(msg.body || "").slice(0, 100)}`);
 
-        // Fire and forget — deliver to session, don't wait for result
+        // P3: Wait for result and write back via mailbox.reply
         executeCommand(cfg, {
           id: msg.id,
           taskId: `MB-${msg.id}`,
           name: `Mailbox: ${msg.fromMailboxId} → ${myMailboxId}`,
           description: msg.body || "",
           input: msg.body || "",
-        }, prompt).then((result) => {
-          L.info(`📨 Mailbox 消息已投递到 OpenClaw session`);
+        }, prompt).then(async (result) => {
+          L.info(`📨 Mailbox 消息已投递到 OpenClaw session，结果: ${result.slice(0, 120)}`);
+          // Write result back via mailbox.reply
+          const replyR = await trpcCall(cfg, "mailbox.reply", {
+            messageId: msg.id,
+            fromMailboxId: myMailboxId,
+            body: result.slice(0, 4000),
+          });
+          if (!replyR.ok) {
+            L.warn(`Mailbox 结果回写失败: ${replyR.error}`);
+          }
         }).catch((err) => {
           L.warn(`Mailbox 投递失败: ${err.message}`);
         });

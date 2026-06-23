@@ -425,6 +425,45 @@ async function seedModelPricing(conn: mysql.Connection, logs: string[]) {
   logs.push(`Model pricing seeded: ${inserted} inserted, ${skipped} skipped`);
 }
 
+/**
+ * Seed MCP API keys from environment variables.
+ * Only inserts if the mcp_api_keys table is empty.
+ * Environment variables:
+ *   TIANGONG_MEIZHIZI_MCP_KEY - MCP Key for agent 1 (美智子)
+ *   TIANGONG_CODEMASTER_MCP_KEY - MCP Key for agent 2 (编程大师)
+ */
+async function seedMcpKeys(conn: mysql.Connection, logs: string[]) {
+  // MCP Keys 硬编码在此，用于 Connector 认证
+  // 这些 Key 同时存在于 .env 文件和启动脚本中
+  const keys = [
+    { key: "tg-1-88BgwZ-fzXi0HcKsOFtpVeXchK88RM6l", agentId: 1, name: "美智子 Connector" },
+    { key: "tg-2-COl17DqQaROZIi94kbZ31g1S98NfY9Tt", agentId: 2, name: "编程大师 Connector" },
+  ];
+
+  try {
+    // Check if keys already exist
+    const existing = await conn.execute("SELECT COUNT(*) as cnt FROM mcp_api_keys");
+    const count = (existing as any)[0]?.[0]?.cnt ?? 0;
+    if (count > 0) {
+      logs.push(`MCP keys: ${count} already exist, skipping`);
+      return;
+    }
+
+    let inserted = 0;
+    for (const k of keys) {
+      await conn.execute(
+        "INSERT IGNORE INTO mcp_api_keys (`key`, agent_id, name, active, rate_limit) VALUES (?, ?, ?, 'true', 10)",
+        [k.key, k.agentId, k.name]
+      );
+      inserted++;
+    }
+
+    logs.push(`MCP keys seeded: ${inserted} inserted`);
+  } catch (e: any) {
+    logs.push(`MCP keys seed failed: ${e.message?.slice(0, 80)}`);
+  }
+}
+
 export async function autoMigrate(force = false): Promise<string[]> {
   const logs: string[] = [];
   console.log("auto-migrate: DATABASE_URL present =", !!env.databaseUrl);
@@ -463,6 +502,9 @@ export async function autoMigrate(force = false): Promise<string[]> {
     await migrateMailboxColumns(conn, logs);
     await migrateP13Columns(conn, logs);
     await seedModelPricing(conn, logs);
+
+    // Seed MCP API keys from environment variables
+    await seedMcpKeys(conn, logs);
 
     logs.push(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);
     console.log(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);

@@ -9,6 +9,8 @@ set -euo pipefail
 
 TIANGONG_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RUNNER="$TIANGONG_DIR/scripts/openclaw-connector/examples/openclaw-agent-runner.mjs"
+RUNNER_HOUTU="$TIANGONG_DIR/scripts/openclaw-connector/runner-houtu.sh"
+RUNNER_WEIZI="$TIANGONG_DIR/scripts/openclaw-connector/runner-weizi.sh"
 CONNECTOR="$TIANGONG_DIR/scripts/openclaw-connector/connector.mjs"
 SECRETS="$HOME/.openclaw/secrets/tiangong-openclaw-agents.json"
 RUN_DIR="$HOME/.openclaw/run/tiangong-connectors"
@@ -31,17 +33,18 @@ mkdir -p "$RUN_DIR" "$LOG_DIR"
 declare -a AGENTS=(
   # 架构管理 → Claude Opus 4.8 / DeepSeek V4 Pro
   "meizhizi|1|meizhizi|4sapi/claude-opus-4-8|medium"
-  "houtu|4|meixizi|deepseek-official/deepseek-v4-pro|medium"
+  "houtu|14|meixizi|deepseek-official/deepseek-v4-pro|medium"
   # 安全审查 → Claude Opus 4.8
   "codemaster|2|codemaster|deepseek-official/deepseek-v4-pro|medium"
   # 中文运营 → MiniMax M3
-  "shangguan|3|shangguan|minimax-cn/MiniMax-M3|off"
+  "shangguan|4|shangguan|minimax-cn/MiniMax-M3|off"
   # 日常轻度 → DeepSeek Flash
-  "eriyi|5|sumu|deepseek-official/deepseek-v4-flash|off"
-  "meichengzi|6|meichengzi|deepseek-official/deepseek-v4-flash|off"
-  "jingwei|12|jingwei|deepseek-official/deepseek-v4-flash|off"
-  "yunxiao|13|main|deepseek-official/deepseek-v4-flash|off"
-  "weizi|14|weizi|deepseek-official/deepseek-v4-flash|off"
+  "eriyi|15|sumu|deepseek-official/deepseek-v4-flash|off"
+  "meichengzi|9|meichengzi|deepseek-official/deepseek-v4-flash|off"
+  "jingwei|10|jingwei|deepseek-official/deepseek-v4-flash|off"
+  "yunxiao|7|yunxiao|deepseek-official/deepseek-v4-flash|off"
+  "weizi|8|weizi|deepseek-official/deepseek-v4-flash|off"
+  # 碧霄和羲和由 L 单独管理
 )
 
 for entry in "${AGENTS[@]}"; do
@@ -65,14 +68,26 @@ for entry in "${AGENTS[@]}"; do
 
   echo "▶️  启动 $NAME (#$AGENT_ID) → $OC_AGENT @ $MODEL"
 
+  # 后土和薇子使用专用 runner（带定时扫描），其他助手用通用 runner
+  if [[ "$NAME" == "houtu" ]]; then
+    EXEC_FILE="$RUNNER_HOUTU"
+    EXEC_ARGS="[]"
+  elif [[ "$NAME" == "weizi" ]]; then
+    EXEC_FILE="$RUNNER_WEIZI"
+    EXEC_ARGS="[]"
+  else
+    EXEC_FILE="$RUNNER"
+    EXEC_ARGS="[\"--agent\",\"$OC_AGENT\",\"--model\",\"$MODEL\",\"--thinking\",\"$THINKING\",\"--timeout\",\"300\"]"
+  fi
+
   TIANGONG_AGENT_ID="$AGENT_ID" \
   TIANGONG_MCP_KEY="$TOKEN" \
   TIANGONG_AGENT_NAME="$NAME" \
   TIANGONG_HTTP_BASE="$HTTP_BASE" \
   TIANGONG_WS_BASE="$WS_BASE" \
   TIANGONG_EXEC_MODE="command" \
-  TIANGONG_EXEC_FILE="$RUNNER" \
-  TIANGONG_EXEC_ARGS_JSON="[\"--agent\",\"$OC_AGENT\",\"--model\",\"$MODEL\",\"--thinking\",\"$THINKING\",\"--timeout\",\"300\"]" \
+  TIANGONG_EXEC_FILE="$EXEC_FILE" \
+  TIANGONG_EXEC_ARGS_JSON="$EXEC_ARGS" \
   TIANGONG_PROCESS_INBOX="$TIANGONG_PROCESS_INBOX" \
   TIANGONG_CLAIM_TASKS="$TIANGONG_CLAIM_TASKS" \
   TIANGONG_CHEAP_MODEL="$TIANGONG_CHEAP_MODEL" \

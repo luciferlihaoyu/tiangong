@@ -19,7 +19,7 @@ export function serveStaticFiles(app: App) {
     await next();
     // Add CORS header for module scripts with crossorigin="anonymous"
     // Without this, browsers refuse to execute the script
-    c.header("Access-Control-Allow-Origin", "*");
+    c.res.headers.set("Access-Control-Allow-Origin", "*");
   });
 
   app.use("*", serveStatic({

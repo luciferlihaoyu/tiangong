@@ -433,12 +433,20 @@ async function seedModelPricing(conn: mysql.Connection, logs: string[]) {
  *   TIANGONG_CODEMASTER_MCP_KEY - MCP Key for agent 2 (编程大师)
  */
 async function seedMcpKeys(conn: mysql.Connection, logs: string[]) {
-  // MCP Keys 硬编码在此，用于 Connector 认证
-  // 这些 Key 同时存在于 .env 文件和启动脚本中
-  const keys = [
-    { key: "tg-1-88BgwZ-fzXi0HcKsOFtpVeXchK88RM6l", agentId: 1, name: "美智子 Connector" },
-    { key: "tg-2-COl17DqQaROZIi94kbZ31g1S98NfY9Tt", agentId: 2, name: "编程大师 Connector" },
+  // MCP Keys 从环境变量读取，不再硬编码
+  // 环境变量：TIANGONG_MEIZHIZI_MCP_KEY, TIANGONG_CODEMASTER_MCP_KEY 等
+  const keyDefs = [
+    { envVar: "TIANGONG_MEIZHIZI_MCP_KEY", agentId: 1, name: "美智子 Connector" },
+    { envVar: "TIANGONG_CODEMASTER_MCP_KEY", agentId: 2, name: "编程大师 Connector" },
   ];
+  const keys = keyDefs
+    .filter(d => process.env[d.envVar])
+    .map(d => ({ key: process.env[d.envVar]!, agentId: d.agentId, name: d.name }));
+
+  if (keys.length === 0) {
+    logs.push("MCP keys: no env vars set, skipping");
+    return;
+  }
 
   try {
     // Check if keys already exist

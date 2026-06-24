@@ -1,10 +1,27 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, adminQuery, userQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { hashPassword, verifyPassword } from "./lib/password";
+
+// ─── Login rate limiting ───
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_LOGIN_ATTEMPTS = 10;
+const LOGIN_WINDOW_MS = 60_000; // 1 minute
+
+function checkLoginRate(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= MAX_LOGIN_ATTEMPTS) return false;
+  entry.count++;
+  return true;
+}
 
 // JWT secret from APP_SECRET env
 const SECRET = new TextEncoder().encode(
@@ -49,6 +66,12 @@ export const localAuthRouter = createRouter({
       const db = getDb();
       const { username, password } = input;
 
+      // Rate limit check
+      const clientIp = ctx.req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+      if (!checkLoginRate(clientIp)) {
+        return { success: false, error: "登录尝试过于频繁，请稍后再试" };
+      }
+
       // Check against env admin credentials first
       const adminCreds = getAdminCreds();
       if (username === adminCreds.username && password === adminCreds.password) {
@@ -86,8 +109,8 @@ export const localAuthRouter = createRouter({
       return { success: true, token, user: { id: user.id, name: user.name || user.username, role: user.role } };
     }),
 
-  // Register new user (admin only can register)
-  register: publicQuery
+  // Register new user (admin only)
+  register: adminQuery
     .input(
       z.object({
         username: z.string().min(3).max(50),
@@ -132,8 +155,8 @@ export const localAuthRouter = createRouter({
     };
   }),
 
-  // List all users (admin)
-  list: publicQuery.query(async () => {
+  // List all users (admin only)
+  list: adminQuery.query(async () => {
     const db = getDb();
     return db.select({
       id: users.id,
@@ -145,21 +168,15 @@ export const localAuthRouter = createRouter({
     }).from(users);
   }),
 
-  // Change password
-  changePassword: publicQuery
+  // Change password (requires login)
+  changePassword: userQuery
     .input(z.object({
       oldPassword: z.string(),
       newPassword: z.string().min(4),
     }))
     .mutation(async ({ input, ctx }) => {
-      const authHeader = ctx.req.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) return { success: false, error: "未登录" };
-
-      const payload = await verifyToken(authHeader.slice(7));
-      if (!payload) return { success: false, error: "登录已过期" };
-
       const db = getDb();
-      const user = await db.select().from(users).where(eq(users.id, Number(payload.sub))).then(rows => rows[0]);
+      const user = await db.select().from(users).where(eq(users.id, ctx.user!.id)).then(rows => rows[0]);
       if (!user) return { success: false, error: "用户不存在" };
 
       const valid = await verifyPassword(input.oldPassword, user.passwordHash);

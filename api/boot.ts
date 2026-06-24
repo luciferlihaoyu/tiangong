@@ -8,6 +8,7 @@ import { appRouter } from "./router";
 import { createContext } from "./middleware";
 import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
+import { verifyToken } from "./local-auth-router";
 import { autoMigrate } from "./lib/auto-migrate";
 import { migrateV2 } from "./lib/migrate-v2";
 import { serveStaticFiles } from "./lib/vite";
@@ -23,6 +24,24 @@ const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
+
+// ─── Security headers ───
+app.use("*", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Content-Type-Options", "nosniff");
+  c.res.headers.set("X-Frame-Options", "DENY");
+  c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.res.headers.set("X-XSS-Protection", "1; mode=block");
+  c.res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+});
+
+// ─── Auth helper for raw Hono routes ───
+async function requireAdmin(c: any): Promise<boolean> {
+  const authHeader = c.req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) return false;
+  const payload = await verifyToken(authHeader.slice(7));
+  return !!payload && payload.role === "admin";
+}
 
 // MCP HTTP Routes (before tRPC to avoid wildcard conflicts)
 app.route("/mcp", createMcpApp());
@@ -89,8 +108,12 @@ app.get("/api/version", async (c) => {
   });
 });
 
-// P7: Runner 状态诊断端点（不泄露 secrets/command/args/token 内容）
-app.get("/api/runner/status", (c) => {
+// P7: Runner 状态诊断端点（需要管理员认证，不泄露 secrets/command/args/token 内容）
+app.get("/api/runner/status", async (c) => {
+  const isAdmin = await requireAdmin(c);
+  if (!isAdmin) {
+    return c.json({ error: "需要管理员权限" }, 401);
+  }
   const s = taskRunner.status;
   return c.json({
     ok: true,
@@ -123,11 +146,14 @@ app.get("/api/runner/status", (c) => {
   });
 });
 
-// Admin migration endpoint
+// Admin migration endpoint (requires admin auth)
 app.get("/api/admin/migrate", async (c) => {
+  const isAdmin = await requireAdmin(c);
+  if (!isAdmin) {
+    return c.json({ error: "需要管理员权限" }, 401);
+  }
   const force = c.req.query("force") === "1";
   const results: string[] = [];
-  results.push(`DATABASE_URL: ${env.databaseUrl ? "SET (" + env.databaseUrl.substring(0, 20) + "...)" : "NOT SET"}`);
   results.push(`force: ${force}`);
   const amLogs = await autoMigrate(force);
   results.push(...amLogs);
@@ -136,8 +162,12 @@ app.get("/api/admin/migrate", async (c) => {
   return c.json({ ok: true, results });
 });
 
-// WebSocket 诊断端点（HTTP）
-app.get("/api/ws/status", (c) => {
+// WebSocket 诊断端点（HTTP，需要管理员认证）
+app.get("/api/ws/status", async (c) => {
+  const isAdmin = await requireAdmin(c);
+  if (!isAdmin) {
+    return c.json({ error: "需要管理员权限" }, 401);
+  }
   return c.json({
     ok: true,
     websocket: "enabled",

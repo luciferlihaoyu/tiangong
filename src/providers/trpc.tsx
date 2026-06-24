@@ -1,5 +1,5 @@
 import { createTRPCReact } from "@trpc/react-query";
-import { httpBatchLink } from "@trpc/client";
+import { httpLink } from "@trpc/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AppRouter } from "../../api/router";
 import type { ReactNode } from "react";
@@ -9,7 +9,7 @@ export const trpc = createTRPCReact<AppRouter>();
 const queryClient = new QueryClient();
 const trpcClient = trpc.createClient({
   links: [
-    httpBatchLink({
+    httpLink({
       url: "/api/trpc",
       headers() {
         const token = localStorage.getItem("tiangong_token");

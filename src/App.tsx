@@ -21,6 +21,7 @@ import EventStream from './pages/EventStream'
 import DagPanel from './pages/DagPanel'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
+import TaskBoard from './pages/TaskBoard'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {

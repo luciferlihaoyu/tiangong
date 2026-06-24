@@ -15,6 +15,13 @@ export function serveStaticFiles(app: App) {
   // boot.js is at dist/boot.js, public is at dist/public/
   const publicPath = path.resolve(__dirname, "public");
 
+  app.use("/assets/*", async (c, next) => {
+    await next();
+    // Add CORS header for module scripts with crossorigin="anonymous"
+    // Without this, browsers refuse to execute the script
+    c.header("Access-Control-Allow-Origin", "*");
+  });
+
   app.use("*", serveStatic({
     root: publicPath,
   }));

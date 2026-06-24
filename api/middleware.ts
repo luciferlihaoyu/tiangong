@@ -1,4 +1,4 @@
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
 
@@ -80,7 +80,7 @@ export const authedQuery = publicProcedure.use(async ({ ctx, next }) => {
   const hasUser = !!ctx.user;
   const hasApiKey = ctx.apiKeyAgentId !== null;
   if (!hasUser && !hasApiKey) {
-    throw new Error("请先登录或提供有效的 API Key");
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录或提供有效的 API Key" });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
@@ -88,7 +88,7 @@ export const authedQuery = publicProcedure.use(async ({ ctx, next }) => {
 // User-only query - requires login (Bearer token)
 export const userQuery = publicProcedure.use(async ({ ctx, next }) => {
   if (!ctx.user) {
-    throw new Error("请先登录");
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
@@ -96,10 +96,10 @@ export const userQuery = publicProcedure.use(async ({ ctx, next }) => {
 // Admin query - requires admin role
 export const adminQuery = publicProcedure.use(async ({ ctx, next }) => {
   if (!ctx.user) {
-    throw new Error("请先登录");
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
   }
   if (ctx.user.role !== "admin") {
-    throw new Error("需要管理员权限");
+    throw new TRPCError({ code: "FORBIDDEN", message: "需要管理员权限" });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });

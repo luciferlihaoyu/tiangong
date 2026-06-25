@@ -64,6 +64,63 @@ function fmtCny(usd: number): string {
   return `¥${(usd * EXCHANGE_RATE).toFixed(2)}`;
 }
 
+/** 月度预算进度条 */
+function BudgetBar({ byDay, currency, displayMode }: { byDay: any[]; currency: Currency; displayMode: DisplayMode }) {
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthCost = byDay
+    .filter(d => d.date?.startsWith(monthPrefix))
+    .reduce((sum, d) => sum + (d.costCents ?? 0), 0);
+
+  const BUDGET_CENTS = 1000;
+  const progress = Math.min(100, (monthCost / BUDGET_CENTS) * 100);
+
+  let barColor = "var(--success)";
+  if (progress > 100) barColor = "var(--accent-red)";
+  else if (progress >= 80) barColor = "var(--warning)";
+  else if (progress >= 60) barColor = "#eab308";
+
+  const remaining = Math.max(0, BUDGET_CENTS - monthCost);
+  const currentDay = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const projected = currentDay > 0 && monthCost > 0 ? Math.round((monthCost / currentDay) * daysInMonth) : 0;
+
+  return (
+    <div className="glass-panel p-3 sci-border mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+          月度预算 · MONTHLY BUDGET
+        </div>
+        <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+          {fmtCost(monthCost, currency, displayMode)} / {fmtCost(BUDGET_CENTS, currency, displayMode)}
+          {currency === "USD" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "CNY", displayMode)} / {fmtCost(BUDGET_CENTS, "CNY", displayMode)})</span>}
+          {currency === "CNY" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "USD", displayMode)} / {fmtCost(BUDGET_CENTS, "USD", displayMode)})</span>}
+        </div>
+      </div>
+      <div className="w-full rounded-full overflow-hidden mb-2" style={{ height: "6px", background: "rgba(255,255,255,0.05)" }}>
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${Math.min(100, progress)}%`, background: barColor }}
+        />
+      </div>
+      <div className="flex items-center justify-between text-[10px] font-mono">
+        <span style={{ color: "var(--text-muted)" }}>
+          剩余 {fmtCost(remaining, currency, displayMode)}
+          {currency === "USD" && <span className="ml-1">({fmtCost(remaining, "CNY", displayMode)})</span>}
+          {currency === "CNY" && <span className="ml-1">({fmtCost(remaining, "USD", displayMode)})</span>}
+        </span>
+        {projected > 0 && (
+          <span style={{ color: progress >= 100 ? "var(--accent-red)" : "var(--text-muted)" }}>
+            预计月底 {fmtCost(projected, currency, displayMode)}
+            {currency === "USD" && <span className="ml-1">({fmtCost(projected, "CNY", displayMode)})</span>}
+            {currency === "CNY" && <span className="ml-1">({fmtCost(projected, "USD", displayMode)})</span>}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 概览统计卡片 */
 function OverviewCards({
   byModel,
@@ -356,6 +413,37 @@ function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; l
               );
             })}
         </div>
+        {/* Cost line chart */}
+        <div className="relative mb-3" style={{ height: "60px" }}>
+          <svg className="w-full h-full" viewBox={`0 0 ${byDay.length} 60`} preserveAspectRatio="none">
+            <polyline
+              fill="none"
+              stroke="var(--accent-gold)"
+              strokeWidth="0.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              points={byDay
+                .slice()
+                .reverse()
+                .map((d, i) => `${i + 0.5},${60 - Math.max(1, ((d.costCents ?? 0) / maxCost) * 56)}`)
+                .join(" ")}
+            />
+            {byDay.slice().reverse().map((d, i) => {
+              const y = 60 - Math.max(1, ((d.costCents ?? 0) / maxCost) * 56);
+              return <circle key={i} cx={i + 0.5} cy={y} r="0.25" fill="var(--accent-gold)" />;
+            })}
+          </svg>
+          <div className="absolute inset-0 flex">
+            {byDay.slice().reverse().map((d, i) => (
+              <div key={i} className="flex-1 group relative">
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap pointer-events-none z-10" style={{ color: "var(--accent-gold)" }}>
+                  {fmtCost(d.costCents ?? 0, currency, displayMode)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Cost mini bars */}
         <div className="flex items-end gap-1" style={{ height: "40px" }}>
           {byDay
@@ -669,6 +757,8 @@ export default function UsagePanel() {
 
         {/* Overview cards */}
         <OverviewCards byModel={byModel} cacheStats={cacheStats} currency={currency} displayMode={displayMode} />
+
+        <BudgetBar byDay={byDay} currency={currency} displayMode={displayMode} />
 
         {/* Tab navigation */}
         <div className="flex items-center gap-1 mb-4 overflow-x-auto custom-scrollbar">

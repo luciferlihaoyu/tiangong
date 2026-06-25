@@ -3,7 +3,6 @@ import { agentRouter } from "./agent-router";
 import { taskRouter } from "./task-router";
 import { messageRouter } from "./message-router";
 import { systemRouter } from "./system-router";
-import { dbPushRouter } from "./db-push";
 import { orgRouter } from "./org-router";
 import { orchestrationRouter } from "./orchestration-router";
 import { mcpRouter } from "./mcp/mcp-router";
@@ -49,7 +48,6 @@ export const appRouter = createRouter({
   session: sessionRouter,
   memory: memoryRouter,
   externalAgent: externalAgentRouter,
-  dbPush: dbPushRouter,
 });
 
 export type AppRouter = typeof appRouter;

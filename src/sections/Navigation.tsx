@@ -216,7 +216,7 @@ function Sidebar() {
           <div key={group.title} className="mb-4">
             <div
               className="px-3 py-1.5 text-[10px] font-mono font-extrabold tracking-[0.15em] uppercase"
-              style={{ color: 'var(--text-secondary)' }}
+              style={{ color: 'rgba(255,255,255,0.7)' }}
             >
               {group.title}
             </div>
@@ -230,13 +230,13 @@ function Sidebar() {
                     className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-semibold transition-all text-left"
                     style={{
                       background: active ? 'var(--accent-glow-red)' : 'transparent',
-                      color: active ? 'var(--accent-red-bright)' : 'var(--text-primary)',
+                      color: active ? 'var(--accent-red-bright)' : '#ffffff',
                       borderLeft: active ? '2px solid var(--accent-red)' : '2px solid transparent',
                     }}
                   >
                     <span
                       style={{
-                        color: active ? 'var(--accent-red-bright)' : 'var(--text-secondary)',
+                        color: active ? 'var(--accent-red-bright)' : 'rgba(255,255,255,0.6)',
                       }}
                     >
                       {item.icon}
@@ -267,7 +267,7 @@ function Sidebar() {
             boxShadow: wsConnected ? '0 0 6px var(--success)' : '0 0 6px var(--accent-red)',
           }}
         />
-        <span className="text-[10px] font-bold font-mono" style={{ color: 'var(--text-secondary)' }}>
+        <span className="text-[10px] font-bold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
           {wsConnected ? '系统在线' : '连接断开'}
         </span>
       </div>

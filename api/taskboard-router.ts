@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, and, or, like, desc, asc, inArray } from "drizzle-orm";
@@ -103,7 +103,7 @@ export const taskboardRouter = createRouter({
       };
     }),
 
-  claim: publicQuery
+  claim: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -149,7 +149,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  heartbeat: publicQuery
+  heartbeat: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -170,7 +170,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  progress: publicQuery
+  progress: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -213,7 +213,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  submit: publicQuery
+  submit: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -299,7 +299,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  block: publicQuery
+  block: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -348,7 +348,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  unblock: publicQuery
+  unblock: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -410,7 +410,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  updateStatus: publicQuery
+  updateStatus: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -481,7 +481,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  approve: publicQuery
+  approve: adminQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -546,7 +546,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  reject: publicQuery
+  reject: adminQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -611,7 +611,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  requestChanges: publicQuery
+  requestChanges: adminQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -740,7 +740,7 @@ export const taskboardRouter = createRouter({
       };
     }),
 
-  comment: publicQuery
+  comment: authedQuery
     .input(
       z.object({
         taskId: z.number(),
@@ -764,7 +764,7 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -810,5 +810,56 @@ export const taskboardRouter = createRouter({
       });
 
       return { success: true, id: insertId, taskId };
+    }),
+
+  dispatch: authedQuery
+    .input(z.object({ taskId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.status !== "pending" && row.status !== "queued") {
+        throw new Error(`Task cannot be dispatched (current status: ${row.status})`);
+      }
+
+      await db
+        .update(tasks)
+        .set({
+          status: "queued",
+          lifecycleStatus: "dispatched",
+          dispatchedAt: new Date(),
+        })
+        .where(eq(tasks.id, input.taskId));
+
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        eventType: "system",
+        content: `Task dispatched`,
+        metadata: stringifyJson({ action: "dispatch", previousStatus: row.status }),
+      });
+
+      // If agentId is set, send a message to the agent
+      if (row.agentId) {
+        await db.insert(taskMessages).values({
+          taskId: input.taskId,
+          fromAgentId: row.agentId,
+          eventType: "dispatch",
+          content: `Task dispatched to agent ${row.agentId}`,
+          metadata: stringifyJson({ action: "dispatch", agentId: row.agentId }),
+        });
+      }
+
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "dispatched",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: "queued",
+        agentId: row.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true };
     }),
 });

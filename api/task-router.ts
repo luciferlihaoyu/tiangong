@@ -56,6 +56,43 @@ export const taskRouter = createRouter({
       };
     }),
 
+  /**
+   * Dispatch: 将 pending 任务派发到 queued 状态，供 Connector 认领
+   */
+  dispatch: authedQuery
+    .input(z.object({ taskId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.status !== "pending") {
+        throw new Error(`Task cannot be dispatched (current status: ${row.status})`);
+      }
+
+      await db
+        .update(tasks)
+        .set({
+          status: "queued",
+          lifecycleStatus: "dispatched",
+          dispatchedAt: new Date(),
+        })
+        .where(eq(tasks.id, input.taskId));
+
+      // Broadcast WebSocket event
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "dispatched",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: "queued",
+        agentId: row.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, task: { ...row, status: "queued", lifecycleStatus: "dispatched" } };
+    }),
+
   /** Auto-generate taskId 避免冲突 */
   nextTaskId: publicQuery.query(async () => {
     const ts = Date.now().toString(36).slice(-5).toUpperCase();

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
@@ -116,7 +116,7 @@ const taskStatusEnum = z.enum(["pending", "queued", "running", "done", "failed"]
 export const orchestrationRouter = createRouter({
   // ─── Task CRUD with orchestration ───
 
-  createTask: publicQuery
+  createTask: authedQuery
     .input(z.object({
       taskId: z.string().min(1).max(20),
       name: z.string().min(1).max(255),
@@ -214,7 +214,7 @@ export const orchestrationRouter = createRouter({
       return { success: true, id: created?.id ?? null };
     }),
 
-  updateStatus: publicQuery
+  updateStatus: authedQuery
     .input(z.object({
       id: z.number(),
       status: taskStatusEnum,
@@ -335,7 +335,7 @@ export const orchestrationRouter = createRouter({
       };
     }),
 
-  createBatch: publicQuery
+  createBatch: authedQuery
     .input(z.object({
       tasks: z.array(z.object({
         taskId: z.string().min(1).max(20),
@@ -405,7 +405,7 @@ export const orchestrationRouter = createRouter({
     return { tasks: taskStats, agents: agentStats };
   }),
 
-  addDependency: publicQuery
+  addDependency: authedQuery
     .input(z.object({
       taskId: z.number(),
       dependsOnTaskId: z.number(),
@@ -430,7 +430,7 @@ export const orchestrationRouter = createRouter({
       return { success: true };
     }),
 
-  removeDependency: publicQuery
+  removeDependency: authedQuery
     .input(z.object({
       taskId: z.number(),
       dependsOnTaskId: z.number(),

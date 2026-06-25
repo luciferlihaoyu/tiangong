@@ -13,6 +13,7 @@ interface KanbanColumnProps {
   onDragEnd: () => void;
   onDrop: (taskId: number, status: BoardStatus) => void;
   onTaskClick: (task: Task) => void;
+  onDispatch?: (taskId: number) => void;
 }
 
 export function KanbanColumn({
@@ -24,6 +25,7 @@ export function KanbanColumn({
   onDragEnd,
   onDrop,
   onTaskClick,
+  onDispatch,
 }: KanbanColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const config = BOARD_STATUS_CONFIG[status];
@@ -107,6 +109,7 @@ export function KanbanColumn({
               onDragStart={() => onDragStart(task.id)}
               onDragEnd={onDragEnd}
               onClick={() => onTaskClick(task)}
+              onDispatch={onDispatch ? () => onDispatch(task.id) : undefined}
             />
           ))}
           {tasks.length === 0 && (

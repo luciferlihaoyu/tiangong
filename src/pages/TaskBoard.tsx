@@ -136,11 +136,24 @@ export default function TaskBoard() {
     setDetailTaskId(task.id);
   }, []);
 
+  // Dispatch mutation for pending tasks
+  const dispatchMutation = trpc.taskboard.dispatch.useMutation({
+    onSuccess: () => {
+      utils.taskboard.list.invalidate();
+      toast.success("任务已派发，Connector 将自动认领");
+    },
+    onError: (err) => {
+      toast.error(`派发失败: ${err.message}`);
+    },
+  });
+
+  const handleDispatch = useCallback((taskId: number) => {
+    dispatchMutation.mutate({ taskId });
+  }, [dispatchMutation]);
+
   const handleRefresh = useCallback(() => {
     utils.taskboard.list.invalidate();
   }, [utils]);
-
-  // Stats for header
   const stats = useMemo(() => {
     const total = tasks.length;
     const running = tasks.filter((t) => t.boardStatus === "running").length;
@@ -282,6 +295,7 @@ export default function TaskBoard() {
                 onDragEnd={handleDragEnd}
                 onDrop={handleDrop}
                 onTaskClick={handleTaskClick}
+                onDispatch={handleDispatch}
               />
             ))}
           </div>

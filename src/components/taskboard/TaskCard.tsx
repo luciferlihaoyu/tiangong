@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Task } from "./types";
 import { PRIORITY_COLORS, PRIORITY_LABELS, parseLabels } from "./types";
-import { User, Shield } from "lucide-react";
+import { User, Shield, Zap } from "lucide-react";
 
 interface TaskCardProps {
   task: Task;
@@ -10,6 +10,7 @@ interface TaskCardProps {
   onDragStart: () => void;
   onDragEnd: () => void;
   onClick: () => void;
+  onDispatch?: () => void;
 }
 
 export function TaskCard({
@@ -19,6 +20,7 @@ export function TaskCard({
   onDragStart,
   onDragEnd,
   onClick,
+  onDispatch,
 }: TaskCardProps) {
   const agent = useMemo(
     () => agents.find((a) => a.id === task.agentId),
@@ -105,6 +107,24 @@ export function TaskCard({
       >
         {task.name}
       </h4>
+
+      {/* Dispatch button for pending tasks */}
+      {task.status === "pending" && onDispatch && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDispatch();
+          }}
+          className="w-full mb-2 text-[10px] px-2 py-1 rounded font-mono flex items-center justify-center gap-1 transition-colors hover:brightness-110"
+          style={{
+            background: "rgba(74,158,255,0.1)",
+            color: "var(--accent-cyan)",
+            border: "1px solid rgba(74,158,255,0.2)",
+          }}
+        >
+          <Zap size={10} /> 派发
+        </button>
+      )}
 
       {/* Progress (only for running) */}
       {task.boardStatus === "running" && (

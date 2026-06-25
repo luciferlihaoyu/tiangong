@@ -27,6 +27,8 @@ import {
   Activity,
 } from "lucide-react";
 
+import { toast } from "sonner";
+
 // ═══════════════════════ Types ═══════════════════════
 
 interface Agent {
@@ -183,6 +185,7 @@ function TaskCard({
   onDelete,
   onPromote,
   onDemote,
+  onDispatch,
 }: {
   task: Task;
   agents: Agent[];
@@ -190,6 +193,7 @@ function TaskCard({
   onDelete: () => void;
   onPromote: () => void;
   onDemote: () => void;
+  onDispatch?: () => void;
 }) {
   const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
   const agent = agents.find((a) => a.id === task.agentId);
@@ -199,6 +203,16 @@ function TaskCard({
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
       {/* Hover actions */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        {task.status === "pending" && onDispatch && (
+          <button
+            onClick={onDispatch}
+            className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(74,158,255,0.15)] font-mono flex items-center gap-1"
+            style={{ color: "var(--accent-cyan)" }}
+            title="派发任务"
+          >
+            <Zap size={12} /> 派发
+          </button>
+        )}
         <button
           onClick={onPromote}
           className="text-[10px] px-1 py-0.5 rounded hover:bg-[rgba(201,168,76,0.15)] font-mono"
@@ -1346,6 +1360,18 @@ export default function TaskCenter() {
     },
   });
 
+  // Dispatch mutation
+  const dispatchMutation = trpc.task.dispatch.useMutation({
+    onSuccess: () => {
+      utils.task.list.invalidate();
+      utils.orch.getOverview.invalidate();
+      toast.success("任务已派发，Connector 将自动认领");
+    },
+    onError: (err) => {
+      toast.error(`派发失败: ${err.message}`);
+    },
+  });
+
   const handlePromote = (task: Task) => {
     promoteMutation.mutate({ id: task.id, delta: 1 });
   };
@@ -1354,6 +1380,10 @@ export default function TaskCenter() {
     if (task.priority > 0) {
       promoteMutation.mutate({ id: task.id, delta: -1 });
     }
+  };
+
+  const handleDispatch = (task: Task) => {
+    dispatchMutation.mutate({ taskId: task.id });
   };
 
   return (
@@ -1570,6 +1600,7 @@ export default function TaskCenter() {
               onDelete={() => handleDelete(task)}
               onPromote={() => handlePromote(task)}
               onDemote={() => handleDemote(task)}
+              onDispatch={() => handleDispatch(task)}
             />
           ))}
         </div>

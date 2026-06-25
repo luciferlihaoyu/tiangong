@@ -720,8 +720,12 @@ async function executeMock(cfg, task) {
 function executeCommand(cfg, task, prompt) {
   return new Promise((resolve, reject) => {
     const childEnv = { ...process.env };
-    delete childEnv.TIANGONG_MCP_KEY;
     delete childEnv.TIANGONG_TOKEN;
+    // P9.2: keep TIANGONG_MCP_KEY so runner can report usage
+    childEnv.TIANGONG_REPORT_USAGE = "true";
+    childEnv.TIANGONG_AGENT_ID = String(cfg.agentId || "0");
+    childEnv.TIANGONG_HTTP_BASE = cfg.httpBase || childEnv.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
+    childEnv.TIANGONG_CHEAP_MODEL = selectModelForTask(cfg, task) || cfg.cheapModel || "deepseek-official/deepseek-v4-flash";
 
     // P9.1: Apply cost guard — use cheap model for recurring tasks
     let effectiveArgs = cfg.execArgs;
@@ -866,8 +870,8 @@ function getExecutor(cfg) {
  * @param {boolean} success
  */
 async function reportUsage(cfg, task, result, success) {
-  // Resolve actual model from execArgs (--model flag)
-  let model = cfg.execMode === "command" ? "openclaw-connector" : "mock-executor";
+  // Resolve actual model: execArgs --model flag first, then cheapModel fallback
+  let model = cfg.cheapModel || "deepseek-official/deepseek-v4-flash";
   if (cfg.execMode === "command" && cfg.execArgs) {
     for (let i = 0; i < cfg.execArgs.length - 1; i++) {
       if (cfg.execArgs[i] === "--model") {
@@ -876,6 +880,9 @@ async function reportUsage(cfg, task, result, success) {
       }
     }
   }
+  // Mark expensive models
+  const highCostModels = ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet", "gpt-4", "gpt-4o"];
+  const highCostModel = highCostModels.some((m) => model.includes(m));
   const provider = cfg.execMode === "command" ? "openclaw" : "tiangong-mock";
 
   // Estimate token counts based on task content
@@ -904,9 +911,10 @@ async function reportUsage(cfg, task, result, success) {
       taskId: task.id,
       agentId: cfg.agentId,
       source: "connector",
+      highCostModel,
     });
     if (r.ok) {
-      L.debug(`📊 用量上报: ${totalTokens} tokens (${cachedPromptTokens} cached + ${uncachedPromptTokens} uncached + ${completionTokens} completion), model=${model}, source=connector`);
+      L.debug(`📊 用量上报: ${totalTokens} tokens (${cachedPromptTokens} cached + ${uncachedPromptTokens} uncached + ${completionTokens} completion), model=${model}, highCost=${highCostModel}, source=connector`);
     } else {
       L.warn(`用量上报失败: ${r.error}`);
     }
@@ -1014,7 +1022,11 @@ async function executeTaskWithProgress(cfg, task) {
     }
 
     // P9 + P5: Report usage after completion
-    await reportUsage(cfg, task, result, true);
+    // Runner already reports usage via its own reportUsage() when TIANGONG_REPORT_USAGE=true is passed to it
+    // Only fallback if runner won't report (execMode !== "command")
+    if (cfg.execMode !== "command") {
+      await reportUsage(cfg, task, result, true);
+    }
   } catch (err) {
     const errMsg = err.message || String(err);
     L.error(`❌ 任务 ${task.name} 执行失败: ${errMsg}`);
@@ -1054,7 +1066,10 @@ async function executeTaskWithProgress(cfg, task) {
     }
 
     // P9 + P5: Report usage even on failure
-    await reportUsage(cfg, task, errMsg, false);
+    // Runner already reports usage when execMode=command; only fallback otherwise
+    if (cfg.execMode !== "command") {
+      await reportUsage(cfg, task, errMsg, false);
+    }
   }
 }
 

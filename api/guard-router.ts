@@ -7,7 +7,7 @@
  * - 记录熔断事件
  */
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, adminQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { modelAllowlist, highCostModelAuth, agents, tokenUsage } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, or, type SQL } from "drizzle-orm";
@@ -114,7 +114,7 @@ export const guardRouter = createRouter({
   /**
    * 添加模型到白名单
    */
-  addAllowlist: publicQuery
+  addAllowlist: adminQuery
     .input(
       z.object({
         agentId: z.number(),
@@ -138,7 +138,7 @@ export const guardRouter = createRouter({
   /**
    * 移除白名单条目
    */
-  removeAllowlist: publicQuery
+  removeAllowlist: adminQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -180,7 +180,7 @@ export const guardRouter = createRouter({
   /**
    * 创建高价模型授权
    */
-  createAuth: publicQuery
+  createAuth: adminQuery
     .input(
       z.object({
         agentId: z.number(),
@@ -208,7 +208,7 @@ export const guardRouter = createRouter({
   /**
    * 撤销授权
    */
-  revokeAuth: publicQuery
+  revokeAuth: adminQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -256,7 +256,7 @@ export const guardRouter = createRouter({
    * 在 record 时自动检查并标记高价模型
    * 如果未授权则拒绝记录
    */
-  recordWithGuard: publicQuery
+  recordWithGuard: authedQuery
     .input(
       z.object({
         model: z.string().min(1).max(100),

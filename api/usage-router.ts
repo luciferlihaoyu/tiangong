@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tokenUsage, agents } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
@@ -9,7 +9,7 @@ export const usageRouter = createRouter({
   /**
    * P9 + P13: 记录 token 用量（自动计算真实费用）
    */
-  record: publicQuery
+  record: authedQuery
     .input(
       z.object({
         model: z.string().min(1).max(100),

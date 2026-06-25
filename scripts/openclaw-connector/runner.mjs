@@ -30,12 +30,18 @@ async function main() {
     const result = await callGateway(sessionKey, prompt);
     // Accept 'started' as success — the message was delivered to the agent session.
     // The agent will process it asynchronously and reply via mailbox.reply if needed.
+    if (process.env.TIANGONG_REPORT_USAGE === "true") {
+      await reportUsage(prompt, result, true);
+    }
     if (isOnlyStarted(result)) {
       console.log(`[${displayName}] 消息已投递到 ${sessionKey}，助手将异步处理`);
       process.exit(0);
     }
     console.log(result);
   } catch (err) {
+    if (process.env.TIANGONG_REPORT_USAGE === "true") {
+      await reportUsage(prompt, err.message, false);
+    }
     console.error(`[${displayName}/tg#${tiangongAgentId}/${openclawAgent}] 执行失败: ${err.message}`);
     process.exit(1);
   }
@@ -72,6 +78,59 @@ function isOnlyStarted(output) {
     return payload && payload.status === "started" && !payload.final && !payload.message && !payload.text && !payload.content;
   } catch {
     return false;
+  }
+}
+
+async function reportUsage(prompt, result, success) {
+  const mcpKey = process.env.TIANGONG_MCP_KEY;
+  const httpBase = process.env.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
+  const agentId = parseInt(process.env.TIANGONG_AGENT_ID || "0", 10);
+  const agentName = process.env.TIANGONG_OPENCLAW_AGENT_NAME || "助手";
+
+  if (!mcpKey || !agentId) return;
+
+  // 获取模型名（从环境变量或默认）
+  const model = process.env.TIANGONG_CHEAP_MODEL || "deepseek-official/deepseek-v4-flash";
+
+  // 估算 token
+  const inputLen = prompt?.length || 0;
+  const outputLen = result?.length || 0;
+  const promptTokens = Math.max(10, Math.floor(inputLen / 3));
+  const completionTokens = Math.max(5, Math.floor(outputLen / 2));
+  const totalTokens = promptTokens + completionTokens;
+  const cachedPromptTokens = Math.floor(promptTokens * 0.2);
+  const uncachedPromptTokens = promptTokens - cachedPromptTokens;
+
+  try {
+    const url = `${httpBase}/api/trpc/usage.record`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-mcp-key": mcpKey,
+      },
+      body: JSON.stringify({
+        model,
+        provider: "openclaw",
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        cachedPromptTokens,
+        uncachedPromptTokens,
+        callCount: 1,
+        agentId,
+        source: "runner",
+        sessionKey: process.env.TIANGONG_OPENCLAW_SESSION_KEY || "",
+      }),
+    });
+    if (res.ok) {
+      process.stderr.write(`[runner] 📊 用量上报: ${totalTokens} tokens, model=${model}, source=runner\n`);
+    } else {
+      const text = await res.text();
+      process.stderr.write(`[runner] ⚠️ 用量上报失败: HTTP ${res.status}: ${text.slice(0, 200)}\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`[runner] ⚠️ 用量上报异常: ${e.message}\n`);
   }
 }
 

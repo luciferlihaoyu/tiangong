@@ -2,7 +2,7 @@
  * P13: Model Pricing management router
  */
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { modelPricing } from "@db/schema";
 import { eq } from "drizzle-orm";
@@ -19,7 +19,7 @@ export const pricingRouter = createRouter({
   /**
    * Upsert a model pricing entry
    */
-  upsert: publicQuery
+  upsert: adminQuery
     .input(
       z.object({
         model: z.string().min(1).max(100),
@@ -70,7 +70,7 @@ export const pricingRouter = createRouter({
   /**
    * Delete a model pricing entry
    */
-  delete: publicQuery
+  delete: adminQuery
     .input(z.object({ model: z.string().min(1).max(100) }))
     .mutation(async ({ input }) => {
       const db = getDb();

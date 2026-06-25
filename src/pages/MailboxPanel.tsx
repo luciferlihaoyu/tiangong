@@ -7,6 +7,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { toast } from "sonner";
 import {
   Mail,
   RefreshCw,
@@ -18,6 +19,7 @@ import {
   Inbox,
   X,
   Eye,
+  MessageSquarePlus,
 } from "lucide-react";
 
 // ═══════════════════════ Types ═══════════════════════
@@ -301,6 +303,10 @@ export default function MailboxPanel() {
   const [selectedMailboxId, setSelectedMailboxId] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
   const [detailMsg, setDetailMsg] = useState<MailboxMessage | null>(null);
+  const [showSendForm, setShowSendForm] = useState(false);
+  const [targetAgentId, setTargetAgentId] = useState<string>("");
+  const [messageSubject, setMessageSubject] = useState("");
+  const [messageBody, setMessageBody] = useState("");
 
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
@@ -316,6 +322,20 @@ export default function MailboxPanel() {
   const messages = (inboxQuery.data || []) as MailboxMessage[];
 
   const utils = trpc.useUtils();
+
+  const sendMutation = trpc.mailbox.send.useMutation({
+    onSuccess: () => {
+      toast.success("消息发送成功");
+      setMessageSubject("");
+      setMessageBody("");
+      setTargetAgentId("");
+      setShowSendForm(false);
+      utils.mailbox.inbox.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`发送失败: ${err.message}`);
+    },
+  });
 
   // Dashboard WebSocket: backend broadcasts mailbox events
   const { lastMessage } = useWebSocket();
@@ -349,6 +369,13 @@ export default function MailboxPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowSendForm((s) => !s)}
+            className="px-3 py-2 rounded text-xs font-mono transition-colors hover:bg-[rgba(74,158,255,0.1)] flex items-center gap-1"
+            style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
+          >
+            <MessageSquarePlus size={12} /> 发送消息
+          </button>
           <button
             onClick={refresh}
             className="px-3 py-2 rounded text-xs font-mono transition-colors hover:bg-[rgba(180,200,255,0.05)] flex items-center gap-1"
@@ -450,6 +477,127 @@ export default function MailboxPanel() {
               onView={() => setDetailMsg(msg)}
             />
           ))}
+        </div>
+      )}
+
+      {/* Send Message Form */}
+      {showSendForm && (
+        <div className="glass-panel p-5 sci-border mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+              <Send size={14} style={{ color: "var(--accent-cyan)" }} />
+              发送新消息
+            </h3>
+            <button
+              onClick={() => setShowSendForm(false)}
+              className="p-1 rounded hover:bg-[rgba(180,200,255,0.1)]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {/* Target Agent */}
+            <div>
+              <label className="block text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                目标助手 · TO
+              </label>
+              <select
+                value={targetAgentId}
+                onChange={(e) => setTargetAgentId(e.target.value)}
+                className="w-full px-3 py-2 rounded text-xs outline-none font-mono"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                <option value="">选择目标助手</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.agentId}>
+                    {a.name} ({a.agentId})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Subject */}
+            <div>
+              <label className="block text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                主题 · SUBJECT
+              </label>
+              <input
+                type="text"
+                value={messageSubject}
+                onChange={(e) => setMessageSubject(e.target.value)}
+                placeholder="输入消息主题..."
+                className="w-full px-3 py-2 rounded text-xs outline-none font-mono"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                }}
+              />
+            </div>
+
+            {/* Body */}
+            <div>
+              <label className="block text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                内容 · BODY
+              </label>
+              <textarea
+                value={messageBody}
+                onChange={(e) => setMessageBody(e.target.value)}
+                placeholder="输入消息内容..."
+                rows={4}
+                className="w-full px-3 py-2 rounded text-xs outline-none font-mono resize-none"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
+                }}
+              />
+            </div>
+
+            {/* Submit */}
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  if (!targetAgentId) {
+                    toast.error("请选择目标助手");
+                    return;
+                  }
+                  if (!messageBody.trim()) {
+                    toast.error("请输入消息内容");
+                    return;
+                  }
+                  sendMutation.mutate({
+                    toMailboxId: targetAgentId,
+                    subject: messageSubject || undefined,
+                    body: messageBody,
+                    type: "direct",
+                  });
+                }}
+                disabled={sendMutation.isPending}
+                className="px-4 py-2 rounded text-xs font-mono transition-colors flex items-center gap-1 disabled:opacity-50"
+                style={{
+                  background: "var(--accent-cyan)",
+                  color: "#000",
+                }}
+              >
+                {sendMutation.isPending ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> 发送中...
+                  </>
+                ) : (
+                  <>
+                    <Send size={12} /> 发送
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

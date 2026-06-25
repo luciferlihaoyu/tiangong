@@ -468,7 +468,7 @@ export const mailboxRouter = createRouter({
       return serializeMessage(message);
     }),
 
-  ack: publicQuery
+  ack: authedQuery
     .input(z.object({
       messageId: z.number(),
       mailboxId: z.string().min(1).max(20),
@@ -504,7 +504,7 @@ export const mailboxRouter = createRouter({
       return { success: true, messageId: message.id, idempotent: false, status: "acknowledged" };
     }),
 
-  reply: publicQuery
+  reply: authedQuery
     .input(z.object({
       messageId: z.number(),
       fromMailboxId: z.string().min(1).max(20),
@@ -599,7 +599,7 @@ export const mailboxRouter = createRouter({
       return { success: true, messageId: message.id, replyMessageId, status: "replied" };
     }),
 
-  resolve: publicQuery
+  resolve: authedQuery
     .input(z.object({
       messageId: z.number(),
       mailboxId: z.string().min(1).max(20),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { messages, agents } from "@db/schema";
 import { eq, desc, asc, sql, and, or, isNull, lt, gte, type SQL } from "drizzle-orm";
@@ -39,7 +39,7 @@ export const messageRouter = createRouter({
    * 支持 correlationId, taskId, parentMessageId, priority, expiresAt。
    * 写入数据库后，通过 WebSocket 推送给在线目标，更新 deliveredAt/status。
    */
-  send: publicQuery
+  send: authedQuery
     .input(
       z.object({
         fromAgent: z.number(),
@@ -220,7 +220,7 @@ export const messageRouter = createRouter({
    * 接收方确认收到/处理一条消息。幂等：重复 ACK 同一消息返回相同结果。
    * 更新 status='acked' 并设置 ackedAt。
    */
-  ack: publicQuery
+  ack: authedQuery
     .input(
       z.object({
         messageId: z.number(),
@@ -305,7 +305,7 @@ export const messageRouter = createRouter({
    * P8.1: 标记消息已读
    * PATCH 更新 status='read' + readAt
    */
-  markRead: publicQuery
+  markRead: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -339,7 +339,7 @@ export const messageRouter = createRouter({
    * 返回状态为 'sent'（未推送）且未过期的消息。可选择性触发重推。
    * 用于离线 Agent 上线时补偿投递。
    */
-  replayUndelivered: publicQuery
+  replayUndelivered: authedQuery
     .input(
       z.object({
         agentId: z.number(),
@@ -456,7 +456,7 @@ export const messageRouter = createRouter({
   /**
    * 广播消息给所有在线 Agent
    */
-  broadcast: publicQuery
+  broadcast: adminQuery
     .input(
       z.object({
         fromAgent: z.number(),
@@ -547,6 +547,34 @@ export const messageRouter = createRouter({
       ),
     };
   }),
+
+  /**
+   * 通知飞书 — 队列化通知，由 Connector 或 cron 负责实际发送
+   */
+  notifyFeishu: authedQuery
+    .input(z.object({
+      agentName: z.string(),
+      subject: z.string(),
+      body: z.string(),
+      urgency: z.enum(["info", "warning", "critical"]).default("info"),
+    }))
+    .mutation(async ({ input }) => {
+      // 1. 记录通知日志到控制台（可扩展为写入数据库）
+      console.log(`[notifyFeishu] ${input.urgency.toUpperCase()} | Agent: ${input.agentName} | ${input.subject}`);
+
+      // 2. 通过 WebSocket 广播到 Dashboard，触发前端 toast 提示
+      wsManager.broadcastToDashboard({
+        type: "feishu_notification",
+        agentName: input.agentName,
+        subject: input.subject,
+        body: input.body,
+        urgency: input.urgency,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 3. 返回成功，实际飞书发送由 Connector 或 OpenClaw cron 处理
+      return { success: true, message: "Notification queued" };
+    }),
 });
 
 // ── 辅助 ──

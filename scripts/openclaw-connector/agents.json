@@ -42,7 +42,7 @@
     },
     {
       "name": "sumu",
-      "agentId": 7,
+      "agentId": 15,
       "label": "上杉绘梨衣",
       "execMode": "command",
       "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-sumu.sh",
@@ -52,7 +52,7 @@
     },
     {
       "name": "qiongxiao",
-      "agentId": 8,
+      "agentId": 6,
       "label": "琼霄",
       "execMode": "command",
       "execFile": "/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector/runner-qiongxiao.sh",

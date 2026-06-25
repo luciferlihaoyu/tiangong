@@ -18,6 +18,9 @@ import { githubRouter } from "./github-router";
 import { a2aRouter } from "./a2a-router";
 import { mailboxRouter } from "./mailbox-router";
 import { taskboardRouter } from "./taskboard-router";
+import { sessionRouter } from "./session-router";
+import { memoryRouter } from "./memory-router";
+import { externalAgentRouter } from "./external-agent-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -42,6 +45,9 @@ export const appRouter = createRouter({
   a2a: a2aRouter,
   mailbox: mailboxRouter,
   taskboard: taskboardRouter,
+  session: sessionRouter,
+  memory: memoryRouter,
+  externalAgent: externalAgentRouter,
 });
 
 export type AppRouter = typeof appRouter;

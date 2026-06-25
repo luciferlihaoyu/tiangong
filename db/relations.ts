@@ -1,5 +1,9 @@
 import { relations } from "drizzle-orm";
-import { agents, tasks, messages, organizations, departments, taskDependencies, mcpApiKeys, mcpAuditLog, taskThreads, taskMessages, taskArtifacts } from "./schema";
+import {
+  agents, tasks, messages, organizations, departments, taskDependencies,
+  mcpApiKeys, mcpAuditLog, taskThreads, taskMessages, taskArtifacts,
+  sharedSessions, sessionMessages, agentMemories, externalAgents,
+} from "./schema";
 
 export const agentRelations = relations(agents, ({ many, one }) => ({
   tasks: many(tasks),
@@ -67,3 +71,20 @@ export const taskArtifactRelations = relations(taskArtifacts, ({ one }) => ({
   task: one(tasks, { fields: [taskArtifacts.taskId], references: [tasks.id] }),
   agent: one(agents, { fields: [taskArtifacts.agentId], references: [agents.id] }),
 }));
+
+// ── Phase 3: Shared Sessions, Session Messages, Agent Memories, External Agents ──
+export const sharedSessionRelations = relations(sharedSessions, ({ many }) => ({
+  messages: many(sessionMessages),
+}));
+
+export const sessionMessageRelations = relations(sessionMessages, ({ one }) => ({
+  session: one(sharedSessions, { fields: [sessionMessages.sessionId], references: [sharedSessions.id] }),
+  fromAgent: one(agents, { fields: [sessionMessages.fromAgentId], references: [agents.id] }),
+  toAgent: one(agents, { fields: [sessionMessages.toAgentId], references: [agents.id] }),
+}));
+
+export const agentMemoryRelations = relations(agentMemories, ({ one }) => ({
+  agent: one(agents, { fields: [agentMemories.agentId], references: [agents.id] }),
+}));
+
+export const externalAgentRelations = relations(externalAgents, () => ({}));

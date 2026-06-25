@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   decimal,
 } from "drizzle-orm/mysql-core";
+import { relations } from "drizzle-orm";
 
 // ─── Users (内置认证) ───
 export const users = mysqlTable("users", {
@@ -537,3 +538,76 @@ export const taskArtifacts = mysqlTable("task_artifacts", {
 
 export type TaskArtifact = typeof taskArtifacts.$inferSelect;
 export type InsertTaskArtifact = typeof taskArtifacts.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
+// 天宫 Phase 3: 上下文共享 + 跨平台接入 + 记忆系统
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Shared Sessions: 多 Agent 共享会话 ───
+export const sharedSessions = mysqlTable("shared_sessions", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  sessionKey: varchar("session_key", { length: 100 }).notNull().unique(),
+  type: mysqlEnum("type", ["collaboration", "handoff", "meeting", "review", "adhoc"]).default("adhoc").notNull(),
+  status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
+  participants: text("participants"), // JSON array of agent IDs
+  summary: text("summary"), // 会话摘要
+  context: text("context"), // 上下文快照（JSON）
+  createdBy: bigint("created_by", { mode: "number", unsigned: true }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type SharedSession = typeof sharedSessions.$inferSelect;
+export type InsertSharedSession = typeof sharedSessions.$inferInsert;
+
+// ─── Session Messages: 会话消息历史 ───
+export const sessionMessages = mysqlTable("session_messages", {
+  id: serial("id").primaryKey(),
+  sessionId: bigint("session_id", { mode: "number", unsigned: true }).notNull(),
+  fromAgentId: bigint("from_agent_id", { mode: "number", unsigned: true }),
+  toAgentId: bigint("to_agent_id", { mode: "number", unsigned: true }),
+  role: mysqlEnum("role", ["user", "assistant", "system"]).default("assistant").notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata"), // JSON
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type SessionMessage = typeof sessionMessages.$inferSelect;
+export type InsertSessionMessage = typeof sessionMessages.$inferInsert;
+
+// ─── Agent Memories: Agent 长期记忆 ───
+export const agentMemories = mysqlTable("agent_memories", {
+  id: serial("id").primaryKey(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }).notNull(),
+  key: varchar("key", { length: 100 }).notNull(),
+  value: text("value").notNull(),
+  type: mysqlEnum("type", ["personal", "shared", "company"]).default("personal").notNull(),
+  tags: varchar("tags", { length: 500 }), // 逗号分隔
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+}, (table) => ({
+  agentKeyIdx: uniqueIndex("uq_agent_memories_key").on(table.agentId, table.key),
+}));
+
+export type AgentMemory = typeof agentMemories.$inferSelect;
+export type InsertAgentMemory = typeof agentMemories.$inferInsert;
+
+// ─── External Agents: 外部 Agent 注册 ───
+export const externalAgents = mysqlTable("external_agents", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  platform: mysqlEnum("platform", ["hermes", "opencode", "codex", "arkclaw", "openai", "custom"]).notNull(),
+  endpoint: varchar("endpoint", { length: 500 }),
+  apiKey: varchar("api_key", { length: 500 }),
+  model: varchar("model", { length: 100 }),
+  status: mysqlEnum("status", ["online", "offline", "error"]).default("offline").notNull(),
+  capabilities: text("capabilities"), // JSON
+  config: text("config"), // JSON: 平台特定配置
+  lastHeartbeat: timestamp("last_heartbeat"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type ExternalAgent = typeof externalAgents.$inferSelect;
+export type InsertExternalAgent = typeof externalAgents.$inferInsert;

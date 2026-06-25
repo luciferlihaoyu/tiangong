@@ -1,5 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router'
-import Navigation from './sections/Navigation'
+import { Routes, Route, Navigate, Outlet } from 'react-router'
 import Starfield from './sections/Starfield'
 import Dashboard from './sections/Dashboard'
 import MatrixNodes from './sections/MatrixNodes'
@@ -22,6 +21,7 @@ import DagPanel from './pages/DagPanel'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
 import TaskBoard from './pages/TaskBoard'
+import { AppLayout } from './sections/Navigation'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -43,106 +43,56 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function HomePage() {
+  return (
+    <>
+      <Dashboard />
+      <MatrixNodes />
+      <Features />
+      <ExecutionCore />
+      <FAQ />
+      <FooterTerminal />
+    </>
+  )
+}
+
 export default function App() {
   return (
     <div className="relative min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <Starfield />
       <Routes>
+        {/* Public routes — no layout */}
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={
+
+        {/* Protected routes — with AppLayout */}
+        <Route element={
           <ProtectedLayout>
-            <Navigation />
-            <Dashboard />
-            <MatrixNodes />
-            <Features />
-            <ExecutionCore />
-            <FAQ />
-            <FooterTerminal />
+            <AppLayout>
+              <Outlet />
+            </AppLayout>
           </ProtectedLayout>
-        } />
-        <Route path="/account" element={
-          <ProtectedLayout>
-            <Navigation />
-            <AccountSettings />
-          </ProtectedLayout>
-        } />
-        <Route path="/missions" element={
-          <ProtectedLayout>
-            <Navigation />
-            <MissionLog />
-          </ProtectedLayout>
-        } />
-        <Route path="/task-center" element={
-          <ProtectedLayout>
-            <Navigation />
-            <TaskCenter />
-          </ProtectedLayout>
-        } />
-        <Route path="/usage" element={
-          <ProtectedLayout>
-            <Navigation />
-            <UsagePanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/pricing" element={
-          <ProtectedLayout>
-            <Navigation />
-            <PricingPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/guard" element={
-          <ProtectedLayout>
-            <Navigation />
-            <GuardPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/ops" element={
-          <ProtectedLayout>
-            <Navigation />
-            <OpsPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/fusion" element={
-          <ProtectedLayout>
-            <Navigation />
-            <FusionPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/events" element={
-          <ProtectedLayout>
-            <Navigation />
-            <EventStream />
-          </ProtectedLayout>
-        } />
-        <Route path="/dag" element={
-          <ProtectedLayout>
-            <Navigation />
-            <DagPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/taskboard" element={
-          <ProtectedLayout>
-            <Navigation />
-            <TaskBoard />
-          </ProtectedLayout>
-        } />
-        <Route path="/mailbox" element={
-          <ProtectedLayout>
-            <Navigation />
-            <MailboxPanel />
-          </ProtectedLayout>
-        } />
-        <Route path="/github" element={
-          <ProtectedLayout>
-            <Navigation />
-            <GitHubPanel />
-          </ProtectedLayout>
-        } />
+        }>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/account" element={<AccountSettings />} />
+          <Route path="/missions" element={<MissionLog />} />
+          <Route path="/task-center" element={<TaskCenter />} />
+          <Route path="/usage" element={<UsagePanel />} />
+          <Route path="/pricing" element={<PricingPanel />} />
+          <Route path="/guard" element={<GuardPanel />} />
+          <Route path="/ops" element={<OpsPanel />} />
+          <Route path="/fusion" element={<FusionPanel />} />
+          <Route path="/events" element={<EventStream />} />
+          <Route path="/dag" element={<DagPanel />} />
+          <Route path="/taskboard" element={<TaskBoard />} />
+          <Route path="/mailbox" element={<MailboxPanel />} />
+          <Route path="/github" element={<GitHubPanel />} />
+        </Route>
+
+        {/* 404 — show nav but no auth requirement */}
         <Route path="*" element={
-          <>
-            <Navigation />
+          <AppLayout>
             <NotFound />
-          </>
+          </AppLayout>
         } />
       </Routes>
     </div>

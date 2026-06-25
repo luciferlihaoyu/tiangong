@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { trpc } from "@/providers/trpc";
 import McpPanel from "./McpPanel";
 
 /* ═══════════════════════════════════════════
@@ -415,18 +416,25 @@ function ConnectionPanel({ systems, onStatusChange }: {
    统计行
    ═══════════════════════════════════════════ */
 
-function StatsRow({ agents, tasks, totalMsgs, orgs }: {
-  agents: MockAgent[]; tasks: { status: string }[]; totalMsgs: number; orgs: number;
+function StatsRow({ agents, tasks, totalMsgs, orgs, todayCostCents }: {
+  agents: MockAgent[]; tasks: { status: string }[]; totalMsgs: number; orgs: number; todayCostCents?: number;
 }) {
   const onlineCount = agents.filter(a => a.status === 'online' || a.status === 'busy').length;
   const doneCount = tasks.filter(t => t.status === 'done').length;
   const failedCount = tasks.filter(t => t.status === 'failed').length;
+  const todayTasks = tasks.filter(t => {
+    const updated = (t as any).updatedAt || (t as any).createdAt;
+    if (!updated) return false;
+    const d = new Date(updated);
+    const now = new Date();
+    return d.toDateString() === now.toDateString();
+  }).length;
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
       {[
         { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
-        { label: '总任务', value: String(tasks.length), sub: `完成 ${doneCount}` },
-        { label: '失败', value: String(failedCount), sub: '个任务' },
+        { label: '今日任务', value: String(todayTasks || tasks.length), sub: `完成 ${doneCount}` },
+        { label: '今日成本', value: todayCostCents !== undefined ? `¥${(todayCostCents / 100).toFixed(2)}` : '—', sub: '元' },
         { label: '消息总量', value: totalMsgs >= 1000 ? `${(totalMsgs / 1000).toFixed(1)}K` : String(totalMsgs), sub: '实时同步' },
         { label: '组织', value: String(orgs), sub: '个公司' },
       ].map(s => (
@@ -881,6 +889,20 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { connected: wsConnected, lastMessage: lastWsMessage } = useWebSocket();
 
+  // tRPC real data queries — fallback to useDataSource mock when unavailable
+  const usageByDayQuery = trpc.usage.byDay.useQuery(
+    { limit: 7 },
+    { retry: 1, staleTime: 30000, enabled: data.hasBackend }
+  );
+
+  // Compute today's cost from usage.byDay (fallback to undefined if unavailable)
+  const todayCostCents = useMemo(() => {
+    if (!usageByDayQuery.data || !Array.isArray(usageByDayQuery.data)) return undefined;
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRow = usageByDayQuery.data.find((r: any) => r.date === today);
+    return todayRow?.costCents ?? 0;
+  }, [usageByDayQuery.data]);
+
   const [mainTab, setMainTab] = useState<MainTab>('dashboard');
   const [filterTab, setFilterTab] = useState('all');
 
@@ -948,7 +970,7 @@ export default function Dashboard() {
   const handleAddOrg = (v: Record<string, string>) => { data.addOrg(v); setShowOrgForm(false); };
 
   return (
-    <div className="relative z-10 min-h-screen pt-14 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>
+    <div className="relative z-10 min-h-screen pt-4 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>
       <div className="max-w-7xl mx-auto">
 
         {/* ── 标题行 ── */}
@@ -994,7 +1016,7 @@ export default function Dashboard() {
         {/* ── 仪表盘 Tab ── */}
         {mainTab === 'dashboard' && (
           <>
-            <div className="mb-4"><StatsRow agents={agentsWithWS} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} /></div>
+            <div className="mb-4"><StatsRow agents={agentsWithWS} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} todayCostCents={todayCostCents} /></div>
             {/* Filter + Actions */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-1">

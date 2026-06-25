@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/schema";
 import { eq, desc, asc, and } from "drizzle-orm";
@@ -130,7 +130,7 @@ export const a2aRouter = createRouter({
       };
     }),
 
-  updateAgentCard: publicQuery
+  updateAgentCard: authedQuery
     .input(z.object({
       agentId: z.number(),
       agentCard: z.record(z.string(), z.any()).optional(),
@@ -154,20 +154,27 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 2. Dispatch: 任务投递给目标助手 ───
-  dispatch: publicQuery
+  dispatch: authedQuery
     .input(z.object({
       taskId: z.number(),
       targetAgentId: z.number(),
       dispatcherAgentId: z.number().optional(),
       payload: z.string().optional(), // dispatch 附加内容
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
 
       const agent = await db.select().from(agents).where(eq(agents.id, input.targetAgentId)).then((r) => r[0]);
       if (!agent) throw new Error("Target agent not found");
+
+      // dispatcher 权限检查
+      if (ctx.apiKeyAgentId !== null) {
+        if (!(ctx.apiKeyAgentId > 0 || ctx.apiKeyAgentId === -1)) {
+          throw new Error("Dispatcher not authorized");
+        }
+      }
 
       // 更新 lifecycle 到 dispatched（或 awaiting_result 如果直接投递到外部 runner）
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "dispatched";
@@ -209,7 +216,7 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 3. ACK: 助手确认收到任务 ───
-  ack: publicQuery
+  ack: authedQuery
     .input(z.object({
       taskId: z.number(),
       agentId: z.number(),
@@ -256,7 +263,7 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 4. Progress/Working: 助手报告执行中 ───
-  reportWorking: publicQuery
+  reportWorking: authedQuery
     .input(z.object({
       taskId: z.number(),
       agentId: z.number(),
@@ -287,7 +294,7 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 5. AwaitingResult: 投递后等待最终结果 ───
-  markAwaitingResult: publicQuery
+  markAwaitingResult: authedQuery
     .input(z.object({
       taskId: z.number(),
       agentId: z.number().optional(),
@@ -316,7 +323,7 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 6. SubmitResult: 助手提交最终结果 ───
-  submitResult: publicQuery
+  submitResult: authedQuery
     .input(z.object({
       taskId: z.number(),
       agentId: z.number(),
@@ -326,13 +333,18 @@ export const a2aRouter = createRouter({
       artifactJson: z.record(z.string(), z.any()).optional(),
       mimeType: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
 
       if (task.agentId !== input.agentId) {
         return { success: false, error: "Agent is not the assigned executor of this task" };
+      }
+
+      // 权限检查：API Key 认证时，提交者必须是任务执行者
+      if (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== input.agentId) {
+        throw new Error("Agent is not the assigned executor of this task");
       }
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "submitted";
@@ -382,12 +394,20 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 7. Review / Complete / Fail / Timeout / Cancel ───
-  review: publicQuery
+  review: adminQuery
     .input(z.object({ taskId: z.number(), approved: z.boolean(), note: z.string().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
+
+      // 权限检查：API Key 认证时，Agent 必须有 admin 角色
+      if (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0) {
+        const agent = await db.select().from(agents).where(eq(agents.id, ctx.apiKeyAgentId)).then((r) => r[0]);
+        if (!agent || agent.role !== "admin") {
+          throw new Error("需要管理员权限");
+        }
+      }
 
       // 只能从 submitted 或 reviewing 进入 review
       if (!["submitted", "reviewing"].includes(task.lifecycleStatus ?? "")) {
@@ -427,7 +447,7 @@ export const a2aRouter = createRouter({
       return { success: true, lifecycleStatus: nextStatus };
     }),
 
-  fail: publicQuery
+  fail: authedQuery
     .input(z.object({ taskId: z.number(), error: z.string().optional(), agentId: z.number().optional() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -466,7 +486,7 @@ export const a2aRouter = createRouter({
       return { success: true, lifecycleStatus: nextStatus };
     }),
 
-  timeout: publicQuery
+  timeout: authedQuery
     .input(z.object({ taskId: z.number(), note: z.string().optional() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -495,7 +515,7 @@ export const a2aRouter = createRouter({
       return { success: true, lifecycleStatus: nextStatus };
     }),
 
-  cancel: publicQuery
+  cancel: adminQuery
     .input(z.object({ taskId: z.number(), note: z.string().optional() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -568,7 +588,7 @@ export const a2aRouter = createRouter({
       };
     }),
 
-  addArtifact: publicQuery
+  addArtifact: authedQuery
     .input(z.object({
       taskId: z.number(),
       agentId: z.number().optional(),

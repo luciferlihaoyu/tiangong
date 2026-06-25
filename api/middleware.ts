@@ -95,10 +95,12 @@ export const userQuery = publicProcedure.use(async ({ ctx, next }) => {
 
 // Admin query - requires admin role
 export const adminQuery = publicProcedure.use(async ({ ctx, next }) => {
-  if (!ctx.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
+  const hasUser = !!ctx.user;
+  const hasApiKey = ctx.apiKeyAgentId !== null;
+  if (!hasUser && !hasApiKey) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录或提供有效的 API Key" });
   }
-  if (ctx.user.role !== "admin") {
+  if (ctx.user && ctx.user.role !== "admin") {
     throw new TRPCError({ code: "FORBIDDEN", message: "需要管理员权限" });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });

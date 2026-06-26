@@ -18,7 +18,6 @@ import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { agents, messages } from "@db/schema";
 import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
-import mysql from "mysql2/promise";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });

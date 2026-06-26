@@ -21,6 +21,7 @@ import DagPanel from './pages/DagPanel'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
 import TaskBoard from './pages/TaskBoard'
+import TaskDetail from './pages/TaskDetail'
 import SessionPanel from './pages/SessionPanel'
 import { AppLayout } from './sections/Navigation'
 import { useAuth } from './hooks/useAuth'
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="/events" element={<EventStream />} />
           <Route path="/dag" element={<DagPanel />} />
           <Route path="/taskboard" element={<TaskBoard />} />
+          <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />
           <Route path="/github" element={<GitHubPanel />} />

@@ -172,13 +172,14 @@ app.get("/api/admin/debug-keys", async (c) => {
   results.envDatabaseUrl = !!process.env.DATABASE_URL;
   results.envTiangongApiKey = !!process.env.TIANGONG_API_KEY;
   results.envMcpKeys = Object.keys(process.env).filter(k => k.startsWith("TIANGONG_") && k.endsWith("_MCP_KEY"));
-  // Try DB read
+  // Try DB read via Drizzle
   try {
-    const mysql = await import("mysql2/promise");
-    const conn = await mysql.default.createConnection(process.env.DATABASE_URL!);
-    const [rows] = await conn.execute("SELECT id, name, mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''");
-    results.dbTokens = (rows as any[]).map(r => ({ id: r.id, name: r.name, tokenPrefix: r.mcp_token?.slice(0, 10) }));
-    await conn.end();
+    const { getDb } = await import("./queries/connection");
+    const { agents } = await import("@db/schema");
+    const { isNotNull } = await import("drizzle-orm");
+    const db = getDb();
+    const rows = await db.select({ id: agents.id, name: agents.name, mcpToken: agents.mcpToken }).from(agents).where(isNotNull(agents.mcpToken));
+    results.dbTokens = rows.map((r: any) => ({ id: r.id, name: r.name, tokenPrefix: r.mcpToken?.slice(0, 10) }));
   } catch (e: any) {
     results.dbError = e.message;
   }

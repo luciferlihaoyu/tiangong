@@ -1,8 +1,9 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
-import mysql from "mysql2/promise";
-import { env } from "./lib/env";
+import { getDb } from "./queries/connection";
+import { agents } from "@db/schema";
+import { eq, isNotNull, ne } from "drizzle-orm";
 
 // ─── API Key validation ───
 let _cachedApiKeys: Set<string> | null = null;
@@ -39,22 +40,19 @@ async function loadApiKeys(): Promise<Set<string>> {
     // secrets file may not exist in all environments
   }
 
-  // 4. MCP tokens from database (works in all environments)
-  if (env.databaseUrl) {
-    let conn: mysql.Connection | null = null;
-    try {
-      conn = await mysql.createConnection(env.databaseUrl);
-      const [rows] = await conn.execute(
-        "SELECT mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''"
-      );
-      for (const row of rows as any[]) {
-        if (row.mcp_token) keys.add(String(row.mcp_token).trim());
-      }
-    } catch {
-      // database may not be connected yet
-    } finally {
-      if (conn) await conn.end().catch(() => {});
+  // 4. MCP tokens from database via Drizzle ORM (same connection as rest of app)
+  try {
+    const db = getDb();
+    const rows = await db
+      .select({ mcpToken: agents.mcpToken })
+      .from(agents)
+      .where(isNotNull(agents.mcpToken));
+    for (const row of rows) {
+      if (row.mcpToken && row.mcpToken.trim()) keys.add(row.mcpToken.trim());
     }
+  } catch (e) {
+    // DB may not be ready yet
+    console.warn("loadApiKeys: DB read failed:", (e as Error).message?.slice(0, 100));
   }
 
   _cachedApiKeys = keys;

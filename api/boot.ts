@@ -162,6 +162,37 @@ app.get("/api/admin/migrate", async (c) => {
   return c.json({ ok: true, results });
 });
 
+// Debug: check API key loading
+app.get("/api/admin/debug-keys", async (c) => {
+  const isAdmin = await requireAdmin(c);
+  if (!isAdmin) {
+    return c.json({ error: "需要管理员权限" }, 401);
+  }
+  const results: any = {};
+  results.envDatabaseUrl = !!process.env.DATABASE_URL;
+  results.envTiangongApiKey = !!process.env.TIANGONG_API_KEY;
+  results.envMcpKeys = Object.keys(process.env).filter(k => k.startsWith("TIANGONG_") && k.endsWith("_MCP_KEY"));
+  // Try DB read
+  try {
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.default.createConnection(process.env.DATABASE_URL!);
+    const [rows] = await conn.execute("SELECT id, name, mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''");
+    results.dbTokens = (rows as any[]).map(r => ({ id: r.id, name: r.name, tokenPrefix: r.mcp_token?.slice(0, 10) }));
+    await conn.end();
+  } catch (e: any) {
+    results.dbError = e.message;
+  }
+  // Check secrets file
+  try {
+    const fs = await import("node:fs");
+    fs.readFileSync("/home/node/.openclaw/secrets/tiangong-openclaw-agents.json");
+    results.secretsFile = "exists";
+  } catch {
+    results.secretsFile = "not found";
+  }
+  return c.json(results);
+});
+
 // WebSocket 诊断端点（HTTP，需要管理员认证）
 app.get("/api/ws/status", async (c) => {
   const isAdmin = await requireAdmin(c);

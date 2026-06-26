@@ -179,14 +179,6 @@ app.get("/api/admin/debug-keys", async (c) => {
   } catch (e: any) {
     results.globalKeyError = e.message;
   }
-  // Check secrets file
-  try {
-    const { readFileSync: rfs } = await import("node:fs");
-    rfs("/home/node/.openclaw/secrets/tiangong-openclaw-agents.json");
-    results.secretsFile = "exists";
-  } catch {
-    results.secretsFile = "not found";
-  }
   return c.json(results);
 });
 
@@ -444,14 +436,15 @@ if (env.isProduction) {
 
   // Load MCP tokens from DB into global key set for API key verification
   try {
-    const db = getDb();
-    const rows = await db
-      .select({ mcpToken: agents.mcpToken })
-      .from(agents)
-      .where(and(isNotNull(agents.mcpToken), ne(agents.mcpToken, "")));
-    for (const row of rows) {
-      if (row.mcpToken && row.mcpToken.trim()) _globalApiKeys.add(row.mcpToken.trim());
+    const mysql = await import("mysql2/promise");
+    const conn = await mysql.default.createConnection(process.env.DATABASE_URL!);
+    const [rows] = await conn.execute(
+      "SELECT mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''"
+    );
+    for (const row of rows as any[]) {
+      if (row.mcp_token && row.mcp_token.trim()) _globalApiKeys.add(row.mcp_token.trim());
     }
+    await conn.end();
     console.log(`[Boot] Loaded ${_globalApiKeys.size} MCP tokens from DB`);
   } catch (e: any) {
     console.warn("[Boot] MCP token load from DB failed:", e.message);

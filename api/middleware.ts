@@ -3,13 +3,10 @@ import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
 
 // ─── API Key validation ───
-// Global token set populated by boot.ts on startup and refreshed periodically
+// Global token set populated by boot.ts on startup
 export const _globalApiKeys = new Set<string>();
 
-let _cachedEnvKeys: Set<string> | null = null;
-
 function loadEnvKeys(): Set<string> {
-  if (_cachedEnvKeys) return _cachedEnvKeys;
   const keys = new Set<string>();
 
   // 1. Fixed API key from env
@@ -36,15 +33,17 @@ function loadEnvKeys(): Set<string> {
     // secrets file may not exist in all environments
   }
 
-  _cachedEnvKeys = keys;
   return keys;
 }
+
+let _envKeys: Set<string> | null = null;
 
 async function verifyApiKey(headerValue: string | null): Promise<boolean> {
   if (!headerValue) return false;
   const val = headerValue.trim();
   // Check env-based keys
-  if (loadEnvKeys().has(val)) return true;
+  if (!_envKeys) _envKeys = loadEnvKeys();
+  if (_envKeys.has(val)) return true;
   // Check DB-based keys (populated by boot.ts)
   if (_globalApiKeys.has(val)) return true;
   return false;

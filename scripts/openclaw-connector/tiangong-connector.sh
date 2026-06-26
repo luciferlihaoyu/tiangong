@@ -39,6 +39,9 @@ case "$AGENT_NAME" in
   weizi)      RUNNER="runner-weizi.sh"; DISPLAY="薇子" ;;
   meichengzi) RUNNER="runner-meichengzi.sh"; DISPLAY="美成子" ;;
   jingwei)    RUNNER="runner-jingwei.sh"; DISPLAY="精卫" ;;
+  xihe)       RUNNER="runner-xihe.sh"; DISPLAY="羲和" ;;
+  bixiao)     RUNNER="runner-bixiao.sh"; DISPLAY="碧霄" ;;
+  eriyi)      RUNNER="runner-eriyi.sh"; DISPLAY="上衣绘梨衣" ;;
   *)
     echo "ERROR: 未知 agent: $AGENT_NAME" >&2
     exit 1

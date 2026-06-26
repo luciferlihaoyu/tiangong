@@ -2,6 +2,7 @@
  * 启动时自动建表 — 使用 mysql2 原生连接，不依赖 Drizzle ORM
  */
 import mysql from "mysql2/promise";
+import { readFileSync } from "node:fs";
 import { env } from "./env";
 
 const CREATE_TABLES_SQL = [
@@ -432,6 +433,77 @@ async function seedModelPricing(conn: mysql.Connection, logs: string[]) {
  *   TIANGONG_MEIZHIZI_MCP_KEY - MCP Key for agent 1 (美智子)
  *   TIANGONG_CODEMASTER_MCP_KEY - MCP Key for agent 2 (编程大师)
  */
+async function migrateAgentMcpToken(conn: mysql.Connection, logs: string[]) {
+  try {
+    await conn.execute(
+      `ALTER TABLE agents ADD COLUMN mcp_token VARCHAR(100) NULL`
+    );
+    logs.push("agents.mcp_token: ADDED");
+  } catch (e: any) {
+    if (e?.code === "ER_DUP_FIELD_NAME" || e?.message?.includes("Duplicate column")) {
+      logs.push("agents.mcp_token: already exists");
+    } else {
+      logs.push(`agents.mcp_token: ${e.message?.slice(0, 80)}`);
+    }
+  }
+}
+
+async function syncAgentMcpTokens(conn: mysql.Connection, logs: string[]) {
+  // Build token map from env vars and secrets file
+  const tokenMap = new Map<number, string>(); // agentId -> token
+
+  // 1. From env vars: TIANGONG_<NAME>_MCP_KEY (need to map name to agentId)
+  const envKeyMap: Record<string, number> = {
+    MEIZHIZI: 1,
+    CODEMASTER: 2,
+    SHANGGUAN: 4,
+    QIONGXIAO: 6,
+    YUNXIAO: 7,
+    WEIZI: 8,
+    MEICHENGZI: 9,
+    JINGWEI: 10,
+    BIXIAO: 12,
+    XIHE: 13,
+    HOUTU: 14,
+    ERIYI: 15,
+  };
+  for (const [name, id] of Object.entries(envKeyMap)) {
+    const val = process.env[`TIANGONG_${name}_MCP_KEY`];
+    if (val) tokenMap.set(id, val.trim());
+  }
+
+  // 2. From secrets file (local/dev)
+  try {
+    const raw = readFileSync("/home/node/.openclaw/secrets/tiangong-openclaw-agents.json", "utf-8");
+    const data = JSON.parse(raw);
+    const agentList = Array.isArray(data) ? data : data.agents || [];
+    for (const a of agentList) {
+      if (a.agentId && a.token) tokenMap.set(Number(a.agentId), String(a.token).trim());
+    }
+  } catch {
+    // secrets file may not exist
+  }
+
+  if (tokenMap.size === 0) {
+    logs.push("MCP token sync: no tokens found, skipping");
+    return;
+  }
+
+  let updated = 0;
+  for (const [agentId, token] of tokenMap) {
+    try {
+      await conn.execute(
+        `UPDATE agents SET mcp_token = ? WHERE id = ?`,
+        [token, agentId]
+      );
+      updated++;
+    } catch (e: any) {
+      logs.push(`MCP token sync agent ${agentId}: ${e.message?.slice(0, 60)}`);
+    }
+  }
+  logs.push(`MCP token sync: ${updated}/${tokenMap.size} agents updated`);
+}
+
 async function seedMcpKeys(conn: mysql.Connection, logs: string[]) {
   // MCP Keys 从环境变量读取，不再硬编码
   // 环境变量：TIANGONG_MEIZHIZI_MCP_KEY, TIANGONG_CODEMASTER_MCP_KEY 等
@@ -509,10 +581,14 @@ export async function autoMigrate(force = false): Promise<string[]> {
 
     await migrateMailboxColumns(conn, logs);
     await migrateP13Columns(conn, logs);
+    await migrateAgentMcpToken(conn, logs);
     await seedModelPricing(conn, logs);
 
     // Seed MCP API keys from environment variables
     await seedMcpKeys(conn, logs);
+
+    // Sync agent MCP tokens from secrets file (local) or env vars
+    await syncAgentMcpTokens(conn, logs);
 
     logs.push(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);
     console.log(`Auto-migration completed: ${CREATE_TABLES_SQL.length} tables checked`);

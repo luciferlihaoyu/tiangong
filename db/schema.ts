@@ -60,6 +60,7 @@ export const agents = mysqlTable("agents", {
   openclawAgent: varchar("openclaw_agent", { length: 100 }),
   canModifyTiangongCore: mysqlEnum("can_modify_tiangong_core", ["true", "false"]).default("false"),
   canSendExternalMessage: mysqlEnum("can_send_external_message", ["true", "false"]).default("false"),
+  mcpToken: varchar("mcp_token", { length: 100 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });

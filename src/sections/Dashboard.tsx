@@ -45,22 +45,26 @@ function LiveClock() {
 }
 
 function SystemMonitor() {
-  const [m, setM] = useState({ cpu: 42, ram: 68, net: 12 });
-  useEffect(() => { const t = setInterval(() => setM({ cpu: 30 + Math.floor(Math.random() * 40), ram: 60 + Math.floor(Math.random() * 25), net: 5 + Math.floor(Math.random() * 20) }), 3000); return () => clearInterval(t); }, []);
+  const stats = useDashboardStats();
+  const { connected: wsConnected } = useWebSocket();
+  const onlineCount = stats.agents.filter(a => a.status === 'online' || a.status === 'busy').length;
+  const totalCount = stats.agents.length;
+  const wsStatus = wsConnected ? '已连接' : '断开';
+  const apiStatus = stats.hasBackend ? '在线' : '离线';
   const bars = [
-    { label: 'CPU', value: m.cpu, color: 'var(--accent-red)' },
-    { label: 'RAM', value: m.ram, color: 'var(--accent-gold)' },
-    { label: 'NET', value: m.net, color: 'var(--accent-cyan)' },
+    { label: 'Agent', value: totalCount > 0 ? Math.round((onlineCount / totalCount) * 100) : 0, display: `${onlineCount}/${totalCount}`, color: 'var(--accent-cyan)' },
+    { label: 'API', value: stats.hasBackend ? 100 : 0, display: apiStatus, color: stats.hasBackend ? 'var(--success)' : 'var(--accent-red)' },
+    { label: 'WS', value: wsConnected ? 100 : 0, display: wsStatus, color: wsConnected ? 'var(--success)' : 'var(--accent-red)' },
   ];
   return (
     <div className="glass-panel p-4 sci-border">
-      <div className="section-label mb-3">系统资源 · SYS_RES</div>
+      <div className="section-label mb-3">系统状态 · SYS_STATUS</div>
       <div className="flex flex-col gap-3">
         {bars.map(b => (
           <div key={b.label}>
             <div className="flex justify-between text-xs mb-1">
               <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{b.label}</span>
-              <span className="font-mono" style={{ color: b.color }}>{b.value}%</span>
+              <span className="font-mono" style={{ color: b.color }}>{b.display}</span>
             </div>
             <div className="progress-track"><div className="progress-fill transition-all duration-700" style={{ width: `${b.value}%`, background: b.color }} /></div>
           </div>

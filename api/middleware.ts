@@ -1,13 +1,15 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
+import { getDb } from "./queries/connection";
+import { agents } from "@db/schema";
 
 // ─── API Key validation ───
 let _cachedApiKeys: Set<string> | null = null;
 let _cachedAt = 0;
 const CACHE_TTL_MS = 60_000;
 
-function loadApiKeys(): Set<string> {
+async function loadApiKeys(): Promise<Set<string>> {
   const now = Date.now();
   if (_cachedApiKeys && now - _cachedAt < CACHE_TTL_MS) return _cachedApiKeys;
 
@@ -17,17 +19,35 @@ function loadApiKeys(): Set<string> {
   const envKey = process.env.TIANGONG_API_KEY;
   if (envKey) keys.add(envKey.trim());
 
-  // 2. MCP keys from secrets file
+  // 2. Per-agent MCP keys from env (TIANGONG_<NAME>_MCP_KEY)
+  for (const [envName, envVal] of Object.entries(process.env)) {
+    if (envName.startsWith("TIANGONG_") && envName.endsWith("_MCP_KEY") && envVal) {
+      keys.add(envVal.trim());
+    }
+  }
+
+  // 3. MCP keys from secrets file (local/dev only)
   try {
     const secretsPath = "/home/node/.openclaw/secrets/tiangong-openclaw-agents.json";
     const raw = readFileSync(secretsPath, "utf-8");
     const data = JSON.parse(raw);
-    const agents = Array.isArray(data) ? data : data.agents || [];
-    for (const agent of agents) {
+    const agentList = Array.isArray(data) ? data : data.agents || [];
+    for (const agent of agentList) {
       if (agent.token) keys.add(String(agent.token).trim());
     }
   } catch {
     // secrets file may not exist in all environments
+  }
+
+  // 4. MCP tokens from database (works in all environments)
+  try {
+    const db = getDb();
+    const rows = await db.select({ mcpToken: agents.mcpToken }).from(agents);
+    for (const row of rows) {
+      if (row.mcpToken) keys.add(row.mcpToken.trim());
+    }
+  } catch {
+    // database may not be connected yet during boot
   }
 
   _cachedApiKeys = keys;
@@ -35,9 +55,9 @@ function loadApiKeys(): Set<string> {
   return keys;
 }
 
-function verifyApiKey(headerValue: string | null): boolean {
+async function verifyApiKey(headerValue: string | null): Promise<boolean> {
   if (!headerValue) return false;
-  const keys = loadApiKeys();
+  const keys = await loadApiKeys();
   return keys.has(headerValue.trim());
 }
 
@@ -57,7 +77,7 @@ export async function createContext(opts: { req: Request }) {
 
   // Try API key from x-api-key or x-mcp-key
   const apiKey = opts.req.headers.get("x-api-key") || opts.req.headers.get("x-mcp-key");
-  if (apiKey && verifyApiKey(apiKey)) {
+  if (apiKey && await verifyApiKey(apiKey)) {
     apiKeyAgentId = -1; // marker for valid API key (no specific agent)
   }
 

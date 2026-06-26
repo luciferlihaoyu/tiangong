@@ -6,6 +6,7 @@
 import { getDb } from "../queries/connection";
 import { mcpApiKeys, mcpAuditLog, agents } from "@db/schema";
 import { eq, and } from "drizzle-orm";
+import { _globalApiKeys } from "../middleware";
 
 // ─── In-memory rate limit (per key, per second) ───
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -41,6 +42,28 @@ export interface McpAuthResult {
 export async function verifyMcpKey(key: string): Promise<McpAuthResult> {
   if (!key || typeof key !== "string" || key.length < 16) {
     return { valid: false, error: "缺少或无效的 API Key", statusCode: 401 };
+  }
+
+  // Fast path: check global API key set (loaded from DB + env + secrets by middleware)
+  if (_globalApiKeys.has(key)) {
+    // Still try to get agent info from mcp_api_keys table
+    try {
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(mcpApiKeys)
+        .where(eq(mcpApiKeys.key, key));
+      const apiKey = rows[0];
+      let agent: typeof agents.$inferSelect | undefined;
+      if (apiKey?.agentId) {
+        const agentRows = await db.select().from(agents).where(eq(agents.id, apiKey.agentId));
+        agent = agentRows[0];
+      }
+      return { valid: true, apiKey: apiKey as any, agent };
+    } catch {
+      // DB lookup failed but key is in global set — still valid
+      return { valid: true };
+    }
   }
 
   try {

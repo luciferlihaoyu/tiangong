@@ -1,8 +1,8 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
-import { getDb } from "./queries/connection";
-import { agents } from "@db/schema";
+import mysql from "mysql2/promise";
+import { env } from "./lib/env";
 
 // ─── API Key validation ───
 let _cachedApiKeys: Set<string> | null = null;
@@ -40,14 +40,21 @@ async function loadApiKeys(): Promise<Set<string>> {
   }
 
   // 4. MCP tokens from database (works in all environments)
-  try {
-    const db = getDb();
-    const rows = await db.select({ mcpToken: agents.mcpToken }).from(agents);
-    for (const row of rows) {
-      if (row.mcpToken) keys.add(row.mcpToken.trim());
+  if (env.databaseUrl) {
+    let conn: mysql.Connection | null = null;
+    try {
+      conn = await mysql.createConnection(env.databaseUrl);
+      const [rows] = await conn.execute(
+        "SELECT mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''"
+      );
+      for (const row of rows as any[]) {
+        if (row.mcp_token) keys.add(String(row.mcp_token).trim());
+      }
+    } catch {
+      // database may not be connected yet
+    } finally {
+      if (conn) await conn.end().catch(() => {});
     }
-  } catch {
-    // database may not be connected yet during boot
   }
 
   _cachedApiKeys = keys;

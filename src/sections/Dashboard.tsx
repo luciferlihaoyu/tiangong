@@ -430,7 +430,7 @@ function StatsRow({ agents, tasks, totalMsgs, orgs, todayCostCents }: {
     return d.toDateString() === now.toDateString();
   }).length;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
       {[
         { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
         { label: '今日任务', value: String(todayTasks || tasks.length), sub: `完成 ${doneCount}` },

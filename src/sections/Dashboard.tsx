@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { useDataSource, type MockAgent, type MockOrg } from "@/hooks/useDataSource";
+import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useAuth } from "@/hooks/useAuth";
 import { useWebSocket, type WSMessage } from "@/hooks/useWebSocket";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { trpc } from "@/providers/trpc";
 import McpPanel from "./McpPanel";
 
 /* ═══════════════════════════════════════════
@@ -885,23 +885,10 @@ type MainTab = 'dashboard' | 'org' | 'orch' | 'mcp';
 
 export default function Dashboard() {
   const data = useDataSource();
+  const stats = useDashboardStats();
   const auth = useAuth();
   const navigate = useNavigate();
   const { connected: wsConnected, lastMessage: lastWsMessage } = useWebSocket();
-
-  // tRPC real data queries — fallback to useDataSource mock when unavailable
-  const usageByDayQuery = trpc.usage.byDay.useQuery(
-    { limit: 7 },
-    { retry: 1, staleTime: 30000, enabled: data.hasBackend }
-  );
-
-  // Compute today's cost from usage.byDay (fallback to undefined if unavailable)
-  const todayCostCents = useMemo(() => {
-    if (!usageByDayQuery.data || !Array.isArray(usageByDayQuery.data)) return undefined;
-    const today = new Date().toISOString().slice(0, 10);
-    const todayRow = usageByDayQuery.data.find((r: any) => r.date === today);
-    return todayRow?.costCents ?? 0;
-  }, [usageByDayQuery.data]);
 
   const [mainTab, setMainTab] = useState<MainTab>('dashboard');
   const [filterTab, setFilterTab] = useState('all');
@@ -1016,7 +1003,7 @@ export default function Dashboard() {
         {/* ── 仪表盘 Tab ── */}
         {mainTab === 'dashboard' && (
           <>
-            <div className="mb-4"><StatsRow agents={agentsWithWS} tasks={data.tasks} totalMsgs={data.msgStats.total} orgs={data.orgs.length} todayCostCents={todayCostCents} /></div>
+            <div className="mb-4"><StatsRow agents={stats.agents} tasks={stats.tasks} totalMsgs={stats.totalMsgs} orgs={stats.orgs} todayCostCents={stats.todayCostCents} /></div>
             {/* Filter + Actions */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-1">

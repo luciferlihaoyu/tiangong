@@ -18,6 +18,7 @@ import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { agents, messages } from "@db/schema";
 import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
+import mysql from "mysql2/promise";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -436,8 +437,7 @@ if (env.isProduction) {
 
   // Load MCP tokens from DB into global key set for API key verification
   try {
-    const mysql = await import("mysql2/promise");
-    const conn = await mysql.default.createConnection(process.env.DATABASE_URL!);
+    const conn = await mysql.createConnection(process.env.DATABASE_URL!);
     const [rows] = await conn.execute(
       "SELECT mcp_token FROM agents WHERE mcp_token IS NOT NULL AND mcp_token != ''"
     );

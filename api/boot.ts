@@ -5,7 +5,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { HttpBindings } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
-import { createContext } from "./middleware";
+import { createContext, _globalApiKeys } from "./middleware";
 import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
 import { verifyToken } from "./local-auth-router";
@@ -174,7 +174,6 @@ app.get("/api/admin/debug-keys", async (c) => {
   results.envMcpKeys = Object.keys(process.env).filter(k => k.startsWith("TIANGONG_") && k.endsWith("_MCP_KEY"));
   // Check global key set
   try {
-    const { _globalApiKeys } = await import("./middleware");
     results.globalKeyCount = _globalApiKeys.size;
     results.globalKeyPrefixes = Array.from(_globalApiKeys).map(k => k.slice(0, 10));
   } catch (e: any) {
@@ -450,7 +449,6 @@ if (env.isProduction) {
       .select({ mcpToken: agents.mcpToken })
       .from(agents)
       .where(and(isNotNull(agents.mcpToken), ne(agents.mcpToken, "")));
-    const { _globalApiKeys } = await import("./middleware");
     for (const row of rows) {
       if (row.mcpToken && row.mcpToken.trim()) _globalApiKeys.add(row.mcpToken.trim());
     }

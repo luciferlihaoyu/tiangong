@@ -1,19 +1,15 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
-import { getDb } from "./queries/connection";
-import { agents } from "@db/schema";
-import { eq, isNotNull, ne } from "drizzle-orm";
 
 // ─── API Key validation ───
-let _cachedApiKeys: Set<string> | null = null;
-let _cachedAt = 0;
-const CACHE_TTL_MS = 60_000;
+// Global token set populated by boot.ts on startup and refreshed periodically
+export const _globalApiKeys = new Set<string>();
 
-async function loadApiKeys(): Promise<Set<string>> {
-  const now = Date.now();
-  if (_cachedApiKeys && now - _cachedAt < CACHE_TTL_MS) return _cachedApiKeys;
+let _cachedEnvKeys: Set<string> | null = null;
 
+function loadEnvKeys(): Set<string> {
+  if (_cachedEnvKeys) return _cachedEnvKeys;
   const keys = new Set<string>();
 
   // 1. Fixed API key from env
@@ -40,30 +36,18 @@ async function loadApiKeys(): Promise<Set<string>> {
     // secrets file may not exist in all environments
   }
 
-  // 4. MCP tokens from database via Drizzle ORM (same connection as rest of app)
-  try {
-    const db = getDb();
-    const rows = await db
-      .select({ mcpToken: agents.mcpToken })
-      .from(agents)
-      .where(isNotNull(agents.mcpToken));
-    for (const row of rows) {
-      if (row.mcpToken && row.mcpToken.trim()) keys.add(row.mcpToken.trim());
-    }
-  } catch (e) {
-    // DB may not be ready yet
-    console.warn("loadApiKeys: DB read failed:", (e as Error).message?.slice(0, 100));
-  }
-
-  _cachedApiKeys = keys;
-  _cachedAt = now;
+  _cachedEnvKeys = keys;
   return keys;
 }
 
 async function verifyApiKey(headerValue: string | null): Promise<boolean> {
   if (!headerValue) return false;
-  const keys = await loadApiKeys();
-  return keys.has(headerValue.trim());
+  const val = headerValue.trim();
+  // Check env-based keys
+  if (loadEnvKeys().has(val)) return true;
+  // Check DB-based keys (populated by boot.ts)
+  if (_globalApiKeys.has(val)) return true;
+  return false;
 }
 
 // Context for each request

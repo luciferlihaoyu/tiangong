@@ -17,7 +17,7 @@ import { verifyMcpKey } from "./mcp/auth";
 import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { agents, messages } from "@db/schema";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -172,21 +172,18 @@ app.get("/api/admin/debug-keys", async (c) => {
   results.envDatabaseUrl = !!process.env.DATABASE_URL;
   results.envTiangongApiKey = !!process.env.TIANGONG_API_KEY;
   results.envMcpKeys = Object.keys(process.env).filter(k => k.startsWith("TIANGONG_") && k.endsWith("_MCP_KEY"));
-  // Try DB read via Drizzle
+  // Check global key set
   try {
-    const { getDb } = await import("./queries/connection");
-    const { agents } = await import("@db/schema");
-    const { isNotNull } = await import("drizzle-orm");
-    const db = getDb();
-    const rows = await db.select({ id: agents.id, name: agents.name, mcpToken: agents.mcpToken }).from(agents).where(isNotNull(agents.mcpToken));
-    results.dbTokens = rows.map((r: any) => ({ id: r.id, name: r.name, tokenPrefix: r.mcpToken?.slice(0, 10) }));
+    const { _globalApiKeys } = await import("./middleware");
+    results.globalKeyCount = _globalApiKeys.size;
+    results.globalKeyPrefixes = Array.from(_globalApiKeys).map(k => k.slice(0, 10));
   } catch (e: any) {
-    results.dbError = e.message;
+    results.globalKeyError = e.message;
   }
   // Check secrets file
   try {
-    const fs = await import("node:fs");
-    fs.readFileSync("/home/node/.openclaw/secrets/tiangong-openclaw-agents.json");
+    const { readFileSync: rfs } = await import("node:fs");
+    rfs("/home/node/.openclaw/secrets/tiangong-openclaw-agents.json");
     results.secretsFile = "exists";
   } catch {
     results.secretsFile = "not found";
@@ -444,6 +441,22 @@ if (env.isProduction) {
     await migrateV2();
   } catch (e: any) {
     console.warn("V2 migration failed:", e.message);
+  }
+
+  // Load MCP tokens from DB into global key set for API key verification
+  try {
+    const db = getDb();
+    const rows = await db
+      .select({ mcpToken: agents.mcpToken })
+      .from(agents)
+      .where(and(isNotNull(agents.mcpToken), ne(agents.mcpToken, "")));
+    const { _globalApiKeys } = await import("./middleware");
+    for (const row of rows) {
+      if (row.mcpToken && row.mcpToken.trim()) _globalApiKeys.add(row.mcpToken.trim());
+    }
+    console.log(`[Boot] Loaded ${_globalApiKeys.size} MCP tokens from DB`);
+  } catch (e: any) {
+    console.warn("[Boot] MCP token load from DB failed:", e.message);
   }
 
   // P5: Start Task Runner

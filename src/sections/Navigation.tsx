@@ -1,8 +1,10 @@
 import { useLocation, useNavigate } from 'react-router';
+import { useState, useCallback } from 'react';
 import { useTheme } from '@/hooks/useTheme';
 import { useVersion } from '@/hooks/useVersion';
 import { useAuth } from '@/hooks/useAuth';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   LayoutDashboard,
   BarChart3,
@@ -21,6 +23,7 @@ import {
   Settings,
   User,
   LogOut,
+  Menu,
 } from 'lucide-react';
 
 function SunIcon() {
@@ -95,11 +98,12 @@ const SIDEBAR_WIDTH = 220;
 const TOPBAR_HEIGHT = 48;
 
 /* ── TopBar ── */
-function TopBar() {
+function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const { data: version } = useVersion();
   const { user, isAuthenticated, logout } = useAuth();
+  const isMobile = useIsMobile();
 
   return (
     <header
@@ -112,8 +116,18 @@ function TopBar() {
         transition: 'background 0.5s ease',
       }}
     >
-      {/* Left: Logo */}
+      {/* Left: Hamburger (mobile) + Logo */}
       <div className="flex items-center gap-3">
+        {isMobile && (
+          <button
+            onClick={onMenuClick}
+            className="p-1.5 rounded hover:bg-[rgba(180,200,255,0.04)] transition-colors"
+            style={{ color: 'var(--text-primary)' }}
+            title="打开菜单"
+          >
+            <Menu size={18} />
+          </button>
+        )}
         <button onClick={() => navigate('/')} className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" title="返回首页">
           <div
             className="relative w-6 h-6 flex items-center justify-center rounded-sm"
@@ -186,10 +200,11 @@ function TopBar() {
 }
 
 /* ── Sidebar ── */
-function Sidebar() {
+function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { connected: wsConnected } = useWebSocket();
+  const isMobile = useIsMobile();
 
   const isActive = (path: string) => {
     if (path === '/') {
@@ -198,93 +213,123 @@ function Sidebar() {
     return location.pathname === path;
   };
 
-  return (
-    <aside
-      className="fixed left-0 z-40 flex flex-col"
-      style={{
-        top: TOPBAR_HEIGHT,
-        width: SIDEBAR_WIDTH,
-        bottom: 0,
-        background: 'rgba(5, 5, 8, 0.95)',
-        borderRight: '1px solid var(--border-default)',
-        backdropFilter: 'blur(12px)',
-      }}
-    >
-      {/* Navigation Groups */}
-      <nav className="flex-1 overflow-y-auto custom-scrollbar py-3 px-2">
-        {navGroups.map((group) => (
-          <div key={group.title} className="mb-4">
-            <div
-              className="px-3 py-1.5 text-[10px] font-mono font-extrabold tracking-[0.15em] uppercase"
-              style={{ color: 'rgba(255,255,255,0.7)' }}
-            >
-              {group.title}
-            </div>
-            <div className="flex flex-col gap-0.5">
-              {group.items.map((item) => {
-                const active = isActive(item.path);
-                return (
-                  <button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-semibold transition-all text-left"
-                    style={{
-                      background: active ? 'var(--accent-glow-red)' : 'transparent',
-                      color: active ? 'var(--accent-red-bright)' : '#ffffff',
-                      borderLeft: active ? '2px solid var(--accent-red)' : '2px solid transparent',
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: active ? 'var(--accent-red-bright)' : 'rgba(255,255,255,0.6)',
-                      }}
-                    >
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
-                    {active && (
-                      <span className="ml-auto w-1 h-1 rounded-full" style={{ background: 'var(--accent-red)' }} />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </nav>
+  const handleNavClick = (path: string) => {
+    navigate(path);
+    if (isMobile) {
+      onClose();
+    }
+  };
 
-      {/* Bottom Status */}
-      <div
-        className="px-3 py-2.5 flex items-center gap-2"
+  return (
+    <>
+      {/* Mobile overlay */}
+      {isMobile && isOpen && (
+        <div
+          className="fixed inset-0 z-[35] bg-black/60"
+          onClick={onClose}
+          style={{ top: TOPBAR_HEIGHT }}
+        />
+      )}
+      <aside
+        className={[
+          'fixed left-0 z-40 flex flex-col transition-transform duration-300 ease-in-out',
+          isMobile
+            ? isOpen
+              ? 'translate-x-0'
+              : '-translate-x-full'
+            : 'md:translate-x-0',
+        ].join(' ')}
         style={{
-          borderTop: '1px solid var(--border-default)',
+          top: TOPBAR_HEIGHT,
+          width: SIDEBAR_WIDTH,
+          bottom: 0,
+          background: 'rgba(5, 5, 8, 0.95)',
+          borderRight: '1px solid var(--border-default)',
+          backdropFilter: 'blur(12px)',
         }}
       >
-        <span
-          className="w-2 h-2 rounded-full flex-shrink-0"
+        {/* Navigation Groups */}
+        <nav className="flex-1 overflow-y-auto custom-scrollbar py-3 px-2">
+          {navGroups.map((group) => (
+            <div key={group.title} className="mb-4">
+              <div
+                className="px-3 py-1.5 text-[10px] font-mono font-extrabold tracking-[0.15em] uppercase"
+                style={{ color: 'rgba(255,255,255,0.7)' }}
+              >
+                {group.title}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {group.items.map((item) => {
+                  const active = isActive(item.path);
+                  return (
+                    <button
+                      key={item.path}
+                      onClick={() => handleNavClick(item.path)}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded text-xs font-semibold transition-all text-left"
+                      style={{
+                        background: active ? 'var(--accent-glow-red)' : 'transparent',
+                        color: active ? 'var(--accent-red-bright)' : '#ffffff',
+                        borderLeft: active ? '2px solid var(--accent-red)' : '2px solid transparent',
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: active ? 'var(--accent-red-bright)' : 'rgba(255,255,255,0.6)',
+                        }}
+                      >
+                        {item.icon}
+                      </span>
+                      <span>{item.label}</span>
+                      {active && (
+                        <span className="ml-auto w-1 h-1 rounded-full" style={{ background: 'var(--accent-red)' }} />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        {/* Bottom Status */}
+        <div
+          className="px-3 py-2.5 flex items-center gap-2"
           style={{
-            background: wsConnected ? 'var(--success)' : 'var(--accent-red)',
-            boxShadow: wsConnected ? '0 0 6px var(--success)' : '0 0 6px var(--accent-red)',
+            borderTop: '1px solid var(--border-default)',
           }}
-        />
-        <span className="text-[10px] font-bold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
-          {wsConnected ? '系统在线' : '连接断开'}
-        </span>
-      </div>
-    </aside>
+        >
+          <span
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{
+              background: wsConnected ? 'var(--success)' : 'var(--accent-red)',
+              boxShadow: wsConnected ? '0 0 6px var(--success)' : '0 0 6px var(--accent-red)',
+            }}
+          />
+          <span className="text-[10px] font-bold font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
+            {wsConnected ? '系统在线' : '连接断开'}
+          </span>
+        </div>
+      </aside>
+    </>
   );
 }
 
 /* ── Layout Export ── */
 export function AppLayout({ children }: { children: React.ReactNode }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isMobile = useIsMobile();
+
+  const toggleMenu = useCallback(() => setMobileMenuOpen((v) => !v), []);
+  const closeMenu = useCallback(() => setMobileMenuOpen(false), []);
+
   return (
     <div className="relative min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <TopBar />
-      <Sidebar />
+      <TopBar onMenuClick={toggleMenu} />
+      <Sidebar isOpen={mobileMenuOpen} onClose={closeMenu} />
       <main
         className="relative"
         style={{
-          marginLeft: SIDEBAR_WIDTH,
+          marginLeft: isMobile ? 0 : SIDEBAR_WIDTH,
           paddingTop: TOPBAR_HEIGHT,
           minHeight: '100vh',
         }}

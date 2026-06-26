@@ -3,6 +3,7 @@ import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, modelAllowlist, type AgentCard } from "@db/schema";
 import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 
 export const agentRouter = createRouter({
   list: publicQuery.query(async () => {
@@ -192,11 +193,15 @@ export const agentRouter = createRouter({
     }),
 
   /**
-   * 任务认领 — 查找可认领的 queued 任务并认领
+   * 任务认领 — 查找可认领的 queued 任务并认领（仅限 connector / MCP Key）
    */
   claimTask: publicQuery
     .input(z.object({ agentId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.apiKeyAgentId === null) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "任务认领需要有效的 MCP Key" });
+      }
+
       const db = getDb();
 
       // 1. 查询 Agent 信息
@@ -278,7 +283,11 @@ export const agentRouter = createRouter({
 
   updateHeartbeat: publicQuery
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.apiKeyAgentId === null) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "心跳更新需要有效的 MCP Key" });
+      }
+
       const db = getDb();
 
       // 1. 更新心跳

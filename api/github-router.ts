@@ -479,7 +479,7 @@ export const githubRouter = createRouter({
     .input(z.object({ prId: z.number(), reason: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const pr = await db
         .select()
@@ -550,7 +550,7 @@ export const githubRouter = createRouter({
     .input(z.object({ prId: z.number(), reason: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const userId = ctx.user.id;
+      const userId = ctx.user!.id;
 
       const pr = await db
         .select()

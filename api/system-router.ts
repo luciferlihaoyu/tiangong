@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { systems } from "@db/schema";
 import { eq } from "drizzle-orm";
@@ -10,7 +10,7 @@ export const systemRouter = createRouter({
     return db.select().from(systems).orderBy(systems.name);
   }),
 
-  updateStatus: publicQuery
+  updateStatus: adminQuery
     .input(
       z.object({
         id: z.number(),

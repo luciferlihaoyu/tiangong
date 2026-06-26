@@ -19,7 +19,12 @@ export function serveStaticFiles(app: App) {
     await next();
     // Add CORS header for module scripts with crossorigin="anonymous"
     // Without this, browsers refuse to execute the script
-    c.res.headers.set("Access-Control-Allow-Origin", "*");
+    const origin = c.req.header("origin");
+    const allowed = ["https://tiangg.zeabur.app", "http://localhost:5173", "http://localhost:3000"];
+    if (origin && allowed.includes(origin)) {
+      c.res.headers.set("Access-Control-Allow-Origin", origin);
+      c.res.headers.set("Vary", "Origin");
+    }
   });
 
   app.use("*", serveStatic({

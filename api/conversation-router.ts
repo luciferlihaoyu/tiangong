@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { conversations, messages } from "@db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
@@ -24,7 +24,7 @@ export const conversationRouter = createRouter({
         .orderBy(asc(messages.createdAt)).limit(500);
       return { ...conv[0], messages: msgs };
     }),
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       title: z.string().min(1).max(255),
       type: z.enum(["mission", "meeting", "test", "ad_hoc"]).default("ad_hoc"),
@@ -42,7 +42,7 @@ export const conversationRouter = createRouter({
       const latest = await db.select({ id: conversations.id }).from(conversations).orderBy(desc(conversations.id)).limit(1);
       return { id: latest[0]?.id ?? null };
     }),
-  update: publicQuery
+  update: authedQuery
     .input(z.object({ id: z.number(), title: z.string().optional(), summary: z.string().optional(), participants: z.array(z.number()).optional() }))
     .mutation(async ({ input }) => {
       const db = getDb(); const { id, ...data } = input;
@@ -53,21 +53,21 @@ export const conversationRouter = createRouter({
       await db.update(conversations).set(setData).where(eq(conversations.id, id));
       return { success: true };
     }),
-  archive: publicQuery
+  archive: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
       await db.update(conversations).set({ status: "archived", archivedAt: new Date() }).where(eq(conversations.id, input.id));
       return { success: true };
     }),
-  unarchive: publicQuery
+  unarchive: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
       await db.update(conversations).set({ status: "active", archivedAt: null }).where(eq(conversations.id, input.id));
       return { success: true };
     }),
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -84,7 +84,7 @@ export const conversationRouter = createRouter({
   }),
 
   /** 将任务输出追加到记事板 */
-  appendTaskOutput: publicQuery
+  appendTaskOutput: authedQuery
     .input(z.object({
       conversationId: z.number(),
       fromAgentId: z.number(),

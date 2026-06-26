@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, messages, taskDependencies, tasks } from "@db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
@@ -175,7 +175,7 @@ function statusCounts(taskRows: TaskRow[]) {
 }
 
 export const collaborationRouter = createRouter({
-  delegate: publicQuery
+  delegate: authedQuery
     .input(z.object({
       parentTaskId: z.number(),
       coordinatorAgentId: z.number(),

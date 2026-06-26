@@ -23,10 +23,12 @@ function checkLoginRate(ip: string): boolean {
   return true;
 }
 
-// JWT secret from APP_SECRET env
-const SECRET = new TextEncoder().encode(
-  process.env.APP_SECRET || "tiangong-default-secret-key-change-me"
-);
+// JWT secret from APP_SECRET env — 禁止默认值，防止伪造
+const APP_SECRET = process.env.APP_SECRET;
+if (!APP_SECRET) {
+  throw new Error("APP_SECRET 环境变量未设置，拒绝启动。请在 Zeabur 环境变量中配置。");
+}
+const SECRET = new TextEncoder().encode(APP_SECRET);
 
 async function createToken(userId: number, role: string): Promise<string> {
   return new SignJWT({ sub: String(userId), role })
@@ -62,7 +64,7 @@ export const localAuthRouter = createRouter({
         password: z.string().min(1).max(100),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const { username, password } = input;
 

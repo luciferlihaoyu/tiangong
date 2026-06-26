@@ -7,7 +7,7 @@ import { wsManager } from "./ws-manager";
 
 export const sessionRouter = createRouter({
   // ─── 会话 CRUD ───
-  list: publicQuery
+  list: authedQuery
     .input(z.object({ status: z.enum(["active", "archived"]).optional() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -15,7 +15,7 @@ export const sessionRouter = createRouter({
       return db.select().from(sharedSessions).where(where).orderBy(desc(sharedSessions.updatedAt));
     }),
 
-  getById: publicQuery
+  getById: authedQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -94,7 +94,7 @@ export const sessionRouter = createRouter({
       return { success: true, messageId: msgId };
     }),
 
-  getMessages: publicQuery
+  getMessages: authedQuery
     .input(z.object({ sessionId: z.number(), limit: z.number().default(50), before: z.number().optional() }))
     .query(async ({ input }) => {
       const db = getDb();

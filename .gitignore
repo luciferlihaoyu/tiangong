@@ -6,6 +6,9 @@ dist/
 jiti/
 feishu_write.json
 openclaw-git-backup
+secrets/
+*.secret
+.tiangong-env
 
 # Build generated files
 api/commit.ts

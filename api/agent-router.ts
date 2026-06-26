@@ -127,6 +127,7 @@ export const agentRouter = createRouter({
         openclawAgent: z.string().max(100).optional(),
         canModifyTiangongCore: z.boolean().optional(),
         canSendExternalMessage: z.boolean().optional(),
+        mcpToken: z.string().max(100).optional(),
       })
     )
     .mutation(async ({ input }) => {

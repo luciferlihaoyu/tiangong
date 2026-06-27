@@ -353,23 +353,6 @@ function TaskCard({
 }
 
 /** 任务详情抽屉 */
-/** 生命周期阶段标签配置 */
-const LIFECYCLE_LABELS: Record<string, string> = {
-  created: "已创建",
-  queued: "已排队",
-  dispatched: "已投递",
-  claimed: "已认领",
-  accepted: "已接受",
-  working: "工作中",
-  awaiting_result: "等待结果",
-  submitted: "已提交",
-  reviewing: "审核中",
-  completed: "已完成",
-  failed: "失败",
-  timeout: "超时",
-  cancelled: "已取消",
-};
-
 function TaskDetailDrawer({
   task,
   agents,

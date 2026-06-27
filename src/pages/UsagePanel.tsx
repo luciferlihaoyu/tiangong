@@ -42,20 +42,17 @@ function fmtTokens(n: number, mode: DisplayMode = "m"): string {
   return String(n);
 }
 
-function fmtCost(cents: number, currency: Currency, mode: DisplayMode = "m"): string {
+function fmtCost(cents: number, currency: Currency): string {
   const usd = cents / 100;
   if (currency === "CNY") {
     const cny = usd * EXCHANGE_RATE;
-    if (mode === "raw") return `¥${cny.toFixed(6)}`;
     return `¥${cny.toFixed(2)}`;
   }
-  if (mode === "raw") return `$${usd.toFixed(6)}`;
   if (cents >= 100) return `$${usd.toFixed(2)}`;
   return `${cents}¢`;
 }
 
-function fmtUsd(usd: number, mode: DisplayMode = "m"): string {
-  if (mode === "raw") return `$${usd.toFixed(6)}`;
+function fmtUsd(usd: number): string {
   if (usd >= 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(4)}`;
 }
@@ -92,9 +89,9 @@ function BudgetBar({ byDay, currency, displayMode }: { byDay: any[]; currency: C
           月度预算 · MONTHLY BUDGET
         </div>
         <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-          {fmtCost(monthCost, currency, displayMode)} / {fmtCost(BUDGET_CENTS, currency, displayMode)}
-          {currency === "USD" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "CNY", displayMode)} / {fmtCost(BUDGET_CENTS, "CNY", displayMode)})</span>}
-          {currency === "CNY" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "USD", displayMode)} / {fmtCost(BUDGET_CENTS, "USD", displayMode)})</span>}
+          {fmtCost(monthCost, currency)} / {fmtCost(BUDGET_CENTS, currency)}
+          {currency === "USD" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "CNY")} / {fmtCost(BUDGET_CENTS, "CNY")})</span>}
+          {currency === "CNY" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "USD")} / {fmtCost(BUDGET_CENTS, "USD")})</span>}
         </div>
       </div>
       <div className="w-full rounded-full overflow-hidden mb-2" style={{ height: "6px", background: "rgba(255,255,255,0.05)" }}>
@@ -105,15 +102,15 @@ function BudgetBar({ byDay, currency, displayMode }: { byDay: any[]; currency: C
       </div>
       <div className="flex items-center justify-between text-[10px] font-mono">
         <span style={{ color: "var(--text-muted)" }}>
-          剩余 {fmtCost(remaining, currency, displayMode)}
-          {currency === "USD" && <span className="ml-1">({fmtCost(remaining, "CNY", displayMode)})</span>}
-          {currency === "CNY" && <span className="ml-1">({fmtCost(remaining, "USD", displayMode)})</span>}
+          剩余 {fmtCost(remaining, currency)}
+          {currency === "USD" && <span className="ml-1">({fmtCost(remaining, "CNY")})</span>}
+          {currency === "CNY" && <span className="ml-1">({fmtCost(remaining, "USD")})</span>}
         </span>
         {projected > 0 && (
           <span style={{ color: progress >= 100 ? "var(--accent-red)" : "var(--text-muted)" }}>
-            预计月底 {fmtCost(projected, currency, displayMode)}
-            {currency === "USD" && <span className="ml-1">({fmtCost(projected, "CNY", displayMode)})</span>}
-            {currency === "CNY" && <span className="ml-1">({fmtCost(projected, "USD", displayMode)})</span>}
+            预计月底 {fmtCost(projected, currency)}
+            {currency === "USD" && <span className="ml-1">({fmtCost(projected, "CNY")})</span>}
+            {currency === "CNY" && <span className="ml-1">({fmtCost(projected, "USD")})</span>}
           </span>
         )}
       </div>
@@ -150,8 +147,8 @@ function OverviewCards({
   const cards = [
     {
       label: currency === "CNY" ? "总花费 (CNY)" : "总花费 (USD)",
-      value: currency === "CNY" ? fmtCny(costUsd) : fmtUsd(costUsd, displayMode),
-      sub: currency === "CNY" ? fmtUsd(costUsd, displayMode) : fmtCny(costUsd),
+      value: currency === "CNY" ? fmtCny(costUsd) : fmtUsd(costUsd),
+      sub: currency === "CNY" ? fmtUsd(costUsd) : fmtCny(costUsd),
       color: "var(--accent-gold)",
       icon: <DollarSign size={16} />,
     },
@@ -169,7 +166,7 @@ function OverviewCards({
     },
     {
       label: "缓存节省",
-      value: fmtUsd(savedUsd, displayMode),
+      value: fmtUsd(savedUsd),
       sub: fmtCny(savedUsd),
       color: "var(--warning)",
       icon: <ShieldCheck size={16} />,
@@ -226,7 +223,7 @@ function ModelTable({ byModel, loading, currency, displayMode }: { byModel: any[
               <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtTokens(m.completionTokens, displayMode)}</td>
               <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(m.totalTokens, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{m.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents, currency, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(m.costCents, currency)}</td>
               <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(m.cachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3">
                 <div className="flex items-center gap-2">
@@ -271,7 +268,7 @@ function AgentTable({ byAgent, loading, currency, displayMode }: { byAgent: any[
               <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(a.cachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{fmtTokens(a.uncachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{a.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(a.costCents, currency, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(a.costCents, currency)}</td>
             </tr>
           ))}
         </tbody>
@@ -303,7 +300,7 @@ function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAge
               <td className="py-2 px-3 font-bold" style={{ color: "var(--accent-cyan)" }}>{fmtTokens(row.totalTokens, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtTokens(row.cachedPromptTokens ?? 0, displayMode)}</td>
               <td className="py-2 px-3" style={{ color: "var(--text-secondary)" }}>{row.callCount}</td>
-              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(row.costCents, currency, displayMode)}</td>
+              <td className="py-2 px-3" style={{ color: "var(--accent-gold)" }}>{fmtCost(row.costCents, currency)}</td>
             </tr>
           ))}
         </tbody>
@@ -360,7 +357,7 @@ function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: any; loa
         <div className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
           <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>缓存节省估算</div>
           <div className="text-xl font-bold font-mono" style={{ color: "var(--accent-gold)" }}>
-            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000, displayMode)}
+            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000)}
           </div>
           <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
             基于平均输入价差
@@ -437,7 +434,7 @@ function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; l
             {byDay.slice().reverse().map((d, i) => (
               <div key={i} className="flex-1 group relative">
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap pointer-events-none z-10" style={{ color: "var(--accent-gold)" }}>
-                  {fmtCost(d.costCents ?? 0, currency, displayMode)}
+                  {fmtCost(d.costCents ?? 0, currency)}
                 </div>
               </div>
             ))}
@@ -454,7 +451,7 @@ function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; l
               return (
                 <div key={i} className="flex-1 flex flex-col items-center group relative" style={{ minWidth: "20px" }}>
                   <div className="absolute -top-4 text-[9px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap" style={{ color: "var(--accent-gold)" }}>
-                    {fmtCost(d.costCents ?? 0, currency, displayMode)}
+                    {fmtCost(d.costCents ?? 0, currency)}
                   </div>
                   <div
                     className="w-full rounded-t"
@@ -511,7 +508,7 @@ function RecordList({ records, loading, currency, displayMode }: { records: any[
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
                 {r.promptTokens}+{r.completionTokens}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents, currency, displayMode)}</span>
+              <span className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(r.costCents, currency)}</span>
               {r.sessionKey && (
                 <span className="text-[9px] font-mono truncate max-w-24" style={{ color: "var(--text-muted)" }} title={r.sessionKey}>{r.sessionKey.split(":").pop()}</span>
               )}
@@ -805,7 +802,7 @@ export default function UsagePanel() {
                       <div className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{fmtTokens(s.totalTokens, displayMode)} tok</div>
                       <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{s.callCount} 次</div>
                       {s.costCents > 0 && (
-                        <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents, currency, displayMode)}</div>
+                        <div className="text-[10px] font-mono" style={{ color: "var(--accent-gold)" }}>{fmtCost(s.costCents, currency)}</div>
                       )}
                     </div>
                   ))}

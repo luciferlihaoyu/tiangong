@@ -588,8 +588,21 @@ function buildTaskPrompt(cfg, task) {
     lines.push(`Input: ${task.input}`);
   }
   lines.push(``);
-  lines.push(`Please execute this task and return a concise result.`);
-  lines.push(`The output will be written back to Tiangong as the task result.`);
+  lines.push(`Please execute this task thoroughly and return a concise result.`);
+  lines.push(``);
+  lines.push(`=== Result Reporting ===`);
+  lines.push(`After completing the task, you MUST call the Tiangong API to report your result:`);
+  lines.push(``);
+  lines.push(`POST ${cfg.httpBase}/api/trpc/task.updateProgress`);
+  lines.push(`Headers: { "content-type": "application/json", "x-mcp-key": "${cfg.token}" }`);
+  lines.push(`Body: { "0": { "json": { "id": ${task.id}, "progress": 100, "status": "done", "lifecycleStatus": "completed", "output": "[your execution result]" } } }`);
+  lines.push(``);
+  lines.push(`Also report usage via:`);
+  lines.push(`POST ${cfg.httpBase}/api/trpc/usage.record`);
+  lines.push(`Headers: { "content-type": "application/json", "x-mcp-key": "${cfg.token}" }`);
+  lines.push(`Body: { "0": { "json": { "model": "...", "promptTokens": N, "completionTokens": N, "totalTokens": N, "callCount": 1, "agentId": ${cfg.agentId}, "source": "agent" } } }`);
+  lines.push(``);
+  lines.push(`⚠️ If you cannot call the API, just return the result here — the system will pick it up.`);
   return lines.join("\n");
 }
 
@@ -726,6 +739,7 @@ function executeCommand(cfg, task, prompt) {
     childEnv.TIANGONG_AGENT_ID = String(cfg.agentId || "0");
     childEnv.TIANGONG_HTTP_BASE = cfg.httpBase || childEnv.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
     childEnv.TIANGONG_CHEAP_MODEL = selectModelForTask(cfg, task) || cfg.cheapModel || "deepseek-official/deepseek-v4-flash";
+    childEnv.TIANGONG_TASK_ID = String(task.id || "0");
 
     // P9.1: Apply cost guard — use cheap model for recurring tasks
     let effectiveArgs = cfg.execArgs;

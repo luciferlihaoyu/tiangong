@@ -353,6 +353,23 @@ function TaskCard({
 }
 
 /** 任务详情抽屉 */
+/** 生命周期阶段标签配置 */
+const LIFECYCLE_LABELS: Record<string, string> = {
+  created: "已创建",
+  queued: "已排队",
+  dispatched: "已投递",
+  claimed: "已认领",
+  accepted: "已接受",
+  working: "工作中",
+  awaiting_result: "等待结果",
+  submitted: "已提交",
+  reviewing: "审核中",
+  completed: "已完成",
+  failed: "失败",
+  timeout: "超时",
+  cancelled: "已取消",
+};
+
 function TaskDetailDrawer({
   task,
   agents,
@@ -369,6 +386,57 @@ function TaskDetailDrawer({
   const utils = trpc.useUtils();
   const agent = agents.find((a) => a.id === task.agentId);
   const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
+
+  // 加载完整任务详情（含 threadMessages、artifacts、timeLine）
+  const detailQuery = trpc.task.getById.useQuery(
+    { id: task.id },
+    { enabled: open, retry: 1, staleTime: 10000 }
+  );
+  const detailData = detailQuery.data as TaskDetailData | null | undefined;
+  const threadMessages = (detailData?.threadMessages || []) as ThreadMessageData[];
+  const artifacts = (detailData?.artifacts || []) as TaskArtifactData[];
+
+  type ThreadMessageData = {
+    id: number;
+    taskId: number;
+    fromAgentId: number | null;
+    toAgentId: number | null;
+    eventType: string;
+    content: string | null;
+    createdAt: string;
+  };
+
+  type TaskArtifactData = {
+    id: number;
+    taskId: number;
+    agentId: number | null;
+    type: string;
+    name: string | null;
+    content: string | null;
+    createdAt: string;
+  };
+
+  type TaskDetailData = {
+    id: number;
+    taskId: string;
+    name: string;
+    agentId: number | null;
+    status: string;
+    lifecycleStatus: string | null;
+    progress: number;
+    description: string | null;
+    priority: number;
+    input: string | null;
+    output: string | null;
+    error: string | null;
+    retryCount: number;
+    maxRetries: number;
+    parentTaskId: number | null;
+    createdAt: string;
+    updatedAt: string;
+    threadMessages: ThreadMessageData[];
+    artifacts: TaskArtifactData[];
+  };
 
   // 状态更新 mutation
   const statusMutation = trpc.orch.updateStatus.useMutation({
@@ -746,6 +814,100 @@ function TaskDetailDrawer({
               <span style={{ color: "var(--text-secondary)" }}>更新:</span> {fmtTime(task.updatedAt)}
             </div>
           </div>
+
+          {/* 生命周期时间线 */}
+          {threadMessages.length > 0 && (
+            <div className="mt-4">
+              <div className="section-label mb-2">
+                <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <Clock size={11} /> 生命周期 · TIMELINE
+                </span>
+              </div>
+              <div className="glass-panel p-3 sci-border">
+                <div className="relative">
+                  {threadMessages.map((msg, i) => (
+                    <div key={msg.id} className="flex gap-3 pb-2 last:pb-0">
+                      <div className="flex flex-col items-center">
+                        <div
+                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1"
+                          style={{
+                            background:
+                              msg.eventType === "submitted" || msg.eventType === "approved"
+                                ? "var(--success)"
+                                : msg.eventType === "failed"
+                                  ? "var(--accent-red)"
+                                  : "var(--accent-cyan)",
+                          }}
+                        />
+                        {i < threadMessages.length - 1 && (
+                          <div className="w-px h-full" style={{ background: "var(--border-default)" }} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>
+                            {msg.eventType}
+                          </span>
+                          <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                            {fmtTime(msg.createdAt)}
+                          </span>
+                          {msg.fromAgentId && (
+                            <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                              Agent#{msg.fromAgentId}
+                            </span>
+                          )}
+                        </div>
+                        {msg.content && (
+                          <div
+                            className="text-[10px] mt-0.5 leading-relaxed whitespace-pre-wrap"
+                            style={{ color: "var(--text-secondary)" }}
+                          >
+                            {msg.content.length > 200 ? msg.content.slice(0, 200) + "..." : msg.content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 工件列表 */}
+          {artifacts.length > 0 && (
+            <div className="mt-4">
+              <div className="section-label mb-2">
+                <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <FileText size={11} /> 工件 · ARTIFACTS
+                </span>
+              </div>
+              <div className="glass-panel p-3 sci-border text-xs font-mono space-y-2">
+                {artifacts.map((art) => (
+                  <div key={art.id} className="p-2 rounded" style={{ background: "var(--bg-tertiary)" }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold" style={{ color: "var(--text-primary)" }}>
+                        {art.name || `Artifact#${art.id}`}
+                      </span>
+                      <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                        {art.type}
+                      </span>
+                      <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                        {fmtTime(art.createdAt)}
+                      </span>
+                    </div>
+                    {art.content && (
+                      <div
+                        className="text-[9px] leading-relaxed whitespace-pre-wrap max-h-24 overflow-y-auto"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        {art.content.length > 300 ? art.content.slice(0, 300) + "..." : art.content}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

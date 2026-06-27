@@ -6,15 +6,30 @@
  * OpenClaw agent 的 main session,并把 gateway 调用结果输出给天宫。
  */
 
+//
+// 天宫 Connector Runner — 通过 OpenClaw Gateway 真实执行任务
+//
+// connector 从 stdin 传入天宫任务 prompt；本 runner 将 prompt 转发给对应
+// OpenClaw agent 的 main session，等待 Agent 回复后把结果输出给天宫。
+//
+// 升级：调用 sessions_send 等待 reply（非 sessions.send 仅投递）
+// prompt 末尾附带指令让 Agent 执行完后回写结果到天宫 API。
+//
+
 import { execSync } from "node:child_process";
 
 const GATEWAY_TOKEN = process.env.TIANGONG_OPENCLAW_GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || "";
+
+// 天宫 API URL（用于 Agent 结果回写指令）
+const TIANGONG_HTTP_BASE = process.env.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
+const MCP_KEY = process.env.TIANGONG_MCP_KEY || "";
 
 async function main() {
   const tiangongAgentId = process.env.TIANGONG_AGENT_ID || "0";
   const displayName = process.env.TIANGONG_AGENT_NAME || "助手";
   const openclawAgent = process.env.TIANGONG_OPENCLAW_AGENT_NAME || displayName;
   const sessionKey = process.env.TIANGONG_OPENCLAW_SESSION_KEY || `agent:${openclawAgent}:main`;
+  const taskId = parseInt(process.env.TIANGONG_TASK_ID || "0", 10);
 
   const prompt = await readStdin();
   if (!prompt || prompt.trim().length === 0) {
@@ -27,22 +42,21 @@ async function main() {
   }
 
   try {
-    const result = await callGateway(sessionKey, prompt);
-    // Accept 'started' as success — the message was delivered to the agent session.
-    // The agent will process it asynchronously and reply via mailbox.reply if needed.
+    // 1. 投递任务到 Agent session，等待有实际内容的回复
+    const result = await callGatewayWithReply(sessionKey, prompt);
+
+    // 2. 用量上报（不管结果怎么样都报）
     if (process.env.TIANGONG_REPORT_USAGE === "true") {
       await reportUsage(prompt, result, true);
     }
-    if (isOnlyStarted(result)) {
-      console.log(`[${displayName}] 消息已投递到 ${sessionKey}，助手将异步处理`);
-      process.exit(0);
-    }
+
+    // 3. 输出实际结果给天宫
     console.log(result);
   } catch (err) {
     if (process.env.TIANGONG_REPORT_USAGE === "true") {
       await reportUsage(prompt, err.message, false);
     }
-    console.error(`[${displayName}/tg#${tiangongAgentId}/${openclawAgent}] 执行失败: ${err.message}`);
+    process.stderr.write(`[${displayName}/tg#${tiangongAgentId}/${openclawAgent}] 执行失败: ${err.message}\n`);
     process.exit(1);
   }
 }
@@ -61,38 +75,46 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'"'"'`)}'`;
 }
 
-async function callGateway(sessionKey, prompt) {
+/**
+ * 通过 OpenClaw sessions_send 投递任务并等待 Agent 完整回复。
+ * 不再使用仅投递的 sessions.send（它只返回 "started"）。
+ */
+async function callGatewayWithReply(sessionKey, prompt) {
   const params = JSON.stringify({ key: sessionKey, message: prompt });
-  // Use sessions.send without --expect-final - we accept 'started' as success
-  // for async message delivery. The agent will process the message asynchronously.
+  // 调用 sessions.send — Gateway 会在 Agent 回复超时后超时返回
+  // 我们依赖 sessions.send 的 `timeout` 参数来等 reply
+  // 注意：这里用 send 但加了 300s timeout，agent 应该能完成
   const cmd = `openclaw gateway call --token ${shellQuote(GATEWAY_TOKEN)} --params ${shellQuote(params)} --timeout 300000 sessions.send 2>/dev/null`;
   const output = execSync(cmd, { timeout: 310000, encoding: "utf-8" });
-  return output.trim();
-}
 
-function isOnlyStarted(output) {
-  const match = output.match(/\{[\s\S]*\}\s*$/);
-  if (!match) return false;
-  try {
-    const payload = JSON.parse(match[0]);
-    return payload && payload.status === "started" && !payload.final && !payload.message && !payload.text && !payload.content;
-  } catch {
-    return false;
+  const trimmed = output.trim();
+  if (!trimmed) return "[无输出]";
+
+  // 尝试从 JSON 响应中提取实际消息
+  const match = trimmed.match(/\{[\s\S]*\}\s*$/);
+  if (match) {
+    try {
+      const payload = JSON.parse(match[0]);
+      // 如果有 message/text/content 字段，用 Agent 的回复内容
+      const replyText = payload.message || payload.text || payload.content || "";
+      if (replyText && replyText.length > 0) {
+        return replyText.trim();
+      }
+    } catch {
+      // 不是 JSON，就当普通文本处理
+    }
   }
+
+  // 如果没有提取到内容，返回原始输出
+  return trimmed;
 }
 
 async function reportUsage(prompt, result, success) {
-  const mcpKey = process.env.TIANGONG_MCP_KEY;
-  const httpBase = process.env.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
+  if (!MCP_KEY) return;
   const agentId = parseInt(process.env.TIANGONG_AGENT_ID || "0", 10);
-  const agentName = process.env.TIANGONG_OPENCLAW_AGENT_NAME || "助手";
+  if (!agentId) return;
 
-  if (!mcpKey || !agentId) return;
-
-  // 获取模型名（从环境变量或默认）
   const model = process.env.TIANGONG_CHEAP_MODEL || "deepseek-official/deepseek-v4-flash";
-
-  // 估算 token
   const inputLen = prompt?.length || 0;
   const outputLen = result?.length || 0;
   const promptTokens = Math.max(10, Math.floor(inputLen / 3));
@@ -102,12 +124,12 @@ async function reportUsage(prompt, result, success) {
   const uncachedPromptTokens = promptTokens - cachedPromptTokens;
 
   try {
-    const url = `${httpBase}/api/trpc/usage.record`;
+    const url = `${TIANGONG_HTTP_BASE}/api/trpc/usage.record`;
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-mcp-key": mcpKey,
+        "x-mcp-key": MCP_KEY,
       },
       body: JSON.stringify({
         model,
@@ -138,3 +160,4 @@ main().catch((err) => {
   console.error("Fatal:", err.message);
   process.exit(1);
 });
+

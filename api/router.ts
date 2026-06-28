@@ -23,6 +23,7 @@ import { memoryRouter } from "./memory-router";
 import { externalAgentRouter } from "./external-agent-router";
 import { createRouter, publicQuery } from "./middleware";
 
+import { executionRouter } from "./execution-router";
 import { dagRouter } from "./dag-router";
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),

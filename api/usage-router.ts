@@ -413,4 +413,52 @@ export const usageRouter = createRouter({
         byAgent,
       };
     }),
+
+  /**
+   * P4: 每日成本汇总
+   */
+  dailySummary: publicQuery
+    .query(async () => {
+      const db = getDb();
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      const rows = await db
+        .select({
+          costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
+          callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
+        })
+        .from(tokenUsage)
+        .where(and(gte(tokenUsage.createdAt, start), lte(tokenUsage.createdAt, end)));
+
+      return rows[0] ?? { costCents: 0, totalTokens: 0, callCount: 0 };
+    }),
+
+  /**
+   * P4: 成本告警检查
+   */
+  alertCheck: publicQuery
+    .query(async () => {
+      const db = getDb();
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+      const rows = await db
+        .select({
+          costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+        })
+        .from(tokenUsage)
+        .where(and(gte(tokenUsage.createdAt, start), lte(tokenUsage.createdAt, end)));
+
+      const costCents = rows[0]?.costCents ?? 0;
+      const threshold = 1000;
+
+      if (costCents > threshold) {
+        return { alert: true, costCents, threshold };
+      }
+      return { alert: false };
+    }),
 });

@@ -10,6 +10,7 @@ import {
   BarChart3,
   Radio,
   Bot,
+  Users,
   ClipboardList,
   Layout,
   GitBranch,
@@ -69,7 +70,8 @@ const navGroups: NavGroup[] = [
   {
     title: '管理',
     items: [
-      { path: '/task-center', label: 'Agent', icon: <Bot size={15} /> },
+      { path: '/agents', label: 'Agent 列表', icon: <Bot size={15} /> },
+      { path: '/task-center', label: '任务中心', icon: <Bot size={15} /> },
       { path: '/missions', label: '任务', icon: <ClipboardList size={15} /> },
       { path: '/taskboard', label: '任务板', icon: <Layout size={15} /> },
       { path: '/dag', label: 'DAG', icon: <GitBranch size={15} /> },

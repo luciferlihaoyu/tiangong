@@ -22,6 +22,8 @@ import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
 import TaskBoard from './pages/TaskBoard'
 import TaskDetail from './pages/TaskDetail'
+import AgentList from './pages/AgentList'
+import AgentDetail from './pages/AgentDetail'
 import SessionPanel from './pages/SessionPanel'
 import { AppLayout } from './sections/Navigation'
 import { useAuth } from './hooks/useAuth'
@@ -83,12 +85,16 @@ export default function App() {
           <Route path="/guard" element={<GuardPanel />} />
           <Route path="/ops" element={<OpsPanel />} />
           <Route path="/fusion" element={<FusionPanel />} />
+          <Route path="/agents" element={<AgentList />} />
+          <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/events" element={<EventStream />} />
           <Route path="/dag" element={<DagPanel />} />
           <Route path="/taskboard" element={<TaskBoard />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />
+          <Route path="/agents" element={<AgentList />} />
+          <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/github" element={<GitHubPanel />} />
         </Route>
 

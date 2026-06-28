@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, tasks, modelAllowlist, type AgentCard } from "@db/schema";
-import { eq, like, and, isNotNull, isNull, sql, desc } from "drizzle-orm";
+import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type AgentCard } from "@db/schema";
+import { eq, like, and, or, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 export const agentRouter = createRouter({
@@ -473,5 +473,316 @@ export const agentRouter = createRouter({
         .set({ agentCard: JSON.stringify(input.card) })
         .where(eq(agents.id, input.agentId));
       return { success: true };
+    }),
+
+  getCapabilities: publicQuery
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const rows = await db.select().from(agents).where(eq(agents.id, input.agentId));
+      const agent = rows[0];
+      if (!agent) return null;
+
+      let capabilities: any[] = [];
+
+      // 优先从 agentCard 解析
+      if (agent.agentCard) {
+        try {
+          const card = JSON.parse(agent.agentCard) as AgentCard;
+          if (card.capabilities && Array.isArray(card.capabilities)) {
+            capabilities = card.capabilities.map((cap) => ({
+              category: cap.category,
+              items: cap.items,
+              level: cap.level,
+            }));
+          }
+        } catch {
+          // fall through
+        }
+      }
+
+      // 如果从 agentCard 没解析出来，尝试从 capabilities 字段
+      if (capabilities.length === 0 && agent.capabilities) {
+        try {
+          const parsed = JSON.parse(agent.capabilities);
+          if (Array.isArray(parsed)) {
+            capabilities = parsed.map((item: any) => {
+              if (typeof item === "string") {
+                return { category: "general", items: [item], level: "intermediate" };
+              }
+              return {
+                category: item.category || "general",
+                items: Array.isArray(item.items) ? item.items : [item.items],
+                level: item.level || "intermediate",
+              };
+            });
+          } else {
+            capabilities = [{
+              category: "general",
+              items: typeof parsed === "string" ? [parsed] : [],
+              level: "intermediate",
+            }];
+          }
+        } catch {
+          const capItems = agent.capabilities.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+          if (capItems.length > 0) {
+            capabilities = [{
+              category: "general",
+              items: capItems,
+              level: "intermediate",
+            }];
+          }
+        }
+      }
+
+      if (capabilities.length === 0) {
+        capabilities = [{
+          category: agent.role || "general",
+          items: ["general"],
+          level: "intermediate",
+        }];
+      }
+
+      return {
+        agentId: agent.id,
+        agentName: agent.name,
+        capabilities,
+      };
+    }),
+
+  getRuntimeStats: publicQuery
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+
+      // 从 agents 表获取基本信息
+      const agentRows = await db.select().from(agents).where(eq(agents.id, input.agentId));
+      const agent = agentRows[0];
+      if (!agent) return null;
+
+      // 从 tokenUsage 表查询统计
+      const tokenUsageRows = await db
+        .select({
+          totalCalls: sql<number>`SUM(${tokenUsage.callCount})`,
+          totalTokens: sql<number>`SUM(${tokenUsage.totalTokens})`,
+          totalCostCents: sql<number>`SUM(${tokenUsage.costCents})`,
+        })
+        .from(tokenUsage)
+        .where(eq(tokenUsage.agentId, input.agentId));
+
+      const tokenStats = tokenUsageRows[0] ?? { totalCalls: 0, totalTokens: 0, totalCostCents: 0 };
+
+      // 从 taskMessages 表查询：统计 dispatch/result/error 事件
+      const taskMessagesRows = await db
+        .select({
+          eventType: taskMessages.eventType,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(taskMessages)
+        .where(
+          or(
+            eq(taskMessages.fromAgentId, input.agentId),
+            eq(taskMessages.toAgentId, input.agentId)
+          )
+        )
+        .groupBy(taskMessages.eventType);
+
+      const taskStats = {
+        completed: 0,
+        failed: 0,
+        dispatched: 0,
+        error: 0,
+      };
+      for (const row of taskMessagesRows) {
+        if (row.eventType === "result") taskStats.completed += Number(row.count) || 0;
+        if (row.eventType === "error") taskStats.failed += Number(row.count) || 0;
+        if (row.eventType === "dispatch") taskStats.dispatched += Number(row.count) || 0;
+        if (row.eventType === "timeout") taskStats.error += Number(row.count) || 0;
+      }
+
+      // 从 tasks 表查询 running/done/failed 的任务
+      const taskStatusRows = await db
+        .select({
+          status: tasks.status,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(tasks)
+        .where(eq(tasks.agentId, input.agentId))
+        .groupBy(tasks.status);
+
+      const taskCounts: Record<string, number> = {};
+      for (const row of taskStatusRows) {
+        taskCounts[row.status] = Number(row.count) || 0;
+      }
+
+      return {
+        agentId: agent.id,
+        agentName: agent.name,
+        status: agent.status,
+        currentTask: agent.currentTask,
+        progress: agent.progress,
+        lastHeartbeat: agent.lastHeartbeat,
+        spentCents: agent.spentCents,
+        budgetCents: agent.budgetCents,
+        tokenUsage: {
+          totalCalls: Number(tokenStats.totalCalls) || 0,
+          totalTokens: Number(tokenStats.totalTokens) || 0,
+          totalCostCents: Number(tokenStats.totalCostCents) || 0,
+        },
+        taskExecution: {
+          completed: taskStats.completed,
+          failed: taskStats.failed,
+          dispatched: taskStats.dispatched,
+          timeout: taskStats.error,
+          running: taskCounts["running"] || 0,
+          done: taskCounts["done"] || 0,
+          failedTasks: taskCounts["failed"] || 0,
+          queued: taskCounts["queued"] || 0,
+          pending: taskCounts["pending"] || 0,
+        },
+      };
+    }),
+
+  getDetails: publicQuery
+    .input(z.object({ agentId: z.number() }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const rows = await db.select().from(agents).where(eq(agents.id, input.agentId));
+      const agent = rows[0];
+      if (!agent) return null;
+
+      // 解析 capabilities（复用 getCapabilities 逻辑）
+      let capabilities: any[] = [];
+      if (agent.agentCard) {
+        try {
+          const card = JSON.parse(agent.agentCard) as AgentCard;
+          if (card.capabilities && Array.isArray(card.capabilities)) {
+            capabilities = card.capabilities;
+          }
+        } catch { /* ignore */ }
+      }
+      if (capabilities.length === 0 && agent.capabilities) {
+        try {
+          const parsed = JSON.parse(agent.capabilities);
+          if (Array.isArray(parsed)) {
+            capabilities = parsed.map((item: any) => {
+              if (typeof item === "string") {
+                return { category: "general", items: [item], level: "intermediate" };
+              }
+              return {
+                category: item.category || "general",
+                items: Array.isArray(item.items) ? item.items : [item.items],
+                level: item.level || "intermediate",
+              };
+            });
+          } else {
+            capabilities = [{
+              category: "general",
+              items: typeof parsed === "string" ? [parsed] : [],
+              level: "intermediate",
+            }];
+          }
+        } catch {
+          const capItems = agent.capabilities.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+          if (capItems.length > 0) {
+            capabilities = [{ category: "general", items: capItems, level: "intermediate" }];
+          }
+        }
+      }
+      if (capabilities.length === 0) {
+        capabilities = [{ category: agent.role || "general", items: ["general"], level: "intermediate" }];
+      }
+
+      // 解析 permissions
+      let permissions: Record<string, boolean> = {};
+      if (agent.agentCard) {
+        try {
+          const card = JSON.parse(agent.agentCard) as AgentCard;
+          if (card.permissions) permissions = card.permissions;
+        } catch { /* ignore */ }
+      }
+      if (Object.keys(permissions).length === 0) {
+        permissions = {
+          canModifyTiangongCore: agent.canModifyTiangongCore === "true",
+          canSendExternalMessage: agent.canSendExternalMessage === "true",
+          canExecuteCode: false,
+          canAccessFiles: false,
+          canAccessNetwork: false,
+        };
+      }
+
+      // 统计 tokenUsage
+      const tokenUsageRows = await db
+        .select({
+          totalCalls: sql<number>`SUM(${tokenUsage.callCount})`,
+          totalTokens: sql<number>`SUM(${tokenUsage.totalTokens})`,
+          totalCostCents: sql<number>`SUM(${tokenUsage.costCents})`,
+        })
+        .from(tokenUsage)
+        .where(eq(tokenUsage.agentId, input.agentId));
+
+      const tokenStats = tokenUsageRows[0] ?? { totalCalls: 0, totalTokens: 0, totalCostCents: 0 };
+
+      // 统计 taskMessages
+      const taskMessagesRows = await db
+        .select({
+          eventType: taskMessages.eventType,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(taskMessages)
+        .where(
+          or(
+            eq(taskMessages.fromAgentId, input.agentId),
+            eq(taskMessages.toAgentId, input.agentId)
+          )
+        )
+        .groupBy(taskMessages.eventType);
+
+      const taskStats = { completed: 0, failed: 0, dispatched: 0, error: 0 };
+      for (const row of taskMessagesRows) {
+        if (row.eventType === "result") taskStats.completed += Number(row.count) || 0;
+        if (row.eventType === "error") taskStats.failed += Number(row.count) || 0;
+        if (row.eventType === "dispatch") taskStats.dispatched += Number(row.count) || 0;
+        if (row.eventType === "timeout") taskStats.error += Number(row.count) || 0;
+      }
+
+      // 从 tasks 表统计
+      const taskStatusRows = await db
+        .select({
+          status: tasks.status,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(tasks)
+        .where(eq(tasks.agentId, input.agentId))
+        .groupBy(tasks.status);
+
+      const taskCounts: Record<string, number> = {};
+      for (const row of taskStatusRows) {
+        taskCounts[row.status] = Number(row.count) || 0;
+      }
+
+      return {
+        ...agent,
+        capabilities,
+        permissions,
+        runtimeStats: {
+          tokenUsage: {
+            totalCalls: Number(tokenStats.totalCalls) || 0,
+            totalTokens: Number(tokenStats.totalTokens) || 0,
+            totalCostCents: Number(tokenStats.totalCostCents) || 0,
+          },
+          taskExecution: {
+            completed: taskStats.completed,
+            failed: taskStats.failed,
+            dispatched: taskStats.dispatched,
+            timeout: taskStats.error,
+            running: taskCounts["running"] || 0,
+            done: taskCounts["done"] || 0,
+            failedTasks: taskCounts["failed"] || 0,
+            queued: taskCounts["queued"] || 0,
+            pending: taskCounts["pending"] || 0,
+          },
+        },
+      };
     }),
 });

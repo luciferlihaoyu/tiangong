@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts } from "@db/schema";
-import { eq, desc, asc, and, or, like, sql } from "drizzle-orm";
+import { eq, desc, asc, and, or, like, sql, isNotNull } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 
@@ -63,10 +63,54 @@ export const taskRouter = createRouter({
     .input(z.object({ taskId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
+      const now = new Date();
+
+      // 1. 超时任务自动标记：timeoutAt 已过但状态还是 running/claimed 的任务
+      const timedOutTasks = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.status, "running"),
+            isNotNull(tasks.timeoutAt),
+            sql`${tasks.timeoutAt} < ${now}`,
+          )
+        );
+
+      for (const t of timedOutTasks) {
+        await db
+          .update(tasks)
+          .set({
+            status: "failed",
+            lifecycleStatus: "timeout",
+            error: "任务执行超时",
+            updatedAt: new Date(),
+          })
+          .where(eq(tasks.id, t.id));
+      }
+
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
       if (row.status !== "pending") {
         throw new Error(`Task cannot be dispatched (current status: ${row.status})`);
+      }
+
+      // 2. 并发限制检查：如果目标 agent 已有 running 任务，则拒绝
+      if (row.agentId) {
+        const runningTasks = await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.agentId, row.agentId),
+              eq(tasks.status, "running"),
+            )
+          )
+          .limit(1);
+
+        if (runningTasks.length > 0) {
+          throw new Error(`Agent ${row.agentId} is already running a task. Cannot dispatch new task concurrently.`);
+        }
       }
 
       await db

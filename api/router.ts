@@ -23,11 +23,13 @@ import { memoryRouter } from "./memory-router";
 import { externalAgentRouter } from "./external-agent-router";
 import { createRouter, publicQuery } from "./middleware";
 
+import { executionRouter } from "./execution-router";
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
   auth: localAuthRouter,
   agent: agentRouter,
   task: taskRouter,
+  execution: executionRouter,
   message: messageRouter,
   system: systemRouter,
   org: orgRouter,

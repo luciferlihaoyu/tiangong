@@ -93,8 +93,6 @@ export default function App() {
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />
-          <Route path="/agents" element={<AgentList />} />
-          <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/github" element={<GitHubPanel />} />
         </Route>
 

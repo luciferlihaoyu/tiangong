@@ -20,6 +20,9 @@ import {
   X,
   Eye,
   MessageSquarePlus,
+  Trash2,
+  Reply,
+  CheckCircle2,
 } from "lucide-react";
 
 // ═══════════════════════ Types ═══════════════════════
@@ -89,9 +92,13 @@ function truncateBody(text: string | null, maxLen = 120) {
 function MessageCard({
   msg,
   onView,
+  onAck,
+  onResolve,
 }: {
   msg: MailboxMessage;
   onView: () => void;
+  onAck: () => void;
+  onResolve: () => void;
 }) {
   const sc = STATUS_CONFIG[msg.status] || STATUS_CONFIG.unread;
   const typeLabel = TYPE_LABELS[msg.type] || msg.type;
@@ -100,6 +107,24 @@ function MessageCard({
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
       {/* Hover actions */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        {msg.status === "unread" && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAck(); }}
+            className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(76,175,125,0.1)] flex items-center gap-1"
+            style={{ color: "var(--success)" }}
+            title="标记已读"
+          >
+            <CheckCircle2 size={12} />
+          </button>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onResolve(); }}
+          className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(194,58,48,0.1)] flex items-center gap-1"
+          style={{ color: "var(--accent-red)" }}
+          title="关闭"
+        >
+          <Trash2 size={12} />
+        </button>
         <button
           onClick={onView}
           className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] flex items-center gap-1"
@@ -177,13 +202,17 @@ function MessageDetailDrawer({
   msg,
   open,
   onClose,
+  onReply,
 }: {
   msg: MailboxMessage;
   open: boolean;
   onClose: () => void;
+  onReply: (body: string) => void;
 }) {
   const sc = STATUS_CONFIG[msg.status] || STATUS_CONFIG.unread;
   const typeLabel = TYPE_LABELS[msg.type] || msg.type;
+  const [replyBody, setReplyBody] = useState("");
+  const [replying, setReplying] = useState(false);
 
   if (!open) return null;
 
@@ -291,6 +320,50 @@ function MessageDetailDrawer({
               </pre>
             </div>
           )}
+
+          {/* Reply */}
+          <div className="mb-4">
+            <div className="section-label mb-2">回复 · REPLY</div>
+            <textarea
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
+              placeholder="输入回复内容..."
+              rows={3}
+              className="w-full px-3 py-2 rounded text-xs outline-none font-mono resize-none mb-2"
+              style={{
+                background: "rgba(0,0,0,0.2)",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-primary)",
+              }}
+            />
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  if (!replyBody.trim()) return;
+                  setReplying(true);
+                  onReply(replyBody.trim());
+                  setReplying(false);
+                  setReplyBody("");
+                }}
+                disabled={!replyBody.trim() || replying}
+                className="px-4 py-2 rounded text-xs font-mono transition-colors flex items-center gap-1 disabled:opacity-50"
+                style={{
+                  background: "var(--accent-cyan)",
+                  color: "#000",
+                }}
+              >
+                {replying ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" /> 发送中...
+                  </>
+                ) : (
+                  <>
+                    <Reply size={12} /> 回复
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -334,6 +407,36 @@ export default function MailboxPanel() {
     },
     onError: (err) => {
       toast.error(`发送失败: ${err.message}`);
+    },
+  });
+
+  const ackMutation = trpc.mailbox.ack.useMutation({
+    onSuccess: () => {
+      toast.success("已标记为已读");
+      utils.mailbox.inbox.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`操作失败: ${err.message}`);
+    },
+  });
+
+  const replyMutation = trpc.mailbox.reply.useMutation({
+    onSuccess: () => {
+      toast.success("回复已发送");
+      utils.mailbox.inbox.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`回复失败: ${err.message}`);
+    },
+  });
+
+  const resolveMutation = trpc.mailbox.resolve.useMutation({
+    onSuccess: () => {
+      toast.success("消息已关闭");
+      utils.mailbox.inbox.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`操作失败: ${err.message}`);
     },
   });
 
@@ -475,6 +578,18 @@ export default function MailboxPanel() {
               key={msg.id}
               msg={msg}
               onView={() => setDetailMsg(msg)}
+              onAck={() =>
+                ackMutation.mutate({
+                  messageId: msg.id,
+                  mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
+                })
+              }
+              onResolve={() =>
+                resolveMutation.mutate({
+                  messageId: msg.id,
+                  mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
+                })
+              }
             />
           ))}
         </div>
@@ -607,6 +722,13 @@ export default function MailboxPanel() {
           msg={detailMsg}
           open={detailMsg !== null}
           onClose={() => setDetailMsg(null)}
+          onReply={(body) =>
+            replyMutation.mutate({
+              messageId: detailMsg.id,
+              fromMailboxId: selectedMailboxId || agents[0]?.agentId || "system",
+              body,
+            })
+          }
         />
       )}
     </div>

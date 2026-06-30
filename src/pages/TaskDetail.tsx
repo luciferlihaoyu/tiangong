@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   Target,
@@ -11,6 +12,9 @@ import {
   AlertTriangle,
   CheckCircle,
   ChevronRight,
+  Shield,
+  RotateCcw,
+  XCircle,
 } from "lucide-react";
 
 // ═══════════════════════ Types ═══════════════════════
@@ -154,6 +158,45 @@ export default function TaskDetail() {
   const handleBack = () => {
     navigate(-1);
   };
+
+  const utils = trpc.useUtils();
+  const [reviewComment, setReviewComment] = useState("");
+
+  const approveMutation = trpc.task.approve.useMutation({
+    onSuccess: () => {
+      toast.success("任务已审批通过");
+      utils.task.getById.invalidate({ id: taskIdNum });
+      setReviewComment("");
+    },
+    onError: (err) => {
+      toast.error(`审批失败: ${err.message}`);
+    },
+  });
+
+  const rejectMutation = trpc.task.reject.useMutation({
+    onSuccess: () => {
+      toast.success("任务已退回修改");
+      utils.task.getById.invalidate({ id: taskIdNum });
+      setReviewComment("");
+    },
+    onError: (err) => {
+      toast.error(`操作失败: ${err.message}`);
+    },
+  });
+
+  const updateProgressMutation = trpc.task.updateProgress.useMutation({
+    onSuccess: () => {
+      toast.success("任务已拒绝");
+      utils.task.getById.invalidate({ id: taskIdNum });
+      setReviewComment("");
+    },
+    onError: (err) => {
+      toast.error(`操作失败: ${err.message}`);
+    },
+  });
+
+  const isReviewing = task?.lifecycleStatus === "reviewing";
+  const isActionPending = approveMutation.isPending || rejectMutation.isPending || updateProgressMutation.isPending;
 
   // Loading state
   if (taskQuery.isLoading) {
@@ -376,6 +419,145 @@ export default function TaskDetail() {
             </div>
           )}
         </div>
+
+        {/* Review Panel */}
+        {isReviewing && (
+          <div className="mb-6 glass-panel p-4 sci-border" style={{ border: "1px solid rgba(74,158,255,0.2)" }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Shield size={14} style={{ color: "var(--accent-cyan)" }} />
+              <span className="section-label" style={{ color: "var(--accent-cyan)" }}>审批操作 · REVIEW</span>
+              <div className="flex-1 h-px" style={{ background: "var(--border-default)" }} />
+            </div>
+            <div className="text-[10px] font-mono mb-3" style={{ color: "var(--text-muted)" }}>
+              该任务已提交审批，请选择审批操作并填写意见。
+            </div>
+            <textarea
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              placeholder="输入审批意见（可选）..."
+              rows={2}
+              className="w-full px-3 py-2 rounded text-xs outline-none font-mono resize-none mb-3"
+              style={{
+                background: "rgba(0,0,0,0.2)",
+                border: "1px solid var(--border-default)",
+                color: "var(--text-primary)",
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => approveMutation.mutate({ id: taskIdNum, comment: reviewComment || undefined })}
+                disabled={isActionPending}
+                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
+                style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)", border: "1px solid rgba(76,175,125,0.2)" }}
+              >
+                <CheckCircle size={12} /> 通过
+              </button>
+              <button
+                onClick={() => rejectMutation.mutate({ id: taskIdNum, comment: reviewComment || undefined })}
+                disabled={isActionPending}
+                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
+                style={{ background: "rgba(201,168,76,0.1)", color: "var(--accent-gold)", border: "1px solid rgba(201,168,76,0.2)" }}
+              >
+                <RotateCcw size={12} /> 退回修改
+              </button>
+              <button
+                onClick={() =>
+                  updateProgressMutation.mutate({
+                    id: taskIdNum,
+                    progress: task.progress,
+                    status: "failed",
+                    lifecycleStatus: "failed",
+                    error: reviewComment || undefined,
+                  })
+                }
+                disabled={isActionPending}
+                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
+                style={{ background: "rgba(194,58,48,0.1)", color: "var(--accent-red)", border: "1px solid rgba(194,58,48,0.2)" }}
+              >
+                <XCircle size={12} /> 拒绝
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Review History */}
+        {task.threadMessages && task.threadMessages.some((m) =>
+          m.eventType === "system" && (
+            m.content?.includes("Approved") ||
+            m.content?.includes("Rejected") ||
+            m.content?.includes("Changes requested") ||
+            m.content?.includes("submitted") ||
+            (m.metadata && typeof m.metadata === "object" && (m.metadata as any).action)
+          )
+        ) && (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="section-label">审批历史</span>
+              <div className="flex-1 h-px" style={{ background: "var(--border-default)" }} />
+            </div>
+            <div className="space-y-2">
+              {task.threadMessages
+                .filter((m) =>
+                  m.eventType === "system" && (
+                    m.content?.includes("Approved") ||
+                    m.content?.includes("Rejected") ||
+                    m.content?.includes("Changes requested") ||
+                    m.content?.includes("submitted") ||
+                    (m.metadata && typeof m.metadata === "object" && ["approve", "reject", "requestChanges", "submit"].includes((m.metadata as any).action))
+                  )
+                )
+                .map((msg) => {
+                  const meta = msg.metadata as Record<string, unknown> | null;
+                  const action = meta?.action as string | undefined;
+                  const reviewerName = msg.fromAgentId
+                    ? agents.find((a) => a.id === msg.fromAgentId)?.name || `Agent #${msg.fromAgentId}`
+                    : "系统";
+                  return (
+                    <div key={msg.id} className="p-3 rounded glass-panel flex items-start gap-3">
+                      <div className="mt-0.5">
+                        {action === "approve" ? (
+                          <CheckCircle size={12} style={{ color: "var(--success)" }} />
+                        ) : action === "reject" ? (
+                          <XCircle size={12} style={{ color: "var(--accent-red)" }} />
+                        ) : action === "requestChanges" ? (
+                          <RotateCcw size={12} style={{ color: "var(--accent-gold)" }} />
+                        ) : (
+                          <Shield size={12} style={{ color: "var(--accent-cyan)" }} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-bold" style={{ color: "var(--text-primary)" }}>
+                            {action === "approve"
+                              ? "审批通过"
+                              : action === "reject"
+                                ? "退回修改"
+                                : action === "requestChanges"
+                                  ? "请求修改"
+                                  : action === "submit"
+                                    ? "提交审批"
+                                    : "状态变更"}
+                          </span>
+                          <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                            by {reviewerName}
+                          </span>
+                          <span className="text-[10px] font-mono ml-auto" style={{ color: "var(--text-muted)" }}>
+                            <Clock size={9} className="inline mr-1" />
+                            {fmtTime(msg.createdAt)}
+                          </span>
+                        </div>
+                        {msg.content && (
+                          <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                            {msg.content}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
 
         {/* Description */}
         {task.description && (

@@ -47,14 +47,32 @@ function LiveClock() {
 function SystemMonitor() {
   const stats = useDashboardStats();
   const { connected: wsConnected } = useWebSocket();
-  const onlineCount = stats.agents.filter(a => a.status === 'online' || a.status === 'busy').length;
-  const totalCount = stats.agents.length;
-  const wsStatus = wsConnected ? '已连接' : '断开';
-  const apiStatus = stats.hasBackend ? '在线' : '离线';
+  const tasks = stats.tasks || [];
+  const agents = stats.agents || [];
+
+  const onlineCount = agents.filter(a => a.status === 'online' || a.status === 'busy').length;
+  const totalCount = agents.length;
+  const ramValue = totalCount > 0 ? Math.round((onlineCount / totalCount) * 100) : 0;
+  const ramDisplay = `${onlineCount}/${totalCount}`;
+
+  const doneCount = tasks.filter(t => t.status === 'done').length;
+  const failedCount = tasks.filter(t => t.status === 'failed').length;
+  const runningCount = tasks.filter(t => t.status === 'running').length;
+  const totalActive = doneCount + failedCount + runningCount;
+  const cpuValue = totalActive > 0 ? Math.round(((doneCount + runningCount) / totalActive) * 100) : 0;
+  const cpuDisplay = `${doneCount}✓ ${failedCount}✗ ${runningCount}⋯`;
+
+  const now = Date.now();
+  const dayAgo = now - 24 * 60 * 60 * 1000;
+  const last24hCount = tasks.filter(t => {
+    const created = (t as any).createdAt ? new Date((t as any).createdAt).getTime() : 0;
+    return created > dayAgo;
+  }).length;
+
   const bars = [
-    { label: 'Agent', value: totalCount > 0 ? Math.round((onlineCount / totalCount) * 100) : 0, display: `${onlineCount}/${totalCount}`, color: 'var(--accent-cyan)' },
-    { label: 'API', value: stats.hasBackend ? 100 : 0, display: apiStatus, color: stats.hasBackend ? 'var(--success)' : 'var(--accent-red)' },
-    { label: 'WS', value: wsConnected ? 100 : 0, display: wsStatus, color: wsConnected ? 'var(--success)' : 'var(--accent-red)' },
+    { label: 'CPU', value: cpuValue, display: cpuDisplay, color: 'var(--accent-cyan)', sub: '任务吞吐' },
+    { label: 'RAM', value: ramValue, display: ramDisplay, color: 'var(--success)', sub: '在线 Agent' },
+    { label: 'NET', value: Math.min(100, last24hCount * 5), display: `${last24hCount} 个/24h`, color: wsConnected ? 'var(--accent-gold)' : 'var(--accent-red)', sub: '任务创建' },
   ];
   return (
     <div className="glass-panel p-4 sci-border">
@@ -67,6 +85,7 @@ function SystemMonitor() {
               <span className="font-mono" style={{ color: b.color }}>{b.display}</span>
             </div>
             <div className="progress-track"><div className="progress-fill transition-all duration-700" style={{ width: `${b.value}%`, background: b.color }} /></div>
+            <div className="text-[9px] font-mono mt-0.5" style={{ color: 'var(--text-muted)' }}>{b.sub}</div>
           </div>
         ))}
       </div>

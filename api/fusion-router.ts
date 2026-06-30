@@ -11,7 +11,7 @@
  * 5. 全程记录 traceId，串联任务、审查、模型调用
  */
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, messages } from "@db/schema";
 import { eq, and, inArray, desc, sql, type SQL } from "drizzle-orm";
@@ -234,7 +234,7 @@ export const fusionRouter = createRouter({
    * 提交审查请求
    * 选择审查 Agent 并发送审查任务
    */
-  submit: publicQuery
+  submit: authedQuery
     .input(
       z.object({
         subject: z.string().min(1).max(500),
@@ -334,7 +334,7 @@ export const fusionRouter = createRouter({
   /**
    * 提交审查结果（由审查 Agent 调用）
    */
-  submitReview: publicQuery
+  submitReview: authedQuery
     .input(
       z.object({
         traceId: z.string().max(64),
@@ -404,7 +404,7 @@ export const fusionRouter = createRouter({
   /**
    * 提交 Judge 裁决（由 Judge Agent 调用）
    */
-  submitJudge: publicQuery
+  submitJudge: authedQuery
     .input(
       z.object({
         traceId: z.string().max(64),

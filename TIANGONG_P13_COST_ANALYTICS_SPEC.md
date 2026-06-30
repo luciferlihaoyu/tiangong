@@ -168,17 +168,17 @@ ALTER TABLE token_usage
 
 | # | 验收项 | 状态 |
 |---|--------|------|
-| P0.1 | model_pricing 表创建 | ⬜ |
-| P0.2 | 预置模型定价数据 | ⬜ |
-| P0.3 | token_usage 新增缓存字段 | ⬜ |
-| P0.4 | usage.record 自动计算真实费用 | ⬜ |
-| P1.1 | usage.byAgent 路由 | ⬜ |
-| P1.2 | usage.byAgentAndModel 路由 | ⬜ |
-| P1.3 | usage.cacheStats 路由 | ⬜ |
-| P1.4 | pricing.list/upsert/delete 路由 | ⬜ |
-| P2.1 | 前端成本分析面板 | ⬜ |
-| P2.2 | Agent 维度视图 | ⬜ |
-| P2.3 | 缓存命中率图表 | ⬜ |
-| P2.4 | 双币种显示 | ⬜ |
-| P2.5 | 定价管理页面 | ⬜ |
-| P3.1 | Connector 上报缓存信息 | ⬜ |
+| P0.1 | model_pricing 表创建 | ✅ 完成（已有 schema + auto-migrate） |
+| P0.2 | 预置模型定价数据 | ✅ 完成（47 个模型已 seed） |
+| P0.3 | token_usage 新增缓存字段 | ✅ 完成（cached/uncached 字段） |
+| P0.4 | usage.record 自动计算真实费用 | ✅ 完成（model-pricing.ts calculateCost） |
+| P1.1 | usage.byAgent 路由 | ✅ 完成 |
+| P1.2 | usage.byAgentAndModel 路由 | ✅ 完成 |
+| P1.3 | usage.cacheStats 路由 | ✅ 完成 |
+| P1.4 | pricing.list/upsert/delete 路由 | ✅ 完成 |
+| P2.1 | 前端成本分析面板 | ✅ 完成（UsagePanel.tsx 850行） |
+| P2.2 | Agent 维度视图 | ✅ 完成（UsagePanel 已含 Agent tab） |
+| P2.3 | 缓存命中率图表 | ✅ 完成（CacheChart 组件） |
+| P2.4 | 双币种显示 | ✅ 完成（USD/CNY 切换） |
+| P2.5 | 定价管理页面 | ✅ 完成（PricingPanel.tsx 300行） |
+| P3.1 | Connector 上报缓存信息 | ✅ 完成（Connector reportUsage 已实现估算+上报） |

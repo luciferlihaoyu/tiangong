@@ -301,7 +301,7 @@ export const collaborationRouter = createRouter({
     .input(z.object({ parentTaskId: z.number() }))
     .query(async ({ input }) => buildCollabSummary(input.parentTaskId)),
 
-  unblockReady: publicQuery
+  unblockReady: authedQuery
     .input(z.object({ parentTaskId: z.number() }))
     .mutation(async ({ input }) => {
       const changed = await unblockReadyCollabTasks(input.parentTaskId);

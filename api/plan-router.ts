@@ -2,7 +2,7 @@
  * 任务 DAG + 组织架构 + 任务计划生成器
  */
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents, organizations, departments } from "@db/schema";
 import { eq, and, inArray, asc, desc, isNull } from "drizzle-orm";
@@ -236,7 +236,7 @@ export const planRouter = createRouter({
    * 生成任务计划
    * 输入一个需求描述，输出拆解后的子任务列表
    */
-  generatePlan: publicQuery
+  generatePlan: authedQuery
     .input(
       z.object({
         title: z.string().min(1).max(255),

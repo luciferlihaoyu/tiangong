@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { taskMessages, tasks } from "@db/schema";
 import { eq, desc, and, or, sql } from "drizzle-orm";
 
 export const executionRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(
       z.object({
         agentId: z.number().optional(),
@@ -48,7 +48,7 @@ export const executionRouter = createRouter({
       }));
     }),
 
-  getByTask: publicQuery
+  getByTask: authedQuery
     .input(z.object({ taskId: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();

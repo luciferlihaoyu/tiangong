@@ -74,11 +74,25 @@ export async function createContext(opts: { req: Request }) {
 
 type Context = Awaited<ReturnType<typeof createContext>>;
 
-const t = initTRPC.context<Context>().create();
+const t = initTRPC.context<Context>().create({
+  errorFormatter({ shape, error }) {
+    return {
+      code: shape.code,
+      message: shape.message,
+      data: {
+        code: shape.code,
+        httpStatus: shape.data?.httpStatus,
+        path: shape.data?.path,
+        stack: process.env.NODE_ENV === "development" ? shape.data?.stack : undefined,
+      },
+    };
+  },
+});
 
 export const router = t.router;
 export const createRouter = router;
 export const publicProcedure = t.procedure;
+export const createCallerFactory = t.createCallerFactory;
 
 // Public query - no auth required
 export const publicQuery = publicProcedure;

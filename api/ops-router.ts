@@ -8,7 +8,7 @@
  * - 成本热力图
  */
 import { z } from "zod";
-import { createRouter, publicQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, tokenUsage } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
@@ -108,7 +108,7 @@ export const opsRouter = createRouter({
   /**
    * 模型调用流 — 最近调用记录
    */
-  recentModelCalls: publicQuery
+  recentModelCalls: authedQuery
     .input(
       z
         .object({
@@ -149,7 +149,7 @@ export const opsRouter = createRouter({
   /**
    * 成本热力图 — 按天 + 按模型
    */
-  costHeatmap: publicQuery
+  costHeatmap: authedQuery
     .input(
       z
         .object({

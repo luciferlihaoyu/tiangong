@@ -41,7 +41,7 @@ interface MailboxMessage {
   toMailboxId: string;
   toAgentId: number;
   type: string;
-  status: string;
+  status: "unread" | "acknowledged" | "working" | "replied" | "resolved" | "failed";
   subject: string | null;
   body: string | null;
   payload: Record<string, unknown> | null;
@@ -84,6 +84,12 @@ function truncateBody(text: string | null, maxLen = 120) {
   if (!text) return "—";
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen) + "...";
+}
+
+// ═══════════════════════ Helpers ═══════════════════════
+
+function isValidStatus(v: string): v is MailboxMessage["status"] | "" {
+  return v === "" || v === "unread" || v === "acknowledged" || v === "working" || v === "replied" || v === "resolved" || v === "failed";
 }
 
 // ═══════════════════════ Components ═══════════════════════
@@ -374,7 +380,7 @@ function MessageDetailDrawer({
 
 export default function MailboxPanel() {
   const [selectedMailboxId, setSelectedMailboxId] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("");
+  const [selectedStatus, setSelectedStatus] = useState<MailboxMessage["status"] | "">("");
   const [detailMsg, setDetailMsg] = useState<MailboxMessage | null>(null);
   const [showSendForm, setShowSendForm] = useState(false);
   const [targetAgentId, setTargetAgentId] = useState<string>("");
@@ -387,7 +393,7 @@ export default function MailboxPanel() {
   const inboxQuery = trpc.mailbox.inbox.useQuery(
     {
       mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
-      status: (selectedStatus || undefined) as MailboxMessage["status"] | undefined,
+      status: selectedStatus || undefined,
       limit: 100,
     },
     { enabled: !!(selectedMailboxId || agents[0]?.agentId), retry: 1, staleTime: 5000 }
@@ -512,7 +518,7 @@ export default function MailboxPanel() {
         {/* Status filter */}
         <select
           value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
+          onChange={(e) => { const v = e.target.value; if (isValidStatus(v)) setSelectedStatus(v); }}
           className="px-3 py-1.5 rounded text-xs outline-none font-mono"
           style={{
             background: "rgba(0,0,0,0.15)",

@@ -437,7 +437,7 @@ export default function SessionPanel() {
     }
     if (lastMessage.type === "session_message") {
       if (lastMessage.sessionId === selectedSessionId) {
-        utils.session.getMessages.invalidate({ sessionId: selectedSessionId, limit: 100 });
+        utils.session.getMessages.invalidate({ sessionId: selectedSessionId || undefined, limit: 100 });
       }
       utils.session.list.invalidate();
     }

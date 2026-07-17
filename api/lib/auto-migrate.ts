@@ -317,6 +317,62 @@ const CREATE_TABLES_SQL = [
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  // Phase 1: General audit/event ledger
+  `CREATE TABLE IF NOT EXISTS audit_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event VARCHAR(50) NOT NULL,
+    actor_user_id BIGINT UNSIGNED NOT NULL,
+    workspace_id BIGINT UNSIGNED NULL,
+    project_id BIGINT UNSIGNED NULL,
+    target_user_id BIGINT UNSIGNED NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id BIGINT UNSIGNED NULL,
+    metadata TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Phase 1: Connector registry foundation (metadata-only, no secrets in rows)
+  `CREATE TABLE IF NOT EXISTS connector_registry (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id BIGINT UNSIGNED NOT NULL,
+    project_id BIGINT UNSIGNED NULL,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    connector_type ENUM('opencode','xuanji','s3') NOT NULL,
+    status ENUM('draft','active','disabled') DEFAULT 'draft' NOT NULL,
+    endpoint VARCHAR(500) NULL,
+    config TEXT NULL,
+    secret_ref_id BIGINT UNSIGNED NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    updated_by BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_connector_registry_workspace_project_slug (workspace_id, project_id, slug)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Phase 1: Artifact registry metadata abstraction (no file contents, no storage clients)
+  `CREATE TABLE IF NOT EXISTS artifact_registry (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id BIGINT UNSIGNED NOT NULL,
+    project_id BIGINT UNSIGNED NULL,
+    task_id BIGINT UNSIGNED NULL,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    artifact_type ENUM('file','image','document','log','data') NOT NULL,
+    status ENUM('draft','active','archived','deleted') DEFAULT 'draft' NOT NULL,
+    mime_type VARCHAR(100) NULL,
+    size_bytes BIGINT NULL,
+    checksum_sha256 VARCHAR(64) NULL,
+    storage_backref_type ENUM('connector','inline','external') NULL,
+    storage_backref_id VARCHAR(100) NULL,
+    metadata TEXT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    updated_by BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_artifact_registry_workspace_project_slug (workspace_id, project_id, slug)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   `CREATE TABLE IF NOT EXISTS conversations (
     id INT AUTO_INCREMENT PRIMARY KEY,
     title VARCHAR(255) NOT NULL,

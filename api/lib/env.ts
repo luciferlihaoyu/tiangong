@@ -31,4 +31,8 @@ export const env = {
   githubAppPrivateKeyBase64: optional("GITHUB_APP_PRIVATE_KEY_BASE64"),
   githubAppInstallationId: optional("GITHUB_APP_INSTALLATION_ID"),
   githubWebhookSecret: optional("GITHUB_WEBHOOK_SECRET"),
+
+  // Phase 1: Secret Vault encryption key
+  secretVaultKey: optional("TIANGONG_SECRET_VAULT_KEY"),
+  secretVaultKeyId: optional("TIANGONG_SECRET_VAULT_KEY_ID", "default"),
 };

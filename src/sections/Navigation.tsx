@@ -25,6 +25,7 @@ import {
   User,
   LogOut,
   Menu,
+  Terminal,
 } from 'lucide-react';
 
 function SunIcon() {
@@ -84,6 +85,12 @@ const navGroups: NavGroup[] = [
       { path: '/guard', label: '熔断', icon: <Shield size={15} /> },
       { path: '/ops', label: 'Ops', icon: <Zap size={15} /> },
       { path: '/github', label: 'GitHub', icon: <Github size={15} /> },
+    ],
+  },
+  {
+    title: '管控',
+    items: [
+      { path: '/console', label: '控制台', icon: <Terminal size={15} /> },
     ],
   },
   {

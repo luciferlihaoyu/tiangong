@@ -25,6 +25,7 @@ import {
   Zap,
   Bot,
   Activity,
+  FileText,
 } from "lucide-react";
 
 import { toast } from "sonner";

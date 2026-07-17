@@ -1,8 +1,11 @@
 import { relations } from "drizzle-orm";
 import {
+  users,
   agents, tasks, messages, organizations, departments, taskDependencies,
   mcpApiKeys, mcpAuditLog, taskThreads, taskMessages, taskArtifacts,
   sharedSessions, sessionMessages, agentMemories, externalAgents,
+  workspaces, projects, workspaceMemberships, secretVaultItems, auditEvents,
+  connectorRegistry, artifactRegistry,
 } from "./schema";
 
 export const agentRelations = relations(agents, ({ many, one }) => ({
@@ -88,3 +91,55 @@ export const agentMemoryRelations = relations(agentMemories, ({ one }) => ({
 }));
 
 export const externalAgentRelations = relations(externalAgents, () => ({}));
+
+// ── Phase 1: Workspace / Project / Membership identity foundation ──
+export const userRelations = relations(users, ({ many }) => ({
+  workspaceMemberships: many(workspaceMemberships),
+  ownedWorkspaces: many(workspaces, { relationName: "owner" }),
+}));
+
+export const workspaceRelations = relations(workspaces, ({ one, many }) => ({
+  owner: one(users, { fields: [workspaces.ownerId], references: [users.id], relationName: "owner" }),
+  projects: many(projects),
+  memberships: many(workspaceMemberships),
+}));
+
+export const projectRelations = relations(projects, ({ one }) => ({
+  workspace: one(workspaces, { fields: [projects.workspaceId], references: [workspaces.id] }),
+  creator: one(users, { fields: [projects.createdBy], references: [users.id] }),
+}));
+
+export const workspaceMembershipRelations = relations(workspaceMemberships, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workspaceMemberships.workspaceId], references: [workspaces.id] }),
+  user: one(users, { fields: [workspaceMemberships.userId], references: [users.id] }),
+}));
+
+export const secretVaultItemRelations = relations(secretVaultItems, ({ one }) => ({
+  workspace: one(workspaces, { fields: [secretVaultItems.workspaceId], references: [workspaces.id] }),
+  project: one(projects, { fields: [secretVaultItems.projectId], references: [projects.id] }),
+  creator: one(users, { fields: [secretVaultItems.createdBy], references: [users.id] }),
+  updater: one(users, { fields: [secretVaultItems.updatedBy], references: [users.id] }),
+}));
+
+export const auditEventRelations = relations(auditEvents, ({ one }) => ({
+  actor: one(users, { fields: [auditEvents.actorUserId], references: [users.id] }),
+  workspace: one(workspaces, { fields: [auditEvents.workspaceId], references: [workspaces.id] }),
+  project: one(projects, { fields: [auditEvents.projectId], references: [projects.id] }),
+  targetUser: one(users, { fields: [auditEvents.targetUserId], references: [users.id] }),
+}));
+
+export const connectorRegistryRelations = relations(connectorRegistry, ({ one }) => ({
+  workspace: one(workspaces, { fields: [connectorRegistry.workspaceId], references: [workspaces.id] }),
+  project: one(projects, { fields: [connectorRegistry.projectId], references: [projects.id] }),
+  creator: one(users, { fields: [connectorRegistry.createdBy], references: [users.id] }),
+  updater: one(users, { fields: [connectorRegistry.updatedBy], references: [users.id] }),
+  secretRef: one(secretVaultItems, { fields: [connectorRegistry.secretRefId], references: [secretVaultItems.id] }),
+}));
+
+export const artifactRegistryRelations = relations(artifactRegistry, ({ one }) => ({
+  workspace: one(workspaces, { fields: [artifactRegistry.workspaceId], references: [workspaces.id] }),
+  project: one(projects, { fields: [artifactRegistry.projectId], references: [projects.id] }),
+  task: one(tasks, { fields: [artifactRegistry.taskId], references: [tasks.id] }),
+  creator: one(users, { fields: [artifactRegistry.createdBy], references: [users.id] }),
+  updater: one(users, { fields: [artifactRegistry.updatedBy], references: [users.id] }),
+}));

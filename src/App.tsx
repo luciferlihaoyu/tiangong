@@ -25,6 +25,7 @@ import TaskDetail from './pages/TaskDetail'
 import AgentList from './pages/AgentList'
 import AgentDetail from './pages/AgentDetail'
 import SessionPanel from './pages/SessionPanel'
+import ConsolePanel from './pages/ConsolePanel'
 import { AppLayout } from './sections/Navigation'
 import { useAuth } from './hooks/useAuth'
 
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/mailbox" element={<MailboxPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />
           <Route path="/github" element={<GitHubPanel />} />
+          <Route path="/console" element={<ConsolePanel />} />
         </Route>
 
         {/* 404 — show nav but no auth requirement */}

@@ -541,6 +541,188 @@ export type TaskArtifact = typeof taskArtifacts.$inferSelect;
 export type InsertTaskArtifact = typeof taskArtifacts.$inferInsert;
 
 // ═══════════════════════════════════════════════════════════════
+// 天宫 Phase 1: Workspace / Project / Membership identity foundation
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Workspaces ───
+export const workspaces = mysqlTable("workspaces", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  description: text("description"),
+  ownerId: bigint("owner_id", { mode: "number", unsigned: true }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Workspace = typeof workspaces.$inferSelect;
+export type InsertWorkspace = typeof workspaces.$inferInsert;
+
+// ─── Projects ───
+export const projects = mysqlTable(
+  "projects",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }).notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    description: text("description"),
+    createdBy: bigint("created_by", { mode: "number", unsigned: true }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    workspaceSlugIdx: uniqueIndex("uq_projects_workspace_slug").on(table.workspaceId, table.slug),
+  })
+);
+
+export type Project = typeof projects.$inferSelect;
+export type InsertProject = typeof projects.$inferInsert;
+
+// ─── Workspace Memberships ───
+export const workspaceMemberships = mysqlTable(
+  "workspace_memberships",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }).notNull(),
+    userId: bigint("user_id", { mode: "number", unsigned: true }).notNull(),
+    role: mysqlEnum("role", ["owner", "admin", "member", "viewer"]).default("member").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    membershipIdx: uniqueIndex("uq_workspace_memberships").on(table.workspaceId, table.userId),
+  })
+);
+
+export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
+export type InsertWorkspaceMembership = typeof workspaceMemberships.$inferInsert;
+
+// ─── Phase 1: Secret Vault (encrypted write-only references) ───
+export const secretVaultItems = mysqlTable(
+  "secret_vault_items",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }).notNull(),
+    projectId: bigint("project_id", { mode: "number", unsigned: true }).notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    description: text("description"),
+    algorithm: varchar("algorithm", { length: 20 }).notNull(),
+    keyId: varchar("key_id", { length: 100 }).notNull(),
+    envelopeVersion: varchar("envelope_version", { length: 10 }).notNull(),
+    nonce: text("nonce").notNull(),
+    authTag: text("auth_tag").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    createdBy: bigint("created_by", { mode: "number", unsigned: true }).notNull(),
+    updatedBy: bigint("updated_by", { mode: "number", unsigned: true }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    projectNameIdx: uniqueIndex("uq_secret_vault_items_project_name").on(
+      table.workspaceId,
+      table.projectId,
+      table.name
+    ),
+  })
+);
+
+export type SecretVaultItem = typeof secretVaultItems.$inferSelect;
+export type InsertSecretVaultItem = typeof secretVaultItems.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
+// 天宫 Phase 1: General audit/event ledger
+// ═══════════════════════════════════════════════════════════════
+
+export const auditEvents = mysqlTable("audit_events", {
+  id: serial("id").primaryKey(),
+  event: varchar("event", { length: 50 }).notNull(),
+  actorUserId: bigint("actor_user_id", { mode: "number", unsigned: true }).notNull(),
+  workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }),
+  projectId: bigint("project_id", { mode: "number", unsigned: true }),
+  targetUserId: bigint("target_user_id", { mode: "number", unsigned: true }),
+  entityType: varchar("entity_type", { length: 50 }).notNull(),
+  entityId: bigint("entity_id", { mode: "number", unsigned: true }),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type InsertAuditEvent = typeof auditEvents.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
+// 天宫 Phase 1: Adapter/Connector registry foundation
+// ═══════════════════════════════════════════════════════════════
+
+export const connectorRegistry = mysqlTable(
+  "connector_registry",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }).notNull(),
+    projectId: bigint("project_id", { mode: "number", unsigned: true }),
+    name: varchar("name", { length: 100 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    connectorType: mysqlEnum("connector_type", ["opencode", "xuanji", "s3"]).notNull(),
+    status: mysqlEnum("status", ["draft", "active", "disabled"]).default("draft").notNull(),
+    endpoint: varchar("endpoint", { length: 500 }),
+    config: text("config"), // JSON: non-secret configuration only
+    secretRefId: bigint("secret_ref_id", { mode: "number", unsigned: true }),
+    createdBy: bigint("created_by", { mode: "number", unsigned: true }).notNull(),
+    updatedBy: bigint("updated_by", { mode: "number", unsigned: true }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    workspaceProjectSlugIdx: uniqueIndex("uq_connector_registry_workspace_project_slug").on(
+      table.workspaceId,
+      table.projectId,
+      table.slug
+    ),
+  })
+);
+
+export type ConnectorRegistry = typeof connectorRegistry.$inferSelect;
+export type InsertConnectorRegistry = typeof connectorRegistry.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
+// 天宫 Phase 1: Artifact/object metadata abstraction
+// ═══════════════════════════════════════════════════════════════
+
+export const artifactRegistry = mysqlTable(
+  "artifact_registry",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }).notNull(),
+    projectId: bigint("project_id", { mode: "number", unsigned: true }),
+    taskId: bigint("task_id", { mode: "number", unsigned: true }),
+    name: varchar("name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 100 }).notNull(),
+    artifactType: mysqlEnum("artifact_type", ["file", "image", "document", "log", "data"]).notNull(),
+    status: mysqlEnum("status", ["draft", "active", "archived", "deleted"]).default("draft").notNull(),
+    mimeType: varchar("mime_type", { length: 100 }),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    checksumSha256: varchar("checksum_sha256", { length: 64 }),
+    storageBackrefType: mysqlEnum("storage_backref_type", ["connector", "inline", "external"]),
+    storageBackrefId: varchar("storage_backref_id", { length: 100 }),
+    metadata: text("metadata"), // JSON: safe, non-secret metadata only
+    createdBy: bigint("created_by", { mode: "number", unsigned: true }).notNull(),
+    updatedBy: bigint("updated_by", { mode: "number", unsigned: true }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    workspaceProjectSlugIdx: uniqueIndex("uq_artifact_registry_workspace_project_slug").on(
+      table.workspaceId,
+      table.projectId,
+      table.slug
+    ),
+  })
+);
+
+export type ArtifactRegistry = typeof artifactRegistry.$inferSelect;
+export type InsertArtifactRegistry = typeof artifactRegistry.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
 // 天宫 Phase 3: 上下文共享 + 跨平台接入 + 记忆系统
 // ═══════════════════════════════════════════════════════════════
 

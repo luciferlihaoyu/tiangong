@@ -21,6 +21,11 @@ import { taskboardRouter } from "./taskboard-router";
 import { sessionRouter } from "./session-router";
 import { memoryRouter } from "./memory-router";
 import { externalAgentRouter } from "./external-agent-router";
+import { workspaceRouter } from "./workspace-router";
+import { secretVaultRouter } from "./secret-vault-router";
+import { auditRouter } from "./audit-router";
+import { connectorRouter } from "./connector-router";
+import { artifactRouter } from "./artifact-router";
 import { createRouter, publicQuery } from "./middleware";
 
 import { executionRouter } from "./execution-router";
@@ -52,6 +57,11 @@ export const appRouter = createRouter({
   session: sessionRouter,
   memory: memoryRouter,
   externalAgent: externalAgentRouter,
+  workspace: workspaceRouter,
+  secretVault: secretVaultRouter,
+  audit: auditRouter,
+  connector: connectorRouter,
+  artifact: artifactRouter,
 });
 
 export type AppRouter = typeof appRouter;

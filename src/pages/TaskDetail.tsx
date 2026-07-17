@@ -731,7 +731,7 @@ export default function TaskDetail() {
                           : artifact.content}
                       </div>
                     )}
-                    {artifact.jsonPayload && (
+                    {artifact.jsonPayload ? (
                       <pre
                         className="text-[10px] font-mono mt-1.5 p-2 rounded max-h-32 overflow-y-auto custom-scrollbar"
                         style={{
@@ -742,7 +742,7 @@ export default function TaskDetail() {
                       >
                         {JSON.stringify(artifact.jsonPayload, null, 2)}
                       </pre>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               ))}

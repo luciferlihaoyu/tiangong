@@ -591,18 +591,8 @@ function buildTaskPrompt(cfg, task) {
   lines.push(`Please execute this task thoroughly and return a concise result.`);
   lines.push(``);
   lines.push(`=== Result Reporting ===`);
-  lines.push(`After completing the task, you MUST call the Tiangong API to report your result:`);
-  lines.push(``);
-  lines.push(`POST ${cfg.httpBase}/api/trpc/task.updateProgress`);
-  lines.push(`Headers: { "content-type": "application/json", "x-mcp-key": "${cfg.token}" }`);
-  lines.push(`Body: { "0": { "json": { "id": ${task.id}, "progress": 100, "status": "done", "lifecycleStatus": "completed", "output": "[your execution result]" } } }`);
-  lines.push(``);
-  lines.push(`Also report usage via:`);
-  lines.push(`POST ${cfg.httpBase}/api/trpc/usage.record`);
-  lines.push(`Headers: { "content-type": "application/json", "x-mcp-key": "${cfg.token}" }`);
-  lines.push(`Body: { "0": { "json": { "model": "...", "promptTokens": N, "completionTokens": N, "totalTokens": N, "callCount": 1, "agentId": ${cfg.agentId}, "source": "agent" } } }`);
-  lines.push(``);
-  lines.push(`⚠️ If you cannot call the API, just return the result here — the system will pick it up.`);
+  lines.push(`Do not call Tiangong APIs from this external process.`);
+  lines.push(`Return the task result on stdout only; the connector owns progress, result, and usage writeback.`);
   return lines.join("\n");
 }
 
@@ -1035,12 +1025,8 @@ async function executeTaskWithProgress(cfg, task) {
       L.info(`✅ 任务 ${task.name} 结果已回写 (${finalOutput.length} chars)`);
     }
 
-    // P9 + P5: Report usage after completion
-    // Runner already reports usage via its own reportUsage() when TIANGONG_REPORT_USAGE=true is passed to it
-    // Only fallback if runner won't report (execMode !== "command")
-    if (cfg.execMode !== "command") {
-      await reportUsage(cfg, task, result, true);
-    }
+    // P9 + P5: connector owns usage writeback; runners only return stdout.
+    await reportUsage(cfg, task, result, true);
   } catch (err) {
     const errMsg = err.message || String(err);
     L.error(`❌ 任务 ${task.name} 执行失败: ${errMsg}`);
@@ -1079,11 +1065,8 @@ async function executeTaskWithProgress(cfg, task) {
       }
     }
 
-    // P9 + P5: Report usage even on failure
-    // Runner already reports usage when execMode=command; only fallback otherwise
-    if (cfg.execMode !== "command") {
-      await reportUsage(cfg, task, errMsg, false);
-    }
+    // P9 + P5: connector owns usage writeback even on failure.
+    await reportUsage(cfg, task, errMsg, false);
   }
 }
 

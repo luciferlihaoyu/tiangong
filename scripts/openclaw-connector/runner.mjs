@@ -44,6 +44,10 @@ async function main() {
   try {
     // 1. 投递任务到 Agent session，等待有实际内容的回复
     const result = await callGatewayWithReply(sessionKey, prompt);
+    if (isOnlyStarted(result)) {
+      process.stderr.write(`[${displayName}/tg#${tiangongAgentId}/${openclawAgent}] awaiting final result\n`);
+      process.exit(2);
+    }
 
     // 2. 用量上报（不管结果怎么样都报）
     if (process.env.TIANGONG_REPORT_USAGE === "true") {
@@ -95,6 +99,9 @@ async function callGatewayWithReply(sessionKey, prompt) {
   if (match) {
     try {
       const payload = JSON.parse(match[0]);
+      if (isOnlyStarted(payload)) {
+        return "started";
+      }
       // 如果有 message/text/content 字段，用 Agent 的回复内容
       const replyText = payload.message || payload.text || payload.content || "";
       if (replyText && replyText.length > 0) {
@@ -107,6 +114,23 @@ async function callGatewayWithReply(sessionKey, prompt) {
 
   // 如果没有提取到内容，返回原始输出
   return trimmed;
+}
+
+function isOnlyStarted(value) {
+  if (typeof value === "string") {
+    return value.trim().toLowerCase() === "started";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const keys = ["status", "result", "message", "text", "content"];
+  const values = keys
+    .map((key) => value[key])
+    .filter((item) => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim().toLowerCase());
+
+  return values.length > 0 && values.every((item) => item === "started");
 }
 
 async function reportUsage(prompt, result, success) {
@@ -160,4 +184,3 @@ main().catch((err) => {
   console.error("Fatal:", err.message);
   process.exit(1);
 });
-

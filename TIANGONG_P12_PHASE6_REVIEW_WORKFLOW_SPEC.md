@@ -1,6 +1,6 @@
 # 天宫 P12：阶段 6 — 审核与长期工作流 Spec
 
-> 状态：Spec 待实现
+> 状态：✅ 已实现（2026-07-21 验证通过）
 > 日期：2026-06-22
 > 依赖：Phase 1（AgentCard + 状态机）✅ 已部署、Phase 2（Kanban UI）✅ 已部署
 
@@ -88,13 +88,13 @@ A2A-lite 六阶段规划的最后一块。Phase 1 和 Phase 2 已部署线上（
 
 | # | 验收项 | 状态 |
 |---|--------|------|
-| P0.1 | 任务可指定审核人 | ⬜ |
-| P0.2 | approve: review → done | ⬜ |
-| P0.3 | reject: review → failed | ⬜ |
-| P0.4 | requestChanges: review → running | ⬜ |
-| P0.5 | 审核操作写入审计事件 | ⬜ |
-| P0.6 | 审核面板：待审核任务列表 | ⬜ |
-| P1.1 | WS 任务通知广播 | ⬜ |
-| P1.2 | 审核通知通过 Mailbox 发送 | ⬜ |
-| P2.1 | 子任务自动 promote 父任务 | ⬜ |
-| P2.2 | 依赖链可视化 | ⬜ |
+| P0.1 | 任务可指定审核人 | ✅ |
+| P0.2 | approve: review → done | ✅ |
+| P0.3 | reject: review → failed | ✅ |
+| P0.4 | requestChanges: review → running | ✅ |
+| P0.5 | 审核操作写入审计事件 | ✅ |
+| P0.6 | 审核面板：待审核任务列表 | ✅ |
+| P1.1 | WS 任务通知广播 | ✅ |
+| P1.2 | 审核通知通过 Mailbox 发送 | ✅ |
+| P2.1 | 子任务自动 promote 父任务 | ✅ |
+| P2.2 | 依赖链可视化 | ✅ |

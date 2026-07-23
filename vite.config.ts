@@ -33,6 +33,16 @@ export default defineConfig(async ({ mode }) => {
     build: {
       outDir: path.resolve(__dirname, "dist/public"),
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            "react-vendor": ["react", "react-dom", "react-router"],
+            "trpc-vendor": ["@trpc/client", "@trpc/react-query", "@trpc/server", "@tanstack/react-query"],
+            "ui-vendor": ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tabs", "@radix-ui/react-tooltip", "@radix-ui/react-select"],
+            "three-vendor": ["three", "@react-three/fiber", "@react-three/drei"],
+          },
+        },
+      },
     },
   }
 })

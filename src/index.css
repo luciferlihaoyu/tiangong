@@ -30,6 +30,7 @@
     --accent-glow-gold: rgba(201, 168, 76, 0.1);
     --success: #4caf7d;
     --warning: #c9a84c;
+    --danger: #e8504a;
     --radius: 0.5rem;
     --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
@@ -56,6 +57,7 @@
     --accent-glow-gold: rgba(201, 168, 76, 0.08);
     --success: #3a9b66;
     --warning: #a68a38;
+    --danger: #c23a30;
   }
 
   body {

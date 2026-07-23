@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -36,8 +36,8 @@ app.use("*", async (c, next) => {
 });
 
 // ─── Auth helper for raw Hono routes ───
-async function requireAdmin(c: any): Promise<boolean> {
-  const authHeader = c.req.headers.get("authorization");
+async function requireAdmin(c: Context): Promise<boolean> {
+  const authHeader = c.req.header("authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
   const payload = await verifyToken(authHeader.slice(7));
   return !!payload && payload.role === "admin";
@@ -168,7 +168,7 @@ app.get("/api/admin/debug-keys", async (c) => {
   if (!isAdmin) {
     return c.json({ error: "需要管理员权限" }, 401);
   }
-  const results: any = {};
+  const results: Record<string, unknown> = {};
   results.envDatabaseUrl = !!process.env.DATABASE_URL;
   results.envTiangongApiKey = !!process.env.TIANGONG_API_KEY;
   results.envMcpKeys = Object.keys(process.env).filter(k => k.startsWith("TIANGONG_") && k.endsWith("_MCP_KEY"));
@@ -176,8 +176,8 @@ app.get("/api/admin/debug-keys", async (c) => {
   try {
     results.globalKeyCount = _globalApiKeys.size;
     results.globalKeyPrefixes = Array.from(_globalApiKeys).map(k => k.slice(0, 10));
-  } catch (e: any) {
-    results.globalKeyError = e.message;
+  } catch (e: unknown) {
+    results.globalKeyError = e instanceof Error ? e.message : String(e);
   }
   return c.json(results);
 });
@@ -293,8 +293,8 @@ app.get("/ws", async (c) => {
               `[WS] Pushed ${unreadMessages.length} offline messages to Agent ${agentId}`
             );
           }
-        } catch (e: any) {
-          console.warn(`[WS] Failed to push offline messages: ${e.message}`);
+        } catch (e: unknown) {
+          console.warn(`[WS] Failed to push offline messages: ${e instanceof Error ? e.message : String(e)}`);
         }
 
         // 通知 Dashboard：Agent 上线
@@ -304,13 +304,13 @@ app.get("/ws", async (c) => {
           status: "online",
           timestamp: new Date().toISOString(),
         });
-      } catch (e: any) {
-        console.error(`[WS] onOpen error for Agent ${agentId}:`, e.message);
+      } catch (e: unknown) {
+        console.error(`[WS] onOpen error for Agent ${agentId}:`, e instanceof Error ? e.message : String(e));
       }
     },
 
     onMessage: async (_evt, ws) => {
-      let data: any;
+      let data: unknown;
       try {
         data = JSON.parse(_evt.data as string);
       } catch {
@@ -319,7 +319,7 @@ app.get("/ws", async (c) => {
       }
 
       // 心跳处理
-      if (data.type === "ping") {
+      if (typeof data === "object" && data !== null && (data as Record<string, unknown>).type === "ping") {
         ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
 
         // 更新 lastHeartbeat
@@ -333,7 +333,7 @@ app.get("/ws", async (c) => {
       }
 
       // 其他消息类型可以在这里扩展
-      console.log(`[WS] Agent ${agentId} sent:`, data.type || "unknown");
+      console.log(`[WS] Agent ${agentId} sent:`, (typeof data === "object" && data !== null ? (data as Record<string, unknown>).type : undefined) || "unknown");
     },
 
     onClose: async (_evt, ws) => {
@@ -358,8 +358,8 @@ app.get("/ws", async (c) => {
         }
 
         console.log(`[WS] Agent ${agentId} disconnected`);
-      } catch (e: any) {
-        console.error(`[WS] onClose error for Agent ${agentId}:`, e.message);
+      } catch (e: unknown) {
+        console.error(`[WS] onClose error for Agent ${agentId}:`, e instanceof Error ? e.message : String(e));
       }
     },
 
@@ -392,14 +392,14 @@ app.get("/ws/dashboard", async (c) => {
 
     onMessage: (_evt, ws) => {
       // Dashboard 客户端一般只接收，不发送
-      let data: any;
+      let data: unknown;
       try {
         data = JSON.parse(_evt.data as string);
       } catch {
         return;
       }
 
-      if (data.type === "ping") {
+      if (typeof data === "object" && data !== null && (data as Record<string, unknown>).type === "ping") {
         ws.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
       }
     },
@@ -424,15 +424,15 @@ if (env.isProduction) {
 // Auto-create tables on startup (both dev and prod)
 try {
   await autoMigrate();
-} catch (e: any) {
-  console.warn("Auto-migration failed:", e.message);
+} catch (e: unknown) {
+  console.warn("Auto-migration failed:", e instanceof Error ? e.message : String(e));
 }
 
 // V2 migration — add new columns to existing tables
 try {
   await migrateV2();
-} catch (e: any) {
-  console.warn("V2 migration failed:", e.message);
+} catch (e: unknown) {
+  console.warn("V2 migration failed:", e instanceof Error ? e.message : String(e));
 }
 
 // Load MCP tokens from DB into global key set for API key verification
@@ -446,16 +446,16 @@ try {
     if (row.mcpToken && row.mcpToken.trim()) _globalApiKeys.add(row.mcpToken.trim());
   }
   console.log(`[Boot] Loaded ${_globalApiKeys.size} MCP tokens from DB`);
-} catch (e: any) {
-  console.warn("[Boot] MCP token load from DB failed:", e.message);
+} catch (e: unknown) {
+  console.warn("[Boot] MCP token load from DB failed:", e instanceof Error ? e.message : String(e));
 }
 
 // P5: Start Task Runner
 try {
   taskRunner.start();
   console.log("[Boot] Task Runner started");
-} catch (e: any) {
-  console.warn("[Boot] Task Runner start failed:", e.message);
+} catch (e: unknown) {
+  console.warn("[Boot] Task Runner start failed:", e instanceof Error ? e.message : String(e));
 }
 
 const port = parseInt(process.env.PORT || "3000");

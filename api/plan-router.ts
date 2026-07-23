@@ -284,19 +284,20 @@ export const planRouter = createRouter({
    辅助函数
    ═══════════════════════════════════════════ */
 
-function buildAgentHierarchy(
-  agentRows: Array<{ id: number; name: string; role: string | null; reportsTo: number | null; status: string }>
-) {
-  const tree: Array<{
-    id: number;
-    name: string;
-    role: string | null;
-    status: string;
-    reportsTo: number | null;
-    children: any[];
-  }> = [];
+type HierarchyAgent = {
+  readonly id: number;
+  readonly name: string;
+  readonly role: string | null;
+  readonly reportsTo: number | null;
+  readonly status: string;
+};
 
-  const agentMap = new Map(agentRows.map((a) => [a.id, { ...a, children: [] as any[] }]));
+type HierarchyAgentNode = HierarchyAgent & { readonly children: HierarchyAgentNode[] };
+
+function buildAgentHierarchy(agentRows: HierarchyAgent[]): HierarchyAgentNode[] {
+  const tree: HierarchyAgentNode[] = [];
+
+  const agentMap = new Map(agentRows.map((a): [number, HierarchyAgentNode] => [a.id, { ...a, children: [] }]));
 
   for (const agent of agentMap.values()) {
     if (agent.reportsTo && agentMap.has(agent.reportsTo)) {

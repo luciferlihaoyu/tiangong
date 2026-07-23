@@ -23,7 +23,7 @@
  */
 
 import { getDb } from "../queries/connection";
-import { tasks, agents, taskMessages, taskArtifacts } from "@db/schema";
+import { tasks, agents, taskMessages, taskArtifacts, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
@@ -207,7 +207,7 @@ class TaskRunner {
       this.consecutiveErrors = 0;
     } catch (e: any) {
       this.consecutiveErrors++;
-      console.error(`[TaskRunner] Tick error (${this.consecutiveErrors}):`, e.message);
+      console.error(`[TaskRunner] Tick error (${this.consecutiveErrors}):`, e instanceof Error ? e.message : String(e));
     } finally {
       this.tickRunning = false;
     }
@@ -216,13 +216,13 @@ class TaskRunner {
   /** A2A-lite v0.1: record task event directly via DB */
   private async recordEvent(taskId: number, eventType: string, content?: string, metadata?: Record<string, unknown>, agentId?: number) {
     const db = getDb();
-    await db.insert(taskMessages).values({
-      taskId,
-      fromAgentId: agentId ?? null,
-      eventType: eventType as any,
-      content: content ?? null,
-      metadata: metadata ? JSON.stringify(metadata) : null,
-    });
+      await db.insert(taskMessages).values({
+        taskId,
+        fromAgentId: agentId ?? null,
+        eventType: eventType as TaskMessage["eventType"],
+        content: content ?? null,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+      });
   }
 
   /** A2A-lite v0.1: record artifact directly via DB */
@@ -246,7 +246,7 @@ class TaskRunner {
       // 安全领取：只有 status 仍是 queued 才更新
       await db
         .update(tasks)
-        .set({ status: "running", lifecycleStatus: "claimed", progress: 10, claimedAt: new Date(), updatedAt: new Date() as any })
+        .set({ status: "running", lifecycleStatus: "claimed", progress: 10, claimedAt: new Date(), updatedAt: new Date() })
         .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
 
       // 重新读取确认领取成功
@@ -332,7 +332,7 @@ class TaskRunner {
           .set({
             lifecycleStatus: "awaiting_result",
             output: outputText || null,
-            updatedAt: new Date() as any,
+            updatedAt: new Date(),
           })
           .where(eq(tasks.id, task.id));
 
@@ -364,7 +364,7 @@ class TaskRunner {
             progress: 95,
             output: outputText,
             error: errorText ?? null,
-            updatedAt: new Date() as any,
+            updatedAt: new Date(),
           })
           .where(eq(tasks.id, task.id));
 
@@ -379,7 +379,7 @@ class TaskRunner {
             lifecycleStatus: "completed",
             progress: 100,
             completedAt: new Date(),
-            updatedAt: new Date() as any,
+            updatedAt: new Date(),
           })
           .where(eq(tasks.id, task.id));
 
@@ -439,7 +439,7 @@ class TaskRunner {
         );
       }
     } catch (e: any) {
-      console.error(`[TaskRunner] Fatal error executing task ${task.taskId}:`, e.message);
+      console.error(`[TaskRunner] Fatal error executing task ${task.taskId}:`, e instanceof Error ? e.message : String(e));
       // 尝试回写失败状态
       try {
         await db
@@ -447,9 +447,9 @@ class TaskRunner {
           .set({
             status: "failed",
             lifecycleStatus: "failed",
-            error: `Runner internal error: ${e.message}`.slice(0, CONFIG.resultMaxChars),
+            error: `Runner internal error: ${e instanceof Error ? e.message : String(e)}`.slice(0, CONFIG.resultMaxChars),
             failedAt: new Date(),
-            updatedAt: new Date() as any,
+            updatedAt: new Date(),
           })
           .where(eq(tasks.id, task.id));
 
@@ -758,11 +758,12 @@ class TaskRunner {
       }
 
       return { output: text, error: null, success: true };
-    } catch (e: any) {
-      if (e?.name === "AbortError") {
+    } catch (e: unknown) {
+      const isAbort = typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
+      if (isAbort) {
         return { output: "", error: `Gateway request timed out after ${timeoutMs}ms`, success: false };
       }
-      return { output: "", error: `Gateway request failed: ${e?.message ?? String(e)}`, success: false };
+      return { output: "", error: `Gateway request failed: ${e instanceof Error ? e.message : String(e)}`, success: false };
     } finally {
       clearTimeout(timer);
     }
@@ -782,8 +783,11 @@ class TaskRunner {
       if (typeof parsed?.reply === "string") return parsed.reply;
       if (Array.isArray(parsed?.payloads)) {
         const texts = parsed.payloads
-          .map((p: any) => p?.text)
-          .filter((t: any) => typeof t === "string" && t.trim());
+          .map((p: unknown) => {
+            if (typeof p !== "object" || p === null) return undefined;
+            return (p as { text?: unknown }).text;
+          })
+          .filter((t: unknown) => typeof t === "string" && t.trim());
         if (texts.length > 0) return texts.join("\n");
       }
     } catch {

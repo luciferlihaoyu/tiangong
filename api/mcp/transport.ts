@@ -14,6 +14,21 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { getMcpServer } from "./server";
 import { verifyMcpKey, extractApiKey, writeAuditLog } from "./auth";
 
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getStringProperty(value: JsonObject, key: string): string | undefined {
+  const property = value[key];
+  return typeof property === "string" ? property : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ─── Session store (sessionId → transport) ───
 const sessions = new Map<
   string,
@@ -147,17 +162,17 @@ export function createMcpApp(): Hono {
     // 3. Handle the request through the transport
     try {
       // Parse request body for audit purposes
-      let requestBody: any;
+      let requestBody: JsonObject;
       try {
-        requestBody = await c.req.raw.clone().json();
+        const parsed: unknown = await c.req.raw.clone().json();
+        requestBody = isJsonObject(parsed) ? parsed : {};
       } catch {
         requestBody = {};
       }
 
-      const toolName =
-        requestBody?.method === "tools/call"
-          ? requestBody?.params?.name || "tools/call"
-          : requestBody?.method || "unknown";
+      const params = isJsonObject(requestBody.params) ? requestBody.params : undefined;
+      const method = getStringProperty(requestBody, "method");
+      const toolName = method === "tools/call" ? getStringProperty(params ?? {}, "name") ?? "tools/call" : method ?? "unknown";
 
       // Delegate to the transport
       const response = await transport.handleRequest(c.req.raw);
@@ -178,17 +193,16 @@ export function createMcpApp(): Hono {
       let errorMsg: string | undefined;
       let paramsSummary: string;
 
-      if (requestBody?.method === "tools/call") {
+      if (method === "tools/call") {
+        const args = params && isJsonObject(params.arguments) ? params.arguments : undefined;
         paramsSummary = JSON.stringify({
-          tool: requestBody?.params?.name,
-          argKeys: requestBody?.params?.arguments
-            ? Object.keys(requestBody.params.arguments)
-            : [],
+          tool: params ? getStringProperty(params, "name") : undefined,
+          argKeys: args ? Object.keys(args) : [],
         });
-      } else if (requestBody?.method) {
-        paramsSummary = requestBody.method;
-        if (requestBody?.params) {
-          paramsSummary += " " + JSON.stringify(requestBody.params).slice(0, 400);
+      } else if (method) {
+        paramsSummary = method;
+        if (params) {
+          paramsSummary += " " + JSON.stringify(params).slice(0, 400);
         }
       } else {
         paramsSummary = "unknown";
@@ -196,8 +210,9 @@ export function createMcpApp(): Hono {
 
       if (isError) {
         try {
-          const errBody = await response.clone().json() as Record<string, any>;
-          errorMsg = errBody?.error?.message || `HTTP ${response.status}`;
+          const errBody: unknown = await response.clone().json();
+          const errorBody = isJsonObject(errBody) && isJsonObject(errBody.error) ? errBody.error : undefined;
+          errorMsg = errorBody ? getStringProperty(errorBody, "message") ?? `HTTP ${response.status}` : `HTTP ${response.status}`;
         } catch {
           errorMsg = `HTTP ${response.status}`;
         }
@@ -213,14 +228,15 @@ export function createMcpApp(): Hono {
       });
 
       return response;
-    } catch (err: any) {
+    } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
+      const message = getErrorMessage(err);
       writeAuditLog({
         keyId: authResult.apiKey!.id,
         tool: "transport_error",
-        params: (err.message || "unknown").slice(0, 500),
+        params: message.slice(0, 500),
         result: "error",
-        error: err.message,
+        error: message,
         durationMs,
       });
 
@@ -229,7 +245,7 @@ export function createMcpApp(): Hono {
           jsonrpc: "2.0",
           error: {
             code: -32603,
-            message: err.message || "Internal server error",
+            message,
           },
           id: null,
         },
@@ -270,8 +286,8 @@ export function createMcpApp(): Hono {
     try {
       const session = sessions.get(sessionId)!;
       return await session.transport.handleRequest(c.req.raw);
-    } catch (err: any) {
-      console.error("MCP SSE error:", err.message);
+    } catch (err: unknown) {
+      console.error("MCP SSE error:", getErrorMessage(err));
       return c.json({ error: "SSE not available" }, 500);
     }
   });

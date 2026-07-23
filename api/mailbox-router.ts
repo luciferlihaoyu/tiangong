@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 
 const mailboxTypeEnum = z.enum([
   "direct",
@@ -27,6 +28,12 @@ const mailboxStatusEnum = z.enum([
 type AgentRow = typeof agents.$inferSelect;
 type MailboxMessageRow = typeof mailboxMessages.$inferSelect;
 type MailboxType = typeof mailboxMessages.$inferInsert["type"];
+type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+
+function getInsertId(result: InsertResult): number | undefined {
+  const insertId = Array.isArray(result) ? result[0].insertId : result.insertId;
+  return insertId === 0 ? undefined : insertId;
+}
 
 function normalizeMailboxId(mailboxId: string) {
   return mailboxId.trim();
@@ -105,7 +112,7 @@ async function recordMailboxEvent(input: {
   });
 }
 
-function parsePayload(payloadJson: string | null) {
+function parsePayload(payloadJson: string | null): unknown {
   if (!payloadJson) return null;
   try {
     return JSON.parse(payloadJson);
@@ -154,7 +161,7 @@ async function createMailboxMessage(input: {
     artifactId: input.artifactId ?? null,
   });
 
-  let messageId = (result as any).insertId as number | undefined;
+  let messageId = getInsertId(result);
   if (!messageId) {
     const row = await db
       .select({ id: mailboxMessages.id })
@@ -233,7 +240,7 @@ export const mailboxRouter = createRouter({
       type: mailboxTypeEnum.default("direct"),
       subject: z.string().max(255).optional(),
       body: z.string().max(10000).optional(),
-      payload: z.record(z.string(), z.any()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
       replyToMessageId: z.number().optional(),
       artifactId: z.number().optional(),
     }))
@@ -267,7 +274,7 @@ export const mailboxRouter = createRouter({
       threadId: z.number().optional(),
       subject: z.string().max(255).optional(),
       body: z.string().max(10000).optional(),
-      payload: z.record(z.string(), z.any()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ input }) => {
       const fromAgent = await resolveMailbox(input.fromMailboxId);
@@ -304,7 +311,7 @@ export const mailboxRouter = createRouter({
       priority: z.number().int().optional(),
       subject: z.string().max(255).optional(),
       body: z.string().max(10000).optional(),
-      payload: z.record(z.string(), z.any()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -386,7 +393,7 @@ export const mailboxRouter = createRouter({
       taskId: z.number(),
       reason: z.string().max(10000).optional(),
       subject: z.string().max(255).optional(),
-      payload: z.record(z.string(), z.any()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -509,7 +516,7 @@ export const mailboxRouter = createRouter({
       messageId: z.number(),
       fromMailboxId: z.string().min(1).max(20),
       body: z.string().max(10000).optional(),
-      payload: z.record(z.string(), z.any()).optional(),
+      payload: z.record(z.string(), z.unknown()).optional(),
       artifactId: z.number().optional(),
       subject: z.string().max(255).optional(),
     }))
@@ -534,7 +541,7 @@ export const mailboxRouter = createRouter({
         replyToMessageId: message.id,
         artifactId: input.artifactId ?? null,
       });
-      let replyMessageId = (result as any).insertId as number | undefined;
+      let replyMessageId = getInsertId(result);
       if (!replyMessageId) {
         const row = await db
           .select({ id: mailboxMessages.id })

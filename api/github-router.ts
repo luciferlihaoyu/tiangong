@@ -18,7 +18,8 @@ import {
   githubAuditLog,
   agents,
 } from "@db/schema";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, type SQL } from "drizzle-orm";
+import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 import { env } from "./lib/env";
 
 /* ═══════════════════════════════════════════
@@ -26,6 +27,19 @@ import { env } from "./lib/env";
    ═══════════════════════════════════════════ */
 
 const GITHUB_API_BASE = "https://api.github.com";
+type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+
+function getInsertId(result: InsertResult): number {
+  return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isInstallationTokenResponse(value: unknown): value is { readonly token?: string } {
+  return typeof value === "object" && value !== null && ("token" in value ? typeof value.token === "string" : true);
+}
 
 function githubReadiness() {
   return {
@@ -79,10 +93,10 @@ async function generateInstallationToken(): Promise<string | null> {
       return null;
     }
 
-    const data = (await response.json()) as any;
-    return data.token ?? null;
-  } catch (e: any) {
-    console.error(`[GitHub] generateInstallationToken error: ${e.message}`);
+    const data: unknown = await response.json();
+    return isInstallationTokenResponse(data) ? data.token ?? null : null;
+  } catch (e: unknown) {
+    console.error(`[GitHub] generateInstallationToken error: ${getErrorMessage(e)}`);
     return null;
   }
 }
@@ -118,8 +132,8 @@ async function mergeGitHubPR(
 
     const errBody = await response.text().catch(() => "");
     return { success: false, skipped: false, reason: `github_api_error: ${response.status} ${errBody.slice(0, 200)}` };
-  } catch (e: any) {
-    return { success: false, skipped: false, reason: `exception: ${e.message}` };
+  } catch (e: unknown) {
+    return { success: false, skipped: false, reason: `exception: ${getErrorMessage(e)}` };
   }
 }
 
@@ -221,7 +235,7 @@ export const githubRouter = createRouter({
         active: "true",
       });
 
-      const insertId = (result as any).insertId as number;
+      const insertId = getInsertId(result);
       const created = await db.select().from(githubRepos).where(eq(githubRepos.id, insertId)).then((r) => r[0]);
 
       return { success: true, repo: created };
@@ -251,7 +265,7 @@ export const githubRouter = createRouter({
       repo = await db
         .select()
         .from(githubRepos)
-        .where(eq(githubRepos.id, (result as any).insertId as number))
+        .where(eq(githubRepos.id, getInsertId(result)))
         .then((rows) => rows[0]);
     } else if (repo.active !== "true") {
       await db.update(githubRepos).set({ active: "true" }).where(eq(githubRepos.id, repo.id));
@@ -295,13 +309,13 @@ export const githubRouter = createRouter({
     .input(z.object({ repoId: z.number().optional(), agentId: z.number().optional() }))
     .query(async ({ input }) => {
       const db = getDb();
-      const conditions: ReturnType<typeof eq>[] = [];
+      const conditions: SQL[] = [];
 
       if (input.repoId) conditions.push(eq(githubRepoPermissions.repoId, input.repoId));
       if (input.agentId) conditions.push(eq(githubRepoPermissions.agentId, input.agentId));
       conditions.push(eq(githubRepoPermissions.active, "true"));
 
-      const where = conditions.length === 1 ? conditions[0] : and(...(conditions as [any, any, ...any[]]));
+      const where = conditions.length === 1 ? conditions[0] : and(...conditions);
 
       return db
         .select()
@@ -347,7 +361,7 @@ export const githubRouter = createRouter({
         active: "true",
       });
 
-      return { success: true, id: (result as any).insertId };
+      return { success: true, id: getInsertId(result) };
     }),
 
   revokePermission: adminQuery
@@ -374,13 +388,13 @@ export const githubRouter = createRouter({
     )
     .query(async ({ input }) => {
       const db = getDb();
-      const conditions: ReturnType<typeof eq>[] = [eq(githubPullRequests.status, input?.status ?? "pending")];
+      const conditions: SQL[] = [eq(githubPullRequests.status, input?.status ?? "pending")];
 
       if (input?.repoId) {
         conditions.push(eq(githubPullRequests.repoId, input.repoId));
       }
 
-      const where = conditions.length === 1 ? conditions[0] : and(...(conditions as [any, any, ...any[]]));
+      const where = conditions.length === 1 ? conditions[0] : and(...conditions);
 
       return db
         .select()
@@ -458,7 +472,7 @@ export const githubRouter = createRouter({
         status: "pending",
       });
 
-      const insertId = (result as any).insertId as number;
+      const insertId = getInsertId(result);
 
       await db.insert(githubAuditLog).values({
         prId: insertId,
@@ -598,11 +612,15 @@ export const githubRouter = createRouter({
     )
     .query(async ({ input }) => {
       const db = getDb();
-      let query = db.select().from(githubAuditLog).orderBy(desc(githubAuditLog.createdAt)).limit(input?.limit ?? 50);
       if (input?.prId) {
-        query = query.where(eq(githubAuditLog.prId, input.prId)) as any;
+        return db
+          .select()
+          .from(githubAuditLog)
+          .where(eq(githubAuditLog.prId, input.prId))
+          .orderBy(desc(githubAuditLog.createdAt))
+          .limit(input.limit);
       }
-      return query;
+      return db.select().from(githubAuditLog).orderBy(desc(githubAuditLog.createdAt)).limit(input?.limit ?? 50);
     }),
 
   listAgents: authedQuery.query(async () => {

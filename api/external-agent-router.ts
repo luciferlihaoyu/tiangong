@@ -1,9 +1,30 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { externalAgents } from "@db/schema";
+import { externalAgents, type ExternalAgent } from "@db/schema";
 import { eq, desc } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function extractChatText(data: unknown): unknown {
+  if (typeof data !== "object" || data === null) return data;
+  const record = data as Record<string, unknown>;
+  const choices = record.choices;
+  if (!Array.isArray(choices)) return data;
+  const first = choices[0] as Record<string, unknown> | undefined;
+  const message = first?.message as Record<string, unknown> | undefined;
+  const delta = first?.delta as Record<string, unknown> | undefined;
+  const content = message?.content ?? delta?.content;
+  if (typeof content === "string" && content.trim()) return content;
+  return data;
+}
+
+interface InsertResult {
+  insertId: number;
+}
 
 export const externalAgentRouter = createRouter({
   // ─── 外部 Agent 注册 ───
@@ -29,7 +50,7 @@ export const externalAgentRouter = createRouter({
         config: input.config ? JSON.stringify(input.config) : null,
         status: "offline",
       });
-      return { success: true, id: (result as any).insertId as number };
+      return { success: true, id: (result as unknown as InsertResult).insertId as number };
     }),
 
   list: publicQuery.query(async () => {
@@ -115,7 +136,7 @@ export const externalAgentRouter = createRouter({
 
 // ─── 平台适配器 ───
 
-async function sendToOpenCode(agent: any, message: string) {
+async function sendToOpenCode(agent: ExternalAgent, message: string) {
   const endpoint = agent.endpoint || "http://localhost:4096";
   try {
     const res = await fetch(`${endpoint}/api/chat`, {
@@ -123,18 +144,18 @@ async function sendToOpenCode(agent: any, message: string) {
       headers: { "Content-Type": "application/json", ...(agent.apiKey ? { "Authorization": `Bearer ${agent.apiKey}` } : {}) },
       body: JSON.stringify({ prompt: message, model: agent.model || undefined }),
     });
-    const data = await res.json();
+    const data: unknown = await res.json();
     return { success: true, response: data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+  } catch (e: unknown) {
+    return { success: false, error: errorMessage(e) };
   }
 }
 
-async function sendToCodex(_agent: any, _message: string) {
+async function sendToCodex(_agent: ExternalAgent, _message: string) {
   return { success: true, note: "Codex ACP integration - use OpenClaw gateway sessions.send" };
 }
 
-async function sendToArkClaw(agent: any, message: string) {
+async function sendToArkClaw(agent: ExternalAgent, message: string) {
   const endpoint = agent.endpoint || "https://ark.cn-beijing.volces.com/api/v3";
   try {
     const res = await fetch(`${endpoint}/chat/completions`, {
@@ -142,14 +163,14 @@ async function sendToArkClaw(agent: any, message: string) {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${agent.apiKey}` },
       body: JSON.stringify({ model: agent.model || "ep-xxx", messages: [{ role: "user", content: message }] }),
     });
-    const data: any = await res.json();
-    return { success: true, response: data.choices?.[0]?.message?.content || data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+    const data: unknown = await res.json();
+    return { success: true, response: extractChatText(data) };
+  } catch (e: unknown) {
+    return { success: false, error: errorMessage(e) };
   }
 }
 
-async function sendToHermes(agent: any, message: string) {
+async function sendToHermes(agent: ExternalAgent, message: string) {
   const endpoint = agent.endpoint || "";
   if (!endpoint) return { success: false, error: "Hermes endpoint not configured" };
   try {
@@ -158,14 +179,14 @@ async function sendToHermes(agent: any, message: string) {
       headers: { "Content-Type": "application/json", ...(agent.apiKey ? { "Authorization": `Bearer ${agent.apiKey}` } : {}) },
       body: JSON.stringify({ message, agent: agent.name }),
     });
-    const data = await res.json();
+    const data: unknown = await res.json();
     return { success: true, response: data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+  } catch (e: unknown) {
+    return { success: false, error: errorMessage(e) };
   }
 }
 
-async function sendToOpenAI(agent: any, message: string) {
+async function sendToOpenAI(agent: ExternalAgent, message: string) {
   const endpoint = agent.endpoint || "https://api.openai.com/v1";
   try {
     const res = await fetch(`${endpoint}/chat/completions`, {
@@ -173,14 +194,14 @@ async function sendToOpenAI(agent: any, message: string) {
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${agent.apiKey}` },
       body: JSON.stringify({ model: agent.model || "gpt-4", messages: [{ role: "user", content: message }] }),
     });
-    const data: any = await res.json();
-    return { success: true, response: data.choices?.[0]?.message?.content || data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+    const data: unknown = await res.json();
+    return { success: true, response: extractChatText(data) };
+  } catch (e: unknown) {
+    return { success: false, error: errorMessage(e) };
   }
 }
 
-async function sendToCustom(agent: any, message: string) {
+async function sendToCustom(agent: ExternalAgent, message: string) {
   const endpoint = agent.endpoint || "";
   if (!endpoint) return { success: false, error: "Custom agent endpoint not configured" };
   try {
@@ -189,9 +210,9 @@ async function sendToCustom(agent: any, message: string) {
       headers: { "Content-Type": "application/json", ...(agent.apiKey ? { "Authorization": `Bearer ${agent.apiKey}` } : {}) },
       body: JSON.stringify({ message, ...(agent.config ? JSON.parse(agent.config) : {}) }),
     });
-    const data = await res.json();
+    const data: unknown = await res.json();
     return { success: true, response: data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+  } catch (e: unknown) {
+    return { success: false, error: errorMessage(e) };
   }
 }

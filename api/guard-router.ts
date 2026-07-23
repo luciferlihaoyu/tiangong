@@ -9,14 +9,28 @@
 import { z } from "zod";
 import { createRouter, publicQuery, adminQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { modelAllowlist, highCostModelAuth, agents, tokenUsage } from "@db/schema";
+import {
+  modelAllowlist,
+  highCostModelAuth,
+  agents,
+  tokenUsage,
+  type InsertHighCostModelAuth,
+  type InsertModelAllowlist,
+  type InsertTokenUsage,
+} from "@db/schema";
 import { eq, and, gte, lte, desc, sql, or, type SQL } from "drizzle-orm";
+import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 
 /**
  * 高价模型判定阈值（costCents per call）
  * GPT-5.5 high 等模型 costCents >= 100 视为高价
  */
 const HIGH_COST_THRESHOLD_CENTS = 100;
+type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+
+function getInsertId(result: InsertResult): number {
+  return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+}
 
 /** 已知高价模型列表（硬编码 + 数据库动态维护） */
 const KNOWN_HIGH_COST_MODELS = [
@@ -125,13 +139,14 @@ export const guardRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(modelAllowlist).values({
+      const values = {
         agentId: input.agentId,
         model: input.model,
         reason: input.reason ?? null,
         createdBy: input.createdBy ?? "admin",
-      } as any);
-      const insertId = (result as any).insertId;
+      } satisfies InsertModelAllowlist;
+      const result = await db.insert(modelAllowlist).values(values);
+      const insertId = getInsertId(result);
       return { id: insertId, model: input.model, agentId: input.agentId };
     }),
 
@@ -192,7 +207,7 @@ export const guardRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      const values: Record<string, unknown> = {
+      const values: InsertHighCostModelAuth = {
         agentId: input.agentId,
         model: input.model,
         reason: input.reason,
@@ -200,8 +215,8 @@ export const guardRouter = createRouter({
       };
       if (input.expiresAt) values.expiresAt = new Date(input.expiresAt);
 
-      const result = await db.insert(highCostModelAuth).values(values as any);
-      const insertId = (result as any).insertId;
+      const result = await db.insert(highCostModelAuth).values(values);
+      const insertId = getInsertId(result);
       return { id: insertId };
     }),
 
@@ -346,7 +361,7 @@ export const guardRouter = createRouter({
       }
 
       // 记录用量
-      const values: Record<string, unknown> = {
+      const values: InsertTokenUsage = {
         model: input.model,
         provider: input.provider ?? "unknown",
         promptTokens: input.promptTokens,
@@ -363,8 +378,8 @@ export const guardRouter = createRouter({
       if (input.traceId !== undefined) values.traceId = input.traceId;
       if (input.startedAt) values.startedAt = new Date(input.startedAt);
 
-      const result = await db.insert(tokenUsage).values(values as any);
-      const insertId = (result as any).insertId;
+      const result = await db.insert(tokenUsage).values(values);
+      const insertId = getInsertId(result);
 
       // P10.4: 更新 Agent 已用预算
       if (input.agentId && input.costCents > 0) {

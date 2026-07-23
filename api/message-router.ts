@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { messages, agents } from "@db/schema";
+import { messages, agents, type InsertMessage, type Message } from "@db/schema";
 import { eq, desc, asc, sql, and, or, isNull, lt, gte, type SQL } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 
 export const messageRouter = createRouter({
   list: publicQuery.query(async () => {
@@ -84,7 +85,7 @@ export const messageRouter = createRouter({
       }
 
       // ── 构造插入值 ──
-      const values: Record<string, unknown> = {
+      const values: InsertMessage = {
         fromAgent: input.fromAgent,
         toAgent: input.toAgent,
         content: input.content,
@@ -103,8 +104,8 @@ export const messageRouter = createRouter({
         values.parentMessageId = input.parentMessageId;
       if (input.expiresAt) values.expiresAt = new Date(input.expiresAt);
 
-      const result = await db.insert(messages).values(values as any);
-      const insertId = (result as any).insertId;
+      const result = await db.insert(messages).values(values);
+      const insertId = getInsertId(result);
 
       // Increment sender's message count
       await db
@@ -113,7 +114,7 @@ export const messageRouter = createRouter({
         .where(eq(agents.id, input.fromAgent));
 
       // ── 获取完整消息 ──
-      let fullMessage: any = null;
+      let fullMessage: Message | null = null;
       if (insertId) {
         const rows = await db
           .select()
@@ -144,10 +145,11 @@ export const messageRouter = createRouter({
               fullMessage.deliveredAt = new Date();
             }
           }
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : String(e);
           console.warn(
             `[WS] Failed to push message to Agent ${input.toAgent}:`,
-            e.message
+            message
           );
         }
       }
@@ -384,7 +386,7 @@ export const messageRouter = createRouter({
                 .set({
                   status: "delivered",
                   deliveredAt: new Date(),
-                  retryCount: sql`${messages.retryCount} + 1` as any,
+                  retryCount: sql`${messages.retryCount} + 1`,
                 })
                 .where(eq(messages.id, msg.id));
               replayed++;
@@ -393,7 +395,7 @@ export const messageRouter = createRouter({
               await db
                 .update(messages)
                 .set({
-                  retryCount: sql`${messages.retryCount} + 1` as any,
+                  retryCount: sql`${messages.retryCount} + 1`,
                 })
                 .where(eq(messages.id, msg.id));
             }
@@ -471,7 +473,7 @@ export const messageRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
 
-      const values: Record<string, unknown> = {
+      const values: InsertMessage = {
         fromAgent: input.fromAgent,
         toAgent: 0,
         content: input.content,
@@ -481,8 +483,8 @@ export const messageRouter = createRouter({
       };
       if (input.correlationId) values.correlationId = input.correlationId;
 
-      const result = await db.insert(messages).values(values as any);
-      const insertId = (result as any).insertId;
+      const result = await db.insert(messages).values(values);
+      const insertId = getInsertId(result);
 
       const onlineAgents = wsManager.getOnlineAgents();
       const broadcastPayload = {
@@ -582,7 +584,23 @@ export const messageRouter = createRouter({
 /**
  * 序列化消息（将 Date 字段转成 ISO 字符串），以便 JSON 传输。
  */
-function serializeMessage(msg: any): any {
+type SerializedMessage = Omit<Message, "createdAt" | "readAt" | "ackedAt" | "deliveredAt" | "expiresAt"> & {
+  createdAt: string;
+  readAt: string | null;
+  ackedAt: string | null;
+  deliveredAt: string | null;
+  expiresAt: string | null;
+};
+
+type DefaultMessagePayloadInput = Pick<Message, "fromAgent" | "toAgent" | "content" | "type">;
+type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+
+function getInsertId(result: InsertResult): number | undefined {
+  const insertId = Array.isArray(result) ? result[0].insertId : result.insertId;
+  return insertId === 0 ? undefined : insertId;
+}
+
+function serializeMessage(msg: Message): SerializedMessage {
   return {
     ...msg,
     createdAt: msg.createdAt instanceof Date ? msg.createdAt.toISOString() : msg.createdAt,
@@ -596,14 +614,25 @@ function serializeMessage(msg: any): any {
 /**
  * 当无法从 DB 查询完整消息时，构造默认消息 payload。
  */
-function defaultMessagePayload(input: any, insertId: number): any {
+function defaultMessagePayload(input: DefaultMessagePayloadInput, insertId: number | undefined): SerializedMessage {
   return {
-    id: insertId,
+    id: insertId ?? 0,
     fromAgent: input.fromAgent,
     toAgent: input.toAgent,
     content: input.content,
     type: input.type,
     status: "delivered",
+    conversationId: null,
+    correlationId: null,
+    idempotencyKey: null,
+    taskId: null,
+    parentMessageId: null,
+    readAt: null,
+    ackedAt: null,
+    deliveredAt: null,
+    expiresAt: null,
+    retryCount: 0,
+    priority: 0,
     createdAt: new Date().toISOString(),
   };
 }

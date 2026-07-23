@@ -1,9 +1,46 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type AgentCard } from "@db/schema";
+import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type Agent, type AgentCard } from "@db/schema";
 import { eq, like, and, or, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
+
+type AgentNode = Agent & { children: AgentNode[] };
+type AgentCapability = AgentCard["capabilities"][number];
+type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+
+function getInsertId(result: InsertResult): number {
+  return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeCapabilityItem(item: unknown): AgentCapability {
+  if (typeof item === "string") {
+    return { category: "general", items: [item], level: "intermediate" };
+  }
+  if (!isRecord(item)) {
+    return { category: "general", items: [], level: "intermediate" };
+  }
+  const rawItems = item.items;
+  const items = Array.isArray(rawItems)
+    ? rawItems.filter((entry): entry is string => typeof entry === "string")
+    : typeof rawItems === "string"
+      ? [rawItems]
+      : [];
+  return {
+    category: typeof item.category === "string" ? item.category : "general",
+    items,
+    level: isCapabilityLevel(item.level) ? item.level : "intermediate",
+  };
+}
+
+function isCapabilityLevel(value: unknown): value is AgentCapability["level"] {
+  return value === "expert" || value === "advanced" || value === "intermediate" || value === "beginner";
+}
 
 export const agentRouter = createRouter({
   list: publicQuery.query(async () => {
@@ -43,7 +80,7 @@ export const agentRouter = createRouter({
         sourceApiKey: z.string().max(255).optional(),
         sourceEndpoint: z.string().max(500).optional(),
         // A2A-lite v0.1
-        agentCard: z.record(z.string(), z.any()).optional(),
+        agentCard: z.record(z.string(), z.unknown()).optional(),
         openclawAgent: z.string().max(100).optional(),
         canModifyTiangongCore: z.boolean().optional(),
         canSendExternalMessage: z.boolean().optional(),
@@ -71,7 +108,7 @@ export const agentRouter = createRouter({
         canModifyTiangongCore: input.canModifyTiangongCore ? "true" : "false",
         canSendExternalMessage: input.canSendExternalMessage ? "true" : "false",
       });
-      const insertId = (result as any).insertId;
+      const insertId = getInsertId(result);
 
       // P10.3: 自动同步模型白名单
       if (input.model && insertId) {
@@ -123,7 +160,7 @@ export const agentRouter = createRouter({
         sourceApiKey: z.string().max(255).optional(),
         sourceEndpoint: z.string().max(500).optional(),
         // A2A-lite v0.1
-        agentCard: z.record(z.string(), z.any()).optional(),
+        agentCard: z.record(z.string(), z.unknown()).optional(),
         openclawAgent: z.string().max(100).optional(),
         canModifyTiangongCore: z.boolean().optional(),
         canSendExternalMessage: z.boolean().optional(),
@@ -371,16 +408,17 @@ export const agentRouter = createRouter({
     const allAgents = await db.select().from(agents);
 
     // Build a tree from orgId/departmentId/reportsTo
-    const byId = new Map(allAgents.map(a => [a.id, { ...a, children: [] as typeof allAgents }]));
-    const roots: typeof allAgents = [];
+    const byId = new Map(allAgents.map((a): [number, AgentNode] => [a.id, { ...a, children: [] }]));
+    const roots: AgentNode[] = [];
 
     for (const a of allAgents) {
       if (a.reportsTo && byId.has(a.reportsTo)) {
-        const parent = byId.get(a.reportsTo)! as any;
-        parent.children = parent.children || [];
-        parent.children.push(byId.get(a.id)!);
+        const parent = byId.get(a.reportsTo);
+        const child = byId.get(a.id);
+        if (parent && child) parent.children.push(child);
       } else {
-        roots.push(byId.get(a.id)!);
+        const root = byId.get(a.id);
+        if (root) roots.push(root);
       }
     }
 
@@ -463,7 +501,7 @@ export const agentRouter = createRouter({
     .input(
       z.object({
         agentId: z.number(),
-        card: z.record(z.string(), z.any()),
+        card: z.record(z.string(), z.unknown()),
       })
     )
     .mutation(async ({ input }) => {
@@ -483,7 +521,7 @@ export const agentRouter = createRouter({
       const agent = rows[0];
       if (!agent) return null;
 
-      let capabilities: any[] = [];
+      let capabilities: AgentCapability[] = [];
 
       // 优先从 agentCard 解析
       if (agent.agentCard) {
@@ -504,18 +542,9 @@ export const agentRouter = createRouter({
       // 如果从 agentCard 没解析出来，尝试从 capabilities 字段
       if (capabilities.length === 0 && agent.capabilities) {
         try {
-          const parsed = JSON.parse(agent.capabilities);
+          const parsed: unknown = JSON.parse(agent.capabilities);
           if (Array.isArray(parsed)) {
-            capabilities = parsed.map((item: any) => {
-              if (typeof item === "string") {
-                return { category: "general", items: [item], level: "intermediate" };
-              }
-              return {
-                category: item.category || "general",
-                items: Array.isArray(item.items) ? item.items : [item.items],
-                level: item.level || "intermediate",
-              };
-            });
+            capabilities = parsed.map(normalizeCapabilityItem);
           } else {
             capabilities = [{
               category: "general",
@@ -652,7 +681,7 @@ export const agentRouter = createRouter({
       if (!agent) return null;
 
       // 解析 capabilities（复用 getCapabilities 逻辑）
-      let capabilities: any[] = [];
+      let capabilities: AgentCapability[] = [];
       if (agent.agentCard) {
         try {
           const card = JSON.parse(agent.agentCard) as AgentCard;
@@ -663,18 +692,9 @@ export const agentRouter = createRouter({
       }
       if (capabilities.length === 0 && agent.capabilities) {
         try {
-          const parsed = JSON.parse(agent.capabilities);
+          const parsed: unknown = JSON.parse(agent.capabilities);
           if (Array.isArray(parsed)) {
-            capabilities = parsed.map((item: any) => {
-              if (typeof item === "string") {
-                return { category: "general", items: [item], level: "intermediate" };
-              }
-              return {
-                category: item.category || "general",
-                items: Array.isArray(item.items) ? item.items : [item.items],
-                level: item.level || "intermediate",
-              };
-            });
+            capabilities = parsed.map(normalizeCapabilityItem);
           } else {
             capabilities = [{
               category: "general",

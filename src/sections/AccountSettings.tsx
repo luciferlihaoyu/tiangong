@@ -9,7 +9,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-async function trpcCall(path: string, input?: any): Promise<any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getResponseErrorMessage(errorBody: unknown, status: number): string {
+  if (isRecord(errorBody) && typeof errorBody.message === "string") return errorBody.message;
+  if (Array.isArray(errorBody) && isRecord(errorBody[0]) && typeof errorBody[0].message === "string") {
+    return errorBody[0].message;
+  }
+  return `HTTP ${status}`;
+}
+
+function unwrapTrpcData(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.result)) return value;
+  const data = value.result.data;
+  if (isRecord(data) && "json" in data) return data.json;
+  return data ?? value;
+}
+
+async function trpcCall(path: string, input?: Record<string, unknown>): Promise<unknown> {
   const token = localStorage.getItem("tiangong_token");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -22,8 +45,8 @@ async function trpcCall(path: string, input?: any): Promise<any> {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-    throw new Error(err?.message || err?.[0]?.message || `HTTP ${res.status}`);
+    const err: unknown = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(getResponseErrorMessage(err, res.status));
   }
 
   return res.json();
@@ -53,17 +76,17 @@ export default function AccountSettings() {
     setLoading(true);
     try {
       const res = await trpcCall("auth.changePassword", { oldPassword, newPassword });
-      const data = res?.result?.data?.json || res?.result?.data || res;
-      if (data?.success) {
+      const data = unwrapTrpcData(res);
+      if (isRecord(data) && data.success) {
         setMessage({ type: "success", text: "密码修改成功" });
         setOldPassword("");
         setNewPassword("");
         setConfirmPassword("");
       } else {
-        setMessage({ type: "error", text: data?.error || "修改失败" });
+        setMessage({ type: "error", text: isRecord(data) && typeof data.error === "string" ? data.error : "修改失败" });
       }
-    } catch (e: any) {
-      setMessage({ type: "error", text: e.message });
+    } catch (e: unknown) {
+      setMessage({ type: "error", text: getErrorMessage(e) });
     } finally {
       setLoading(false);
     }

@@ -6,8 +6,10 @@
  * 同时创建独立的 /task-center 路由入口
  */
 import { useState, useCallback, useEffect } from "react";
+import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import type { AppRouter } from "../../api/router";
 import {
   Target,
   Plus,
@@ -69,6 +71,11 @@ interface Conversation {
   title: string;
   status: string;
 }
+
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type CollabStatus = RouterOutputs["collab"]["status"];
+type CollabSummary = RouterOutputs["collab"]["summary"];
+type CollabSubtask = CollabStatus["subtasks"][number];
 
 // ═══════════════════════ Constants ═══════════════════════
 
@@ -995,9 +1002,11 @@ function CollaborationPanel({ tasks, agents }: CollabPanelProps) {
     unblockMutation.mutate({ parentTaskId });
   };
 
-  const summary = summaryQuery.data as any;
-  const status = statusQuery.data as any;
-  const counts = summary?.counts || status?.counts || {};
+  const summary: CollabSummary | undefined = summaryQuery.data;
+  const status: CollabStatus | undefined = statusQuery.data;
+  const counts: Partial<Record<Task["status"], number>> = summary?.counts ?? status?.counts ?? {};
+  const summaryOutputs = summary?.outputs ?? [];
+  const summaryErrors = summary?.errors ?? [];
 
   return (
     <div className="glass-panel p-4 sci-border mb-6">
@@ -1111,8 +1120,8 @@ function CollaborationPanel({ tasks, agents }: CollabPanelProps) {
             <div className="text-xs" style={{ color: "var(--text-muted)" }}>暂无子任务。选择父任务后输入子任务并委托。</div>
           )}
           <div className="space-y-2">
-            {(status?.subtasks || []).map((item: any) => {
-              const task = item.task as Task;
+            {(status?.subtasks || []).map((item: CollabSubtask) => {
+              const task = item.task;
               const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
               return (
                 <div key={task.id} className="rounded p-2" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-default)" }}>
@@ -1127,14 +1136,14 @@ function CollaborationPanel({ tasks, agents }: CollabPanelProps) {
               );
             })}
           </div>
-          {summary?.outputs?.length > 0 && (
+          {summaryOutputs.length > 0 && (
             <div className="mt-3 text-[10px] font-mono" style={{ color: "var(--success)" }}>
-              已收集输出：{summary.outputs.length} 条
+              已收集输出：{summaryOutputs.length} 条
             </div>
           )}
-          {summary?.errors?.length > 0 && (
+          {summaryErrors.length > 0 && (
             <div className="mt-1 text-[10px] font-mono" style={{ color: "var(--accent-red)" }}>
-              错误：{summary.errors.length} 条
+              错误：{summaryErrors.length} 条
             </div>
           )}
         </div>

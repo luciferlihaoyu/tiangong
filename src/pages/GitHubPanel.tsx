@@ -8,7 +8,9 @@
  * - PR approval queue (register, approve, reject, audit)
  */
 import { useState } from "react";
+import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/providers/trpc";
+import type { AppRouter } from "../../api/router";
 import {
   GitBranch,
   CheckCircle2,
@@ -28,6 +30,21 @@ import {
 /* ═══════════════════════════════════════════
    辅助函数
    ═══════════════════════════════════════════ */
+
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type GithubReadiness = RouterOutputs["github"]["status"]["readiness"];
+type GithubRepo = RouterOutputs["github"]["listRepos"][number] & { readonly permissionCount?: number };
+type GithubAgent = RouterOutputs["github"]["listAgents"][number];
+type GithubPermission = RouterOutputs["github"]["listPermissions"][number];
+type GithubPullRequest = RouterOutputs["github"]["listPRs"][number];
+type GithubPullRequestDetail = NonNullable<RouterOutputs["github"]["getPR"]>;
+type GithubAuditLogEntry = GithubPullRequestDetail["auditLog"][number];
+type PermissionLevel = "read" | "push" | "admin";
+
+function toPermissionLevel(value: string): PermissionLevel {
+  if (value === "read" || value === "push" || value === "admin") return value;
+  return "push";
+}
 
 function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -71,7 +88,7 @@ function YesNo({ value }: { value: boolean }) {
    子组件: Readiness
    ═══════════════════════════════════════════ */
 
-function ReadinessPanel({ readiness, onRefresh }: { readiness: any; onRefresh: () => void }) {
+function ReadinessPanel({ readiness, onRefresh }: { readiness: GithubReadiness | undefined; onRefresh: () => void }) {
   if (!readiness) {
     return (
       <div className="glass-panel p-4 sci-border">
@@ -137,20 +154,20 @@ function ReadinessPanel({ readiness, onRefresh }: { readiness: any; onRefresh: (
    子组件: Repos
    ═══════════════════════════════════════════ */
 
-function RepoPanel({ repos, onRefresh }: { repos: any[]; onRefresh: () => void }) {
+function RepoPanel({ repos, onRefresh }: { repos: readonly GithubRepo[]; onRefresh: () => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [owner, setOwner] = useState("luciferlihaoyu");
   const [name, setName] = useState("tiangong");
   const [msg, setMsg] = useState("");
 
   const addMut = trpc.github.addRepo.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       if (data.success) {
         setMsg("已添加");
         setShowAdd(false);
         onRefresh();
       } else {
-        setMsg(`错误: ${data.error ?? "未知错误"}`);
+        setMsg(`错误: ${"error" in data ? data.error : "未知错误"}`);
       }
     },
     onError: (e) => setMsg(`错误: ${e.message}`),
@@ -231,7 +248,7 @@ function RepoPanel({ repos, onRefresh }: { repos: any[]; onRefresh: () => void }
         </div>
       ) : (
         <div className="space-y-1">
-          {repos.map((r: any) => (
+          {repos.map((r) => (
             <div
               key={r.id}
               className="flex items-center justify-between gap-2 py-1.5 px-2 rounded text-[10px] font-mono"
@@ -271,8 +288,8 @@ function PermissionPanel({
   onRefresh,
 }: {
   repoId: number;
-  permissions: any[];
-  agents: any[];
+  permissions: readonly GithubPermission[];
+  agents: readonly GithubAgent[];
   onRefresh: () => void;
 }) {
   const [showGrant, setShowGrant] = useState(false);
@@ -328,13 +345,13 @@ function PermissionPanel({
               style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
             >
               <option value={0}>选择 Agent</option>
-              {agents.map((a: any) => (
+              {agents.map((a) => (
                 <option key={a.id} value={a.id}>{a.name || a.agentId}</option>
               ))}
             </select>
             <select
               value={selLevel}
-              onChange={(e) => setSelLevel(e.target.value as any)}
+              onChange={(e) => setSelLevel(toPermissionLevel(e.target.value))}
               className="px-2 py-1.5 rounded text-xs font-mono outline-none"
               style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
             >
@@ -369,8 +386,8 @@ function PermissionPanel({
         </div>
       ) : (
         <div className="space-y-1">
-          {permissions.map((p: any) => {
-            const agent = agents.find((a: any) => a.id === p.agentId);
+          {permissions.map((p) => {
+            const agent = agents.find((a) => a.id === p.agentId);
             return (
               <div
                 key={p.id}
@@ -419,8 +436,8 @@ function PRApprovalPanel({
   onRefresh,
 }: {
   repoId: number;
-  repos: any[];
-  agents: any[];
+  repos: readonly GithubRepo[];
+  agents: readonly GithubAgent[];
   onRefresh: () => void;
 }) {
   const [showRegister, setShowRegister] = useState(false);
@@ -438,7 +455,7 @@ function PRApprovalPanel({
     { retry: 1, staleTime: 5_000, enabled: !!selectedPR }
   );
   const registerMut = trpc.github.registerPR.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       if (data.success) {
         setShowRegister(false);
         setPrNumber("");
@@ -447,15 +464,16 @@ function PRApprovalPanel({
         onRefresh();
         prsQuery.refetch();
       } else {
-        alert(`注册失败: ${data.error ?? "未知错误"}${data.detail ? " - " + data.detail : ""}`);
+        const detail = "detail" in data ? ` - ${data.detail}` : "";
+        alert(`注册失败: ${"error" in data ? data.error : "未知错误"}${detail}`);
       }
     },
     onError: (e) => alert(`错误: ${e.message}`),
   });
   const approveMut = trpc.github.approvePR.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       if (data.success) {
-        const mergeMsg = data.mergeSkipped
+        const mergeMsg = "mergeSkipped" in data && data.mergeSkipped
           ? ` (GitHub 合并跳过: ${data.mergeSkippedReason ?? "配置未就绪"})`
           : " (已合并)";
         alert(`PR 已批准${mergeMsg}`);
@@ -463,13 +481,13 @@ function PRApprovalPanel({
         prsQuery.refetch();
         if (selectedPR) prDetailQuery.refetch();
       } else {
-        alert(`批准失败: ${data.error ?? "未知错误"}`);
+        alert(`批准失败: ${"error" in data ? data.error : "未知错误"}`);
       }
     },
     onError: (e) => alert(`错误: ${e.message}`),
   });
   const rejectMut = trpc.github.rejectPR.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       if (data.success) {
         setShowReject(null);
         setRejectReason("");
@@ -477,16 +495,16 @@ function PRApprovalPanel({
         prsQuery.refetch();
         if (selectedPR) prDetailQuery.refetch();
       } else {
-        alert(`拒绝失败: ${data.error ?? "未知错误"}`);
+        alert(`拒绝失败: ${"error" in data ? data.error : "未知错误"}`);
       }
     },
     onError: (e) => alert(`错误: ${e.message}`),
   });
 
-  const prs = (prsQuery.data ?? []) as any[];
-  const prDetail = prDetailQuery.data as any;
-  const repo = repos.find((r: any) => r.id === repoId);
-  const meizhiziAgent = agents.find((a: any) =>
+  const prs: readonly GithubPullRequest[] = prsQuery.data ?? [];
+  const prDetail = prDetailQuery.data;
+  const repo = repos.find((r) => r.id === repoId);
+  const meizhiziAgent = agents.find((a) =>
     String(a.agentId ?? "").toLowerCase().includes("meizhizi") ||
     String(a.name ?? "").includes("美智子")
   );
@@ -540,7 +558,7 @@ function PRApprovalPanel({
                 style={{ background: "rgba(0,0,0,0.2)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
               >
                 <option value={0}>选择提交助手</option>
-                {agents.map((a: any) => (
+                {agents.map((a) => (
                   <option key={a.id} value={a.id}>{a.name || a.agentId}</option>
                 ))}
               </select>
@@ -604,7 +622,7 @@ function PRApprovalPanel({
 
       {prs.length > 0 && (
         <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar">
-          {prs.map((pr: any) => (
+          {prs.map((pr) => (
             <div
               key={pr.id}
               className="flex items-center justify-between gap-2 py-2 px-2 rounded text-[10px] font-mono cursor-pointer"
@@ -705,8 +723,8 @@ function PRApprovalPanel({
             <div className="mt-2">
               <div className="text-[9px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>审批记录</div>
               <div className="space-y-0.5">
-                {prDetail.auditLog.map((a: any) => {
-                  const agent = agents.find((ag: any) => ag.id === a.agentId);
+                {prDetail.auditLog.map((a: GithubAuditLogEntry) => {
+                  const agent = agents.find((ag) => ag.id === a.agentId);
                   const actionColors: Record<string, string> = {
                     register: "var(--accent-cyan)",
                     approve: "var(--success)",
@@ -751,13 +769,14 @@ export default function GitHubPanel() {
 
   const statusQuery = trpc.github.status.useQuery(undefined, { retry: 1, staleTime: 10_000 });
   const bootstrapMut = trpc.github.bootstrapDefault.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       if (data.success) {
         handleRefresh();
         if (data.repo?.id) setSelectedRepoId(data.repo.id);
-        alert(`已初始化 ${data.repo?.fullName ?? "tiangong"}，授权给 ${data.agent?.name ?? "美智子"}`);
+        const agentName = "agent" in data ? data.agent.name : "美智子";
+        alert(`已初始化 ${data.repo?.fullName ?? "tiangong"}，授权给 ${agentName}`);
       } else {
-        alert(`初始化失败: ${data.error ?? "未知错误"}`);
+        alert(`初始化失败: ${"error" in data ? data.error : "未知错误"}`);
       }
     },
     onError: (e) => alert(`初始化失败: ${e.message}`),
@@ -769,11 +788,11 @@ export default function GitHubPanel() {
     { retry: 1, staleTime: 5_000, enabled: !!selectedRepoId }
   );
 
-  const status = statusQuery.data as any;
+  const status = statusQuery.data;
   const readiness = status?.readiness;
-  const repos = (listReposQuery.data ?? []) as any[];
-  const agents = (listAgentsQuery.data ?? []) as any[];
-  const permissions = (listPermsQuery.data ?? []) as any[];
+  const repos: readonly GithubRepo[] = listReposQuery.data ?? [];
+  const agents: readonly GithubAgent[] = listAgentsQuery.data ?? [];
+  const permissions: readonly GithubPermission[] = listPermsQuery.data ?? [];
 
   const handleRefresh = () => {
     statusQuery.refetch();
@@ -820,7 +839,7 @@ export default function GitHubPanel() {
         {repos.length > 0 && (
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>选择仓库:</span>
-            {repos.map((r: any) => (
+            {repos.map((r) => (
               <button
                 key={r.id}
                 onClick={() => setSelectedRepoId(r.id)}

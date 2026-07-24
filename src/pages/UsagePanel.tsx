@@ -5,7 +5,10 @@
  * 双币种显示（USD / CNY），支持汇率切换
  */
 import { useState, useMemo } from "react";
+import type { ReactNode } from "react";
+import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/providers/trpc";
+import type { AppRouter } from "../../api/router";
 import {
   BarChart3,
   Database,
@@ -23,6 +26,15 @@ const EXCHANGE_RATE = 7.2;
 
 type Currency = "USD" | "CNY";
 type DisplayMode = "m" | "raw";
+type ActiveTab = "overview" | "agent" | "cross" | "cache";
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type UsageByModel = RouterOutputs["usage"]["byModel"];
+type UsageByAgent = RouterOutputs["usage"]["byAgent"];
+type UsageByAgentAndModel = RouterOutputs["usage"]["byAgentAndModel"];
+type UsageCacheStats = RouterOutputs["usage"]["cacheStats"];
+type UsageByDay = RouterOutputs["usage"]["byDay"];
+type UsageBySource = RouterOutputs["usage"]["bySource"];
+type UsageRecord = RouterOutputs["usage"]["list"][number];
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -62,7 +74,7 @@ function fmtCny(usd: number): string {
 }
 
 /** 月度预算进度条 */
-function BudgetBar({ byDay, currency, displayMode }: { byDay: any[]; currency: Currency; displayMode: DisplayMode }) {
+function BudgetBar({ byDay, currency, displayMode }: { byDay: UsageByDay; currency: Currency; displayMode: DisplayMode }) {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthCost = byDay
@@ -198,7 +210,7 @@ function OverviewCards({
 }
 
 /** 按模型分组表 */
-function ModelTable({ byModel, loading, currency, displayMode }: { byModel: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
+function ModelTable({ byModel, loading, currency, displayMode }: { byModel: UsageByModel; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byModel.length === 0) return <EmptyState title="暂无模型数据" desc="通过 Connector 或 API 上报后可见" />;
 
@@ -242,7 +254,7 @@ function ModelTable({ byModel, loading, currency, displayMode }: { byModel: any[
 }
 
 /** 按 Agent 统计表 */
-function AgentTable({ byAgent, loading, currency, displayMode }: { byAgent: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
+function AgentTable({ byAgent, loading, currency, displayMode }: { byAgent: UsageByAgent; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byAgent.length === 0) return <EmptyState title="暂无 Agent 数据" desc="任务执行后自动生成" />;
 
@@ -278,7 +290,7 @@ function AgentTable({ byAgent, loading, currency, displayMode }: { byAgent: any[
 }
 
 /** Agent × Model 交叉表 */
-function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAgentAndModel: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
+function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAgentAndModel: UsageByAgentAndModel; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byAgentAndModel.length === 0) return <EmptyState title="暂无交叉数据" desc="多 Agent 多模型使用后可见" />;
 
@@ -310,11 +322,11 @@ function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAge
 }
 
 /** 缓存命中率图表 */
-function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: any; loading: boolean; displayMode: DisplayMode }) {
+function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: UsageCacheStats | undefined; loading: boolean; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (!cacheStats || cacheStats.byModel.length === 0) return <EmptyState title="暂无缓存数据" desc="Connector 上报缓存信息后可分析" />;
 
-  const maxCached = Math.max(...cacheStats.byModel.map((m: any) => m.cachedPromptTokens), 1);
+  const maxCached = Math.max(...cacheStats.byModel.map((m) => m.cachedPromptTokens), 1);
 
   return (
     <div className="space-y-4">
@@ -322,7 +334,7 @@ function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: any; loa
       <div>
         <div className="text-[10px] font-mono mb-2" style={{ color: "var(--text-muted)" }}>按模型缓存命中</div>
         <div className="space-y-2">
-          {cacheStats.byModel.map((m: any) => {
+          {cacheStats.byModel.map((m) => {
             const totalPrompt = (m.cachedPromptTokens ?? 0) + (m.uncachedPromptTokens ?? 0);
             const rate = totalPrompt > 0 ? ((m.cachedPromptTokens ?? 0) / totalPrompt) * 100 : 0;
             return (
@@ -369,7 +381,7 @@ function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: any; loa
 }
 
 /** 日趋势图 */
-function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
+function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: UsageByDay; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (byDay.length === 0) return null;
 
@@ -479,7 +491,7 @@ function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: any[]; l
 }
 
 /** 详细记录列表 */
-function RecordList({ records, loading, currency, displayMode }: { records: any[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
+function RecordList({ records, loading, currency, displayMode }: { records: readonly UsageRecord[]; loading: boolean; currency: Currency; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (records.length === 0) return <div className="text-xs py-4" style={{ color: "var(--text-muted)" }}>暂无详细记录</div>;
 
@@ -499,7 +511,7 @@ function RecordList({ records, loading, currency, displayMode }: { records: any[
               )}
               {(r.cachedPromptTokens ?? 0) > 0 && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)" }}>
-                  缓存 {fmtTokens(r.cachedPromptTokens, displayMode)}
+                  缓存 {fmtTokens(r.cachedPromptTokens ?? 0, displayMode)}
                 </span>
               )}
             </div>
@@ -547,7 +559,7 @@ export default function UsagePanel() {
   const [agentId, setAgentId] = useState<number | undefined>(undefined);
   const [currency, setCurrency] = useState<Currency>("USD");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("m");
-  const [activeTab, setActiveTab] = useState<"overview" | "agent" | "cross" | "cache">("overview");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
 
   const timeRange = { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined };
 
@@ -592,14 +604,21 @@ export default function UsagePanel() {
     { retry: 1, staleTime: 10_000 }
   );
 
-  const byModel = (byModelQuery.data as any[]) || [];
-  const byAgent = (byAgentQuery.data as any[]) || [];
-  const byAgentAndModel = (byAgentAndModelQuery.data as any[]) || [];
-  const cacheStats = cacheStatsQuery.data as any;
-  const byDay = (byDayQuery.data as any[]) || [];
-  const bySource = (bySourceQuery.data as any[]) || [];
-  const records = (listQuery.data as any[]) || [];
+  const byModel: UsageByModel = byModelQuery.data ?? [];
+  const byAgent: UsageByAgent = byAgentQuery.data ?? [];
+  const byAgentAndModel: UsageByAgentAndModel = byAgentAndModelQuery.data ?? [];
+  const cacheStats = cacheStatsQuery.data;
+  const byDay: UsageByDay = byDayQuery.data ?? [];
+  const bySource: UsageBySource = bySourceQuery.data ?? [];
+  const records: readonly UsageRecord[] = listQuery.data ?? [];
   const loading = byModelQuery.isLoading || byDayQuery.isLoading;
+
+  const tabs = [
+    { key: "overview", label: "概览", icon: <BarChart3 size={12} /> },
+    { key: "agent", label: "按 Agent", icon: <Users size={12} /> },
+    { key: "cross", label: "交叉统计", icon: <Layers size={12} /> },
+    { key: "cache", label: "缓存分析", icon: <ShieldCheck size={12} /> },
+  ] satisfies readonly { readonly key: ActiveTab; readonly label: string; readonly icon: ReactNode }[];
 
   const modelNames = useMemo(() => Array.from(new Set(byModel.map((m) => m.model))), [byModel]);
   const agentOptions = useMemo(() => Array.from(new Set(byAgent.map((a) => ({ id: a.agentId, name: a.agentName ?? `Agent#${a.agentId}` })))), [byAgent]);
@@ -759,15 +778,10 @@ export default function UsagePanel() {
 
         {/* Tab navigation */}
         <div className="flex items-center gap-1 mb-4 overflow-x-auto custom-scrollbar">
-          {[
-            { key: "overview", label: "概览", icon: <BarChart3 size={12} /> },
-            { key: "agent", label: "按 Agent", icon: <Users size={12} /> },
-            { key: "cross", label: "交叉统计", icon: <Layers size={12} /> },
-            { key: "cache", label: "缓存分析", icon: <ShieldCheck size={12} /> },
-          ].map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key as any)}
+              onClick={() => setActiveTab(tab.key)}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono whitespace-nowrap transition-colors"
               style={{
                 background: activeTab === tab.key ? "rgba(180,200,255,0.06)" : "transparent",

@@ -65,7 +65,7 @@ function SystemMonitor() {
   const now = Date.now();
   const dayAgo = now - 24 * 60 * 60 * 1000;
   const last24hCount = tasks.filter(t => {
-    const created = (t as any).createdAt ? new Date((t as any).createdAt).getTime() : 0;
+    const created = "createdAt" in t && typeof t.createdAt === "string" ? new Date(t.createdAt).getTime() : 0;
     return created > dayAgo;
   }).length;
 
@@ -173,7 +173,7 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp }:
    ═══════════════════════════════════════════ */
 
 function OrgTab() {
-  const treeQuery = (window as any).__trpc ? null : null; // will use existing data
+  const treeQuery = "__trpc" in window ? null : null; // will use existing data
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <OrgTreePanel />
@@ -446,7 +446,11 @@ function StatsRow({ agents, tasks, totalMsgs, orgs, todayCostCents }: {
   const doneCount = tasks.filter(t => t.status === 'done').length;
   const failedCount = tasks.filter(t => t.status === 'failed').length;
   const todayTasks = tasks.filter(t => {
-    const updated = (t as any).updatedAt || (t as any).createdAt;
+    const updated = "updatedAt" in t && typeof t.updatedAt === "string"
+      ? t.updatedAt
+      : "createdAt" in t && typeof t.createdAt === "string"
+        ? t.createdAt
+        : null;
     if (!updated) return false;
     const d = new Date(updated);
     const now = new Date();

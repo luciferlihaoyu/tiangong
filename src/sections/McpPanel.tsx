@@ -69,16 +69,156 @@ interface AuditStats {
   recentErrors: { id: number; keyId: number; tool: string; error: string | null; createdAt: string }[];
 }
 
+type AgentOption = {
+  readonly id: number;
+  readonly name: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return typeof value === "string" || value === null;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getResponseErrorMessage(errorBody: unknown, status: number): string {
+  if (isRecord(errorBody) && typeof errorBody.message === "string") return errorBody.message;
+  if (Array.isArray(errorBody) && isRecord(errorBody[0]) && typeof errorBody[0].message === "string") {
+    return errorBody[0].message;
+  }
+  return `HTTP ${status}`;
+}
+
+function unwrapTrpcData(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.result)) return value;
+  const data = value.result.data;
+  if (isRecord(data) && "json" in data) return data.json;
+  return data ?? value;
+}
+
+function toMcpKeyItem(value: unknown): McpKeyItem | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.id !== "number" ||
+    typeof value.keyPreview !== "string" ||
+    !(typeof value.agentId === "number" || value.agentId === null) ||
+    !isStringOrNull(value.agentName) ||
+    typeof value.name !== "string" ||
+    !isStringOrNull(value.permissions) ||
+    typeof value.rateLimit !== "number" ||
+    !(value.active === "true" || value.active === "false") ||
+    !isStringOrNull(value.lastUsedAt) ||
+    typeof value.createdAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    keyPreview: value.keyPreview,
+    agentId: value.agentId,
+    agentName: value.agentName,
+    name: value.name,
+    permissions: value.permissions,
+    rateLimit: value.rateLimit,
+    active: value.active,
+    lastUsedAt: value.lastUsedAt,
+    createdAt: value.createdAt,
+  };
+}
+
+function toAgentOption(value: unknown): AgentOption | null {
+  if (!isRecord(value) || typeof value.id !== "number" || typeof value.name !== "string") return null;
+  return { id: value.id, name: value.name };
+}
+
+function toAuditLogItem(value: unknown): AuditLogItem | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.id !== "number" ||
+    typeof value.keyId !== "number" ||
+    typeof value.tool !== "string" ||
+    !isStringOrNull(value.params) ||
+    !(value.result === "success" || value.result === "error") ||
+    !isStringOrNull(value.error) ||
+    !(typeof value.durationMs === "number" || value.durationMs === null) ||
+    typeof value.createdAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    keyId: value.keyId,
+    tool: value.tool,
+    params: value.params,
+    result: value.result,
+    error: value.error,
+    durationMs: value.durationMs,
+    createdAt: value.createdAt,
+  };
+}
+
+function toAuditStats(value: unknown): AuditStats | null {
+  if (!isRecord(value)) return null;
+  const recentErrors = Array.isArray(value.recentErrors)
+    ? value.recentErrors
+        .map((entry) => {
+          if (!isRecord(entry)) return null;
+          if (
+            typeof entry.id !== "number" ||
+            typeof entry.keyId !== "number" ||
+            typeof entry.tool !== "string" ||
+            !isStringOrNull(entry.error) ||
+            typeof entry.createdAt !== "string"
+          ) {
+            return null;
+          }
+          return {
+            id: entry.id,
+            keyId: entry.keyId,
+            tool: entry.tool,
+            error: entry.error,
+            createdAt: entry.createdAt,
+          };
+        })
+        .filter((entry): entry is AuditStats["recentErrors"][number] => entry !== null)
+    : [];
+
+  if (
+    typeof value.total !== "number" ||
+    typeof value.successCount !== "number" ||
+    typeof value.errorCount !== "number" ||
+    typeof value.errorRate !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    total: value.total,
+    successCount: value.successCount,
+    errorCount: value.errorCount,
+    errorRate: value.errorRate,
+    recentErrors,
+  };
+}
+
 /* ═══════════════════════════════════════════
    Helper: parse/serialize permissions
    ═══════════════════════════════════════════ */
 
 function parsePermissions(perms: string | null): { tools: string[]; resources: string[] } {
   try {
-    const p = perms ? JSON.parse(perms) : {};
+    const p: unknown = perms ? JSON.parse(perms) : {};
+    if (!isRecord(p)) return { tools: [], resources: [] };
     return {
-      tools: Array.isArray(p.tools) ? p.tools : [],
-      resources: Array.isArray(p.resources) ? p.resources : [],
+      tools: Array.isArray(p.tools) ? p.tools.filter((tool): tool is string => typeof tool === "string") : [],
+      resources: Array.isArray(p.resources) ? p.resources.filter((resource): resource is string => typeof resource === "string") : [],
     };
   } catch {
     return { tools: [], resources: [] };
@@ -93,7 +233,7 @@ function serializePermissions(tools: string[], resources: string[]): string {
    Helper: call tRPC via fetch
    ═══════════════════════════════════════════ */
 
-async function trpcCall(path: string, input?: any): Promise<any> {
+async function trpcCall(path: string, input?: Record<string, unknown>): Promise<unknown> {
   const token = localStorage.getItem("tiangong_token");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -106,8 +246,8 @@ async function trpcCall(path: string, input?: any): Promise<any> {
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-    throw new Error(err?.message || err?.[0]?.message || `HTTP ${res.status}`);
+    const err: unknown = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(getResponseErrorMessage(err, res.status));
   }
 
   return res.json();
@@ -240,13 +380,13 @@ function ApiKeyRow({
     setLoadingKey(true);
     try {
       const res = await trpcCall(`mcp.revealKey?input=${encodeURIComponent(JSON.stringify({id:item.id}))}`);
-      const data = res?.result?.data?.json || res?.result?.data || res;
-      if (data?.key) {
+      const data = unwrapTrpcData(res);
+      if (isRecord(data) && typeof data.key === "string") {
         setFullKey(data.key);
         setShowFullKey(true);
       }
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e));
     } finally {
       setLoadingKey(false);
     }
@@ -390,8 +530,9 @@ function AuditLogPanel() {
         trpcCall("mcp.getAuditLog", { limit: 100 }),
         trpcCall("mcp.getAuditStats"),
       ]);
-      setLogs(Array.isArray(logData) ? logData : logData?.result?.data?.json || []);
-      setStats(statsData?.result?.data?.json || statsData);
+      const logsData = unwrapTrpcData(logData);
+      setLogs(Array.isArray(logsData) ? logsData.map(toAuditLogItem).filter((log): log is AuditLogItem => log !== null) : []);
+      setStats(toAuditStats(unwrapTrpcData(statsData)));
     } catch (e) {
       console.error("Failed to fetch audit logs:", e);
     } finally {
@@ -533,7 +674,7 @@ function PermissionEditDialog({
 }: {
   open: boolean;
   item: McpKeyItem | null;
-  agents: { id: number; name: string }[];
+  agents: readonly AgentOption[];
   onClose: () => void;
   onSaved: (fullKey?: string) => void;
 }) {
@@ -552,9 +693,9 @@ function PermissionEditDialog({
     setSaving(true);
     try {
       const perms = serializePermissions(selectedTools, selectedResources);
-      if (isEdit) {
+      if (item) {
         await trpcCall("mcp.updateKey", {
-          id: item!.id,
+          id: item.id,
           name,
           permissions: perms,
           rateLimit: parseInt(rateLimit) || 10,
@@ -568,8 +709,8 @@ function PermissionEditDialog({
           permissions: perms,
           rateLimit: parseInt(rateLimit) || 10,
         });
-        const data = res?.result?.data?.json || res?.result?.data || res;
-        if (data?.key) {
+        const data = unwrapTrpcData(res);
+        if (isRecord(data) && typeof data.key === "string") {
           setNewKey(data.key);
           onSaved(data.key);
           // 不自动关闭 — 让用户看到 Key 后再手动关闭
@@ -579,8 +720,8 @@ function PermissionEditDialog({
           handleClose();
         }
       }
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -790,7 +931,7 @@ function PermissionEditDialog({
 
 export default function McpPanel() {
   const [keys, setKeys] = useState<McpKeyItem[]>([]);
-  const [agents, setAgents] = useState<{ id: number; name: string }[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"keys" | "audit" | "guide">("keys");
   const [editItem, setEditItem] = useState<McpKeyItem | null>(null);
@@ -803,14 +944,14 @@ export default function McpPanel() {
         trpcCall("mcp.listKeys"),
         trpcCall("agent.list"),
       ]);
-      const normalizedKeys =
-        (keyData?.result?.data?.json || keyData?.result?.data || keyData)?.map?.(
-          (k: any) => ({ ...k, key: undefined })
-        ) || [];
-      const normalizedAgents =
-        (agentData?.result?.data?.json || agentData?.result?.data || agentData)?.map?.(
-          (a: any) => ({ id: a.id, name: a.name })
-        ) || [];
+      const keyItems = unwrapTrpcData(keyData);
+      const agentItems = unwrapTrpcData(agentData);
+      const normalizedKeys = Array.isArray(keyItems)
+        ? keyItems.map(toMcpKeyItem).filter((key): key is McpKeyItem => key !== null)
+        : [];
+      const normalizedAgents = Array.isArray(agentItems)
+        ? agentItems.map(toAgentOption).filter((agent): agent is AgentOption => agent !== null)
+        : [];
       setKeys(normalizedKeys);
       setAgents(normalizedAgents);
     } catch (e) {
@@ -828,8 +969,8 @@ export default function McpPanel() {
     try {
       await trpcCall("mcp.revokeKey", { id });
       fetchKeys();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e));
     }
   };
 
@@ -837,8 +978,8 @@ export default function McpPanel() {
     try {
       await trpcCall("mcp.activateKey", { id });
       fetchKeys();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e));
     }
   };
 
@@ -847,8 +988,8 @@ export default function McpPanel() {
     try {
       await trpcCall("mcp.deleteKey", { id });
       fetchKeys();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e));
     }
   };
 
@@ -869,15 +1010,17 @@ export default function McpPanel() {
     setHeartbeatResult(null);
     try {
       const res = await trpcCall("agent.updateHeartbeat", { id: parseInt(heartbeatAgentId) });
-      const data = res?.result?.data?.json || res?.result?.data || res;
-      setHeartbeatResult(data?.claimedTask
-        ? `✅ 心跳成功！已自动认领任务: ${data.claimedTask.name}`
+      const data = unwrapTrpcData(res);
+      const claimedTask = isRecord(data) ? data.claimedTask : null;
+      const claimedTaskName = isRecord(claimedTask) ? String(claimedTask.name) : "undefined";
+      setHeartbeatResult(claimedTask
+        ? `✅ 心跳成功！已自动认领任务: ${claimedTaskName}`
         : "✅ 心跳成功！当前无待认领任务"
       );
       // 刷新页面以更新 Agent 列表中的心跳时间和连接状态
       setTimeout(() => window.location.reload(), 1500);
-    } catch (e: any) {
-      setHeartbeatResult(`❌ 失败: ${e.message}`);
+    } catch (e: unknown) {
+      setHeartbeatResult(`❌ 失败: ${getErrorMessage(e)}`);
     } finally {
       setHeartbeatLoading(false);
     }

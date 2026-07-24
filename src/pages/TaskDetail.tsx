@@ -103,6 +103,8 @@ const PRIORITY_COLORS: Record<number, string> = {
   5: "var(--accent-red)",
 };
 
+type ReviewAction = "approve" | "reject" | "requestChanges" | "submit";
+
 // ═══════════════════════ Helpers ═══════════════════════
 
 function fmtTime(iso: string) {
@@ -119,6 +121,27 @@ function formatJson(value: string | null): string {
   } catch {
     return value;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getMetadataAction(metadata: unknown): string | undefined {
+  if (!isRecord(metadata) || typeof metadata.action !== "string") return undefined;
+  return metadata.action;
+}
+
+function hasMetadataAction(metadata: unknown): boolean {
+  return isRecord(metadata) && Boolean(metadata.action);
+}
+
+function isReviewAction(value: unknown): value is ReviewAction {
+  return value === "approve" || value === "reject" || value === "requestChanges" || value === "submit";
+}
+
+function hasReviewAction(metadata: unknown): boolean {
+  return isRecord(metadata) && isReviewAction(metadata.action);
 }
 
 // ═══════════════════════ Component ═══════════════════════
@@ -487,7 +510,7 @@ export default function TaskDetail() {
             m.content?.includes("Rejected") ||
             m.content?.includes("Changes requested") ||
             m.content?.includes("submitted") ||
-            (m.metadata && typeof m.metadata === "object" && (m.metadata as any).action)
+            hasMetadataAction(m.metadata)
           )
         ) && (
           <div className="mb-6">
@@ -503,12 +526,11 @@ export default function TaskDetail() {
                     m.content?.includes("Rejected") ||
                     m.content?.includes("Changes requested") ||
                     m.content?.includes("submitted") ||
-                    (m.metadata && typeof m.metadata === "object" && ["approve", "reject", "requestChanges", "submit"].includes((m.metadata as any).action))
+                    hasReviewAction(m.metadata)
                   )
                 )
                 .map((msg) => {
-                  const meta = msg.metadata as Record<string, unknown> | null;
-                  const action = meta?.action as string | undefined;
+                  const action = getMetadataAction(msg.metadata);
                   const reviewerName = msg.fromAgentId
                     ? agents.find((a) => a.id === msg.fromAgentId)?.name || `Agent #${msg.fromAgentId}`
                     : "系统";

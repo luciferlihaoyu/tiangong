@@ -58,13 +58,9 @@ async function triggerDownstream(completedTaskId: number) {
   }
 }
 
-// ─── Server instance ───
-
-let _server: McpServer | null = null;
+// ─── Server factory (new instance per session for stateless MCP HTTP) ───
 
 export function getMcpServer(): McpServer {
-  if (_server) return _server;
-
   const server = new McpServer({
     name: "Tiangong",
     version: "2.0.0",
@@ -794,6 +790,5 @@ export function getMcpServer(): McpServer {
     };
   });
 
-  _server = server;
   return server;
 }

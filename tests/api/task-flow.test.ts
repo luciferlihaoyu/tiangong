@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { z } from "zod";
 
 // Mock database with a simple, flexible chain
-let mockData: any = [];
+type ThenCallback = (value: unknown[]) => unknown;
+
+let mockData: unknown[] = [];
+let mockInsertValues: unknown = null;
 const mockSelectFn = vi.fn(() => mockData);
 const mockInsertResult = vi.fn(() => ({ insertId: 1 }));
 
-const chained = (val: any) => ({
+const chained = (val: unknown[]) => ({
   orderBy: vi.fn(() => ({ limit: vi.fn(() => val) })),
-  then: vi.fn((cb: any) => (typeof cb === "function" ? cb(val) : val)),
+  then: vi.fn((cb: ThenCallback) => cb(val)),
   limit: vi.fn(() => val),
   where: vi.fn(() => chained(val)),
   leftJoin: vi.fn(() => chained(val)),
@@ -16,7 +20,12 @@ const chained = (val: any) => ({
 
 const mockDb = {
   select: vi.fn(() => ({ from: vi.fn(() => chained(mockSelectFn())) })),
-  insert: vi.fn(() => ({ values: vi.fn(() => mockInsertResult()) })),
+  insert: vi.fn(() => ({
+    values: vi.fn((values: unknown) => {
+      mockInsertValues = values;
+      return mockInsertResult();
+    }),
+  })),
   update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => chained([])) })) })),
   delete: vi.fn(() => ({ where: vi.fn() })),
 };
@@ -43,8 +52,15 @@ vi.mock("../../api/lib/password", () => ({
 
 import { taskRouter } from "../../api/task-router";
 import { createCallerFactory } from "../../api/middleware";
+import { parseTaskMetadata } from "../../api/lib/task-metadata";
 
 const createCaller = createCallerFactory(taskRouter);
+
+const TaskInsertCaptureSchema = z.object({
+  taskId: z.string(),
+  name: z.string(),
+  input: z.string(),
+});
 
 function mockCtx(overrides: Record<string, unknown> = {}) {
   return { req: new Request("http://localhost"), user: { id: 1, role: "admin" }, apiKeyAgentId: -1, ...overrides };
@@ -54,6 +70,7 @@ describe("Task Flow - Task Router", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockData = [];
+    mockInsertValues = null;
   });
 
   it("should generate a unique task ID", async () => {
@@ -77,6 +94,13 @@ describe("Task Flow - Task Router", () => {
     expect(result).toBeDefined();
     expect(result.success).toBe(true);
     expect(mockDb.insert).toHaveBeenCalled();
+
+    const insertedTask = TaskInsertCaptureSchema.parse(mockInsertValues);
+    const metadata = parseTaskMetadata(insertedTask.input);
+    expect(insertedTask.taskId).toBe("TG-TEST001");
+    expect(insertedTask.name).toBe("Test Task");
+    expect(metadata?.taskType).toBe("triage_task");
+    expect(metadata?.traceId).toMatch(/^trc_[0-9a-z]+_[0-9a-z]{8}$/);
   });
 
   it("should update task progress", async () => {

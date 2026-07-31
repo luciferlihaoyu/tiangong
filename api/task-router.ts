@@ -1,3 +1,4 @@
+// allow: SIZE_OK — Legacy monolithic tRPC router; this slice only wires create metadata to avoid broad refactoring.
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
@@ -5,6 +6,7 @@ import { tasks, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, desc, asc, and, or, like, sql, isNotNull } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
+import { mergeTaskMetadata, parseTaskMetadata } from "./lib/task-metadata";
 
 export const taskRouter = createRouter({
   list: publicQuery
@@ -163,15 +165,21 @@ export const taskRouter = createRouter({
         ]).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
+      const existingMetadata = parseTaskMetadata(input.input);
+      const originSystem = ctx.apiKeyAgentId !== null ? "mcp" : "human";
+      const taskInput = mergeTaskMetadata(
+        input.input,
+        existingMetadata ? {} : { origin: { system: originSystem } }
+      );
       await db.insert(tasks).values({
         taskId: input.taskId,
         name: input.name,
         agentId: input.agentId ?? null,
         description: input.description ?? null,
         priority: input.priority ?? 0,
-        input: input.input ?? null,
+        input: taskInput,
         status: input.status ?? "pending",
         lifecycleStatus: input.lifecycleStatus ?? "created",
         maxRetries: input.maxRetries ?? 3,

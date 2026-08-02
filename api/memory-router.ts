@@ -1,8 +1,40 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
+import { XuanjiConnectorError, type XuanjiConnectorClient } from "./connectors/xuanji/client";
+import { createXuanjiClient } from "./connectors/xuanji/service";
+import {
+  GetMemoryDigestRequestSchema,
+  LinkArtifactRequestSchema,
+  SearchContextRequestSchema,
+  StartIngestionRequestSchema,
+  WriteTaskMemoryRequestSchema,
+} from "./connectors/xuanji/types";
 import { getDb } from "./queries/connection";
 import { agentMemories } from "@db/schema";
 import { eq, and, like } from "drizzle-orm";
+
+type XuanjiRouterResult<T> =
+  | { readonly ok: true; readonly data: T }
+  | { readonly ok: false; readonly error: "xuanji_not_configured" }
+  | { readonly ok: false; readonly error: "xuanji_request_failed"; readonly message: string };
+
+async function callXuanji<T>(
+  request: (client: XuanjiConnectorClient) => Promise<T>
+): Promise<XuanjiRouterResult<T>> {
+  const client = createXuanjiClient();
+  if (!client) {
+    return { ok: false, error: "xuanji_not_configured" };
+  }
+
+  try {
+    return { ok: true, data: await request(client) };
+  } catch (error) {
+    if (error instanceof XuanjiConnectorError) {
+      return { ok: false, error: "xuanji_request_failed", message: error.message };
+    }
+    throw error;
+  }
+}
 
 export const memoryRouter = createRouter({
   // ─── 个人记忆 ───
@@ -85,4 +117,24 @@ export const memoryRouter = createRouter({
       if (input.tag) conditions.push(like(agentMemories.tags, `%${input.tag}%`));
       return db.select().from(agentMemories).where(and(...conditions));
     }),
+
+  xuanjiSearchContext: authedQuery
+    .input(SearchContextRequestSchema)
+    .query(async ({ input }) => callXuanji((client) => client.searchContext(input))),
+
+  xuanjiWriteTaskMemory: authedQuery
+    .input(WriteTaskMemoryRequestSchema)
+    .mutation(async ({ input }) => callXuanji((client) => client.writeTaskMemory(input))),
+
+  xuanjiLinkArtifact: authedQuery
+    .input(LinkArtifactRequestSchema)
+    .mutation(async ({ input }) => callXuanji((client) => client.linkArtifact(input))),
+
+  xuanjiGetMemoryDigest: authedQuery
+    .input(GetMemoryDigestRequestSchema)
+    .query(async ({ input }) => callXuanji((client) => client.getMemoryDigest(input))),
+
+  xuanjiStartIngestion: authedQuery
+    .input(StartIngestionRequestSchema)
+    .mutation(async ({ input }) => callXuanji((client) => client.startIngestion(input))),
 });

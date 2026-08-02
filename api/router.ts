@@ -26,6 +26,7 @@ import { secretVaultRouter } from "./secret-vault-router";
 import { auditRouter } from "./audit-router";
 import { connectorRouter } from "./connector-router";
 import { artifactRouter } from "./artifact-router";
+import { newapiRouter } from "./newapi-router";
 import { createRouter, publicQuery } from "./middleware";
 
 import { executionRouter } from "./execution-router";
@@ -62,6 +63,7 @@ export const appRouter = createRouter({
   audit: auditRouter,
   connector: connectorRouter,
   artifact: artifactRouter,
+  newapi: newapiRouter,
 });
 
 export type AppRouter = typeof appRouter;

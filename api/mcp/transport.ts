@@ -182,7 +182,7 @@ export function createMcpApp(): Hono {
       if (responseSessionId && !sessions.has(responseSessionId)) {
         sessions.set(responseSessionId, {
           transport,
-          apiKeyId: authResult.apiKey!.id,
+          apiKeyId: authResult.apiKey?.id ?? 0,
           agentId: authResult.agent?.id ?? null,
         });
       }
@@ -219,7 +219,7 @@ export function createMcpApp(): Hono {
       }
 
       writeAuditLog({
-        keyId: authResult.apiKey!.id,
+        keyId: authResult.apiKey?.id ?? 0,
         tool: toolName,
         params: paramsSummary.slice(0, 500),
         result: isError ? "error" : "success",
@@ -232,7 +232,7 @@ export function createMcpApp(): Hono {
       const durationMs = Date.now() - startTime;
       const message = getErrorMessage(err);
       writeAuditLog({
-        keyId: authResult.apiKey!.id,
+        keyId: authResult.apiKey?.id ?? 0,
         tool: "transport_error",
         params: message.slice(0, 500),
         result: "error",

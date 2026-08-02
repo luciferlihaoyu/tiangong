@@ -89,7 +89,7 @@ export class XuanjiConnectorClient {
   }
 
   searchContext(input: SearchContextRequest): Promise<SearchContextResponse> {
-    return this.post(
+    return this.query(
       "searchContext",
       SearchContextRequestSchema.parse(input),
       SearchContextResponseSchema
@@ -97,7 +97,7 @@ export class XuanjiConnectorClient {
   }
 
   writeTaskMemory(input: WriteTaskMemoryRequest): Promise<WriteTaskMemoryResponse> {
-    return this.post(
+    return this.mutation(
       "writeTaskMemory",
       WriteTaskMemoryRequestSchema.parse(input),
       WriteTaskMemoryResponseSchema
@@ -105,7 +105,7 @@ export class XuanjiConnectorClient {
   }
 
   linkArtifact(input: LinkArtifactRequest): Promise<LinkArtifactResponse> {
-    return this.post(
+    return this.mutation(
       "linkArtifact",
       LinkArtifactRequestSchema.parse(input),
       LinkArtifactResponseSchema
@@ -113,7 +113,7 @@ export class XuanjiConnectorClient {
   }
 
   getMemoryDigest(input: GetMemoryDigestRequest): Promise<GetMemoryDigestResponse> {
-    return this.post(
+    return this.query(
       "getMemoryDigest",
       GetMemoryDigestRequestSchema.parse(input),
       GetMemoryDigestResponseSchema
@@ -121,29 +121,51 @@ export class XuanjiConnectorClient {
   }
 
   startIngestion(input: StartIngestionRequest): Promise<StartIngestionResponse> {
-    return this.post(
+    return this.mutation(
       "startIngestion",
       StartIngestionRequestSchema.parse(input),
       StartIngestionResponseSchema
     );
   }
 
-  private async post<ResponseData>(
+  /** Query procedures use GET with the tRPC `input` query parameter. */
+  private async query<ResponseData>(
     methodName: XuanjiConnectorMethod,
     input: unknown,
     responseSchema: ZodType<ResponseData>
   ): Promise<ResponseData> {
+    const url = new URL(`${this.baseUrl}/api/trpc/connector.${methodName}`);
+    url.searchParams.set("input", JSON.stringify({ json: input }));
+    return this.call(methodName, url, undefined, responseSchema);
+  }
+
+  /** Mutation procedures use POST with a `{"json": ...}` body and CSRF header. */
+  private async mutation<ResponseData>(
+    methodName: XuanjiConnectorMethod,
+    input: unknown,
+    responseSchema: ZodType<ResponseData>
+  ): Promise<ResponseData> {
+    const url = `${this.baseUrl}/api/trpc/connector.${methodName}`;
+    return this.call(methodName, url, JSON.stringify({ json: input }), responseSchema);
+  }
+
+  private async call<ResponseData>(
+    methodName: XuanjiConnectorMethod,
+    url: string | URL,
+    body: string | undefined,
+    responseSchema: ZodType<ResponseData>
+  ): Promise<ResponseData> {
     const abortRequest = this.createAbortRequest();
-    const url = `${this.baseUrl}/api/connector.${methodName}`;
 
     try {
       const response = await this.executeFetch(url, {
-        method: "POST",
+        method: body === undefined ? "GET" : "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify(input),
+        body,
         signal: abortRequest.signal,
       }, methodName);
 
@@ -163,7 +185,7 @@ export class XuanjiConnectorClient {
   }
 
   private async executeFetch(
-    url: string,
+    url: string | URL,
     init: RequestInit,
     methodName: XuanjiConnectorMethod
   ): Promise<Response> {

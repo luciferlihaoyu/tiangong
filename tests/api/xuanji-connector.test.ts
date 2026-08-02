@@ -114,7 +114,7 @@ describe("Xuanji connector", () => {
     expect(parsedIngestion.trace).toEqual(expectedTrace);
   });
 
-  it("Given a mock fetch, When searchContext runs, Then URL headers and JSON body match the contract", async () => {
+  it("Given a mock fetch, When searchContext runs, Then it issues a tRPC GET with input query parameter", async () => {
     // Given
     let recordedRequest: RecordedRequest | null = null;
     const fetchMock = vi.fn(async (input: FetchInput, init?: FetchInit) => {
@@ -132,13 +132,49 @@ describe("Xuanji connector", () => {
 
     // Then
     expect(result).toEqual(searchResponse);
-    expect(recordedRequest?.url).toBe("https://xuanji.example.com/api/connector.searchContext");
+    const expectedUrl = new URL("https://xuanji.example.com/api/trpc/connector.searchContext");
+    expectedUrl.searchParams.set("input", JSON.stringify({ json: searchInput }));
+    expect(recordedRequest?.url).toBe(expectedUrl.href);
+    expect(recordedRequest?.init?.method).toBe("GET");
+    expect(recordedRequest?.init?.body).toBeUndefined();
+    const headers = new Headers(recordedRequest?.init?.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("X-Requested-With")).toBe("XMLHttpRequest");
+    expect(headers.get("Authorization")).toBe("Bearer test-secret-ref");
+  });
+
+  it("Given a mock fetch, When writeTaskMemory runs, Then it issues a tRPC POST with json body", async () => {
+    // Given
+    let recordedRequest: RecordedRequest | null = null;
+    const fetchMock = vi.fn(async (input: FetchInput, init?: FetchInit) => {
+      recordedRequest = { url: requestUrl(input), init };
+      return trpcResponse({
+        documentId: 123,
+        nodeIds: [12, 13, 14],
+        edgeIds: [31, 32],
+        chunkCount: 9,
+        vectorized: true,
+      });
+    });
+    const client = new XuanjiConnectorClient({
+      baseUrl: "https://xuanji.example.com/",
+      apiKey: "test-secret-ref",
+      fetchImpl: fetchMock,
+    });
+
+    // When
+    const result = await client.writeTaskMemory(writeInput);
+
+    // Then
+    expect(result.documentId).toBe(123);
+    expect(recordedRequest?.url).toBe("https://xuanji.example.com/api/trpc/connector.writeTaskMemory");
     expect(recordedRequest?.init?.method).toBe("POST");
     const headers = new Headers(recordedRequest?.init?.headers);
     expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("X-Requested-With")).toBe("XMLHttpRequest");
     expect(headers.get("Authorization")).toBe("Bearer test-secret-ref");
     const rawBody: unknown = JSON.parse(bodyText(recordedRequest?.init));
-    expect(SearchContextRequestSchema.parse(rawBody)).toEqual(searchInput);
+    expect(rawBody).toEqual({ json: writeInput });
   });
 
   it("Given a tRPC envelope, When getMemoryDigest runs, Then the client unwraps result data", async () => {

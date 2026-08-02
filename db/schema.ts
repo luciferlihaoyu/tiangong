@@ -31,7 +31,7 @@ export type InsertUser = typeof users.$inferInsert;
 // ─── Agents ───
 export const agents = mysqlTable("agents", {
   id: serial("id").primaryKey(),
-  agentId: varchar("agent_id", { length: 20 }).notNull().unique(),
+  agentId: varchar("agent_id", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 50 }).notNull(),
   system: varchar("system", { length: 30 }).notNull(),
   status: mysqlEnum("status", ["online", "busy", "idle"]).default("idle").notNull(),

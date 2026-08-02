@@ -177,6 +177,17 @@ pending → queued → running → done
 | 苏木 | OpenClaw | volcengine-plan/ark-code-latest | Community Manager | community, engagement |
 | 美澄 | OpenClaw | volcengine-plan/ark-code-latest | WeChat Operator | wechat, social-media |
 | 经纬 | OpenClaw | deepseek-v4-pro | Research Assistant | research, analysis |
+| 天宫总调度 (`tiangong-manager`) | system | volcengine-plan/ark-code-latest | 总调度 Agent | triage, route, decompose, monitor, summarize, request_approval |
+| 研究分析助手 (`openclaw:research`) | openclaw | deepseek-v4-pro | Research Analyst | research, analysis, report |
+| 写作编辑助手 (`openclaw:writing`) | openclaw | volcengine-plan/ark-code-latest | Writing Editor | writing, editing, summary |
+| 图片媒体助手 (`openclaw:media-image`) | openclaw | volcengine-plan/ark-code-latest | Image Media Producer | image_prompt, image_generation |
+| 视频媒体助手 (`openclaw:media-video`) | openclaw | volcengine-plan/ark-code-latest | Video Media Producer | storyboard, video_generation |
+| 数据分析助手 (`openclaw:data`) | openclaw | deepseek-v4-pro | Data Analyst | data_analysis, spreadsheet, datasource |
+| 策略规划助手 (`openclaw:strategy`) | openclaw | deepseek-v4-pro | Strategy Planner | planning, evaluation, decision |
+| 质量检查助手 (`openclaw:qa`) | openclaw | volcengine-plan/ark-code-latest | QA Reviewer | review, test_case, browser_check |
+| 协同跟进助手 (`openclaw:coordinator`) | openclaw | volcengine-plan/ark-code-latest | Coordinator | coordination, followup, status_report |
+| 代码需求分析助手 (`openclaw:coding-analysis`) | openclaw | deepseek-v4-pro | Coding Analyst | requirement, code_reading, spec |
+| OpenCode 主执行器 (`opencode:main`) | opencode | deepseek-v4-pro | Coding Executor | coding, debugging, tests, pr, review |
 
 ---
 

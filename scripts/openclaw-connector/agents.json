@@ -129,6 +129,16 @@
       "execArgs": [],
       "claimTasks": true,
       "tokenEnv": "TIANGONG_ERIYI_MCP_KEY"
+    },
+    {
+      "name": "opencode",
+      "agentId": 16,
+      "label": "OpenCode",
+      "execMode": "command",
+      "execFile": "/opt/tiangong/scripts/openclaw-connector/runner-opencode.sh",
+      "execArgs": [],
+      "claimTasks": true,
+      "tokenEnv": "TIANGONG_OPENCODE_MCP_KEY"
     }
   ]
 }

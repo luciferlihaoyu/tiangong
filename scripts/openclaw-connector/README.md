@@ -636,6 +636,19 @@ Task created (status=queued)
 - command 失败只标记任务 failed，不影响服务稳定性
 - Zeabur secrets 不自动修改，默认 mock 模式可用
 
+## OpenCode Runner
+
+`runner-opencode.mjs` 将 connector 的 stdin prompt 交给本机 OpenCode，并把 OpenCode stdout 作为任务结果返回。启动 Agent#16：
+
+```bash
+export TIANGONG_OPENCODE_MCP_KEY='tg-...'
+./scripts/openclaw-connector/start-opencode.sh
+```
+
+可配置环境变量：`OPENCODE_WORK_DIR`（默认 `/opt/tiangong-tasks`）、`OPENCODE_MODEL`、`OPENCODE_TIMEOUT_MS`（默认 `900000`）和 `OPENCODE_AUTO`（默认 `true`）。每个任务使用独立的 `task-<TIANGONG_TASK_ID>` 工作目录。
+
+> 安全提示：默认启用的 `--auto` 会自动批准未被显式拒绝的 OpenCode 权限，仅应在受控主机和受信任任务源上运行；设置 `OPENCODE_AUTO=false` 可关闭。
+
 ## 技术依赖
 
 - Node.js 20+

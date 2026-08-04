@@ -239,6 +239,9 @@ export const agentRouter = createRouter({
       if (ctx.apiKeyAgentId === null) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "任务认领需要有效的 MCP Key" });
       }
+      if (ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== input.agentId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Key 与目标 Agent 不匹配" });
+      }
 
       const db = getDb();
 
@@ -324,6 +327,9 @@ export const agentRouter = createRouter({
     .mutation(async ({ input, ctx }) => {
       if (ctx.apiKeyAgentId === null) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "心跳更新需要有效的 MCP Key" });
+      }
+      if (ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== input.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Key 与目标 Agent 不匹配" });
       }
 
       const db = getDb();

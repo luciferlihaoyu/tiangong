@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
+import { verifyMcpKey } from "./mcp/auth";
 
 // ─── API Key validation ───
 // Global token set populated by boot.ts on startup
@@ -38,15 +39,23 @@ function loadEnvKeys(): Set<string> {
 
 let _envKeys: Set<string> | null = null;
 
-async function verifyApiKey(headerValue: string | null): Promise<boolean> {
-  if (!headerValue) return false;
+type ApiKeyResolution = {
+  readonly valid: boolean;
+  readonly boundAgentId: number | null;
+};
+
+async function verifyApiKey(headerValue: string | null): Promise<ApiKeyResolution> {
+  if (!headerValue) return { valid: false, boundAgentId: null };
   const val = headerValue.trim();
   // Check env-based keys
   if (!_envKeys) _envKeys = loadEnvKeys();
-  if (_envKeys.has(val)) return true;
+  if (_envKeys.has(val)) return { valid: true, boundAgentId: null };
   // Check DB-based keys (populated by boot.ts)
-  if (_globalApiKeys.has(val)) return true;
-  return false;
+  if (_globalApiKeys.has(val)) return { valid: true, boundAgentId: null };
+
+  const mcpAuth = await verifyMcpKey(val);
+  if (!mcpAuth.valid) return { valid: false, boundAgentId: null };
+  return { valid: true, boundAgentId: mcpAuth.apiKey?.agentId ?? null };
 }
 
 // Context for each request
@@ -65,8 +74,9 @@ export async function createContext(opts: { req: Request }) {
 
   // Try API key from x-api-key or x-mcp-key
   const apiKey = opts.req.headers.get("x-api-key") || opts.req.headers.get("x-mcp-key");
-  if (apiKey && await verifyApiKey(apiKey)) {
-    apiKeyAgentId = -1; // marker for valid API key (no specific agent)
+  const apiKeyResolution = await verifyApiKey(apiKey);
+  if (apiKeyResolution.valid) {
+    apiKeyAgentId = apiKeyResolution.boundAgentId ?? -1;
   }
 
   return { req: opts.req, user, apiKeyAgentId };

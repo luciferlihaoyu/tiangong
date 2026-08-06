@@ -932,8 +932,11 @@ async function reportUsage(cfg, task, result, success) {
  * A2A-lite v0.1 upgrade: dispatch → ack → working → awaiting_result / submitted → completed
  * Updates progress at 10%, 25%, 50%, 75%, then writes final result.
  *
+ * 审批闸门：task.approvalRequired 由服务端在认领时返回。高风险任务提交结果后等待人工审批，
+ * connector 不自动 review / 不强制完成；只有低风险任务才会自动 review 并完成。
+ *
  * @param {Config} cfg
- * @param {{ id: number, taskId: string, name: string, description?: string, input?: string }} task
+ * @param {{ id: number, taskId: string, name: string, description?: string, input?: string, approvalRequired?: boolean }} task
  */
 async function executeTaskWithProgress(cfg, task) {
   L.info(`🎯 开始处理任务: ${task.name} (taskId=${task.taskId})`);
@@ -998,31 +1001,37 @@ async function executeTaskWithProgress(cfg, task) {
     }
     L.info(`✅ 任务 ${task.name} 已提交结果 (artifactId=${submitR.data?.artifactId})`);
 
-    // A2A-lite: review / complete the task only after successful submission
-    const reviewR = await trpcCall(cfg, "a2a.review", {
-      taskId: task.id,
-      approved: true,
-      note: "Connector auto-approved after successful execution",
-    });
-    if (!reviewR.ok) {
-      L.warn(`A2A review failed: ${reviewR.error}`);
+    // 审批闸门：高风险任务提交结果后等待人工审批，不自动 review / 不强制完成。
+    // approvalRequired 由服务端 agent.claimTask / agent.updateHeartbeat 在认领时返回。
+    if (task.approvalRequired) {
+      L.info(`⏳ 任务 ${task.name} 为高风险任务，结果已提交 (lifecycleStatus=submitted)，等待管理员审批，connector 不自动完成`);
     } else {
-      L.info(`✅ 任务 ${task.name} 已审核完成`);
-    }
+      // A2A-lite: review / complete the task only after successful submission（仅低风险任务自动审核）
+      const reviewR = await trpcCall(cfg, "a2a.review", {
+        taskId: task.id,
+        approved: true,
+        note: "Connector auto-approved after successful execution",
+      });
+      if (!reviewR.ok) {
+        L.warn(`A2A review failed: ${reviewR.error}`);
+      } else {
+        L.info(`✅ 任务 ${task.name} 已审核完成`);
+      }
 
-    // P3: Final write-back — ensure task output and status are persisted
-    const finalOutput = truncateOutput(result, cfg.resultMaxChars);
-    const updateR = await trpcCall(cfg, "task.updateProgress", {
-      id: task.id,
-      progress: 100,
-      status: "done",
-      lifecycleStatus: "completed",
-      output: finalOutput,
-    });
-    if (!updateR.ok) {
-      L.warn(`任务最终回写失败: ${updateR.error}`);
-    } else {
-      L.info(`✅ 任务 ${task.name} 结果已回写 (${finalOutput.length} chars)`);
+      // P3: Final write-back — ensure task output and status are persisted
+      const finalOutput = truncateOutput(result, cfg.resultMaxChars);
+      const updateR = await trpcCall(cfg, "task.updateProgress", {
+        id: task.id,
+        progress: 100,
+        status: "done",
+        lifecycleStatus: "completed",
+        output: finalOutput,
+      });
+      if (!updateR.ok) {
+        L.warn(`任务最终回写失败: ${updateR.error}`);
+      } else {
+        L.info(`✅ 任务 ${task.name} 结果已回写 (${finalOutput.length} chars)`);
+      }
     }
 
     // P9 + P5: connector owns usage writeback; runners only return stdout.

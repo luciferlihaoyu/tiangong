@@ -28,6 +28,7 @@ import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkExecutionGate, parkTaskForApproval } from "./execution-gate";
+import { syncTaskMemoryToXuanji } from "./xuanji-sync";
 import { spawn } from "node:child_process";
 
 // ─── Config ───
@@ -390,6 +391,19 @@ class TaskRunner {
             updatedAt: new Date(),
           })
           .where(eq(tasks.id, task.id));
+
+        // 完成（通过执行闸门）→ 尽力而为地把结果写入璇玑记忆（失败不影响完成）
+        await syncTaskMemoryToXuanji(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          output: outputText ?? task.output,
+          agentId: task.agentId,
+          status: "done",
+          lifecycleStatus: "completed",
+        });
 
         await this.recordEvent(task.id, "system", "Task auto-reviewed and completed by runner", { previousStatus: "submitted", lifecycleStatus: "completed" }, task.agentId ?? undefined);
 

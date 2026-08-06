@@ -5,6 +5,7 @@ import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/sch
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
+import { syncTaskMemoryToXuanji } from "./lib/xuanji-sync";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
 // 核心语义：
@@ -445,6 +446,18 @@ export const a2aRouter = createRouter({
       });
 
       if (input.approved) {
+        // 审批通过 → 尽力而为地把结果写入璇玑记忆（失败不影响完成）
+        await syncTaskMemoryToXuanji(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          output: task.output,
+          agentId: task.agentId,
+          status: "done",
+          lifecycleStatus: "completed",
+        });
         wsManager.broadcastToDashboard({
           type: "a2a_complete",
           taskId: task.taskId,

@@ -8,6 +8,7 @@ import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { mergeTaskMetadata, parseTaskMetadata } from "./lib/task-metadata";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
+import { syncTaskMemoryToXuanji } from "./lib/xuanji-sync";
 
 export const taskRouter = createRouter({
   list: publicQuery
@@ -237,6 +238,20 @@ export const taskRouter = createRouter({
       if (input.output !== undefined) update.output = input.output;
       if (input.error !== undefined) update.error = input.error;
       await db.update(tasks).set(update).where(eq(tasks.id, input.id));
+      // 完成任务（通过审批闸门后）→ 尽力而为地把结果写入璇玑记忆（失败不影响完成）
+      if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
+        await syncTaskMemoryToXuanji(db, {
+          id: taskRow.id,
+          taskId: taskRow.taskId,
+          name: taskRow.name,
+          description: taskRow.description,
+          input: taskRow.input,
+          output: input.output ?? taskRow.output,
+          agentId: taskRow.agentId,
+          status: "done",
+          lifecycleStatus: input.lifecycleStatus ?? "completed",
+        });
+      }
       // 通知 Dashboard：任务状态变更
       const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
       wsManager.broadcastToDashboard({
@@ -364,6 +379,19 @@ export const taskRouter = createRouter({
         completedAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(tasks.id, input.id));
+
+      // 审批通过 → 尽力而为地把结果写入璇玑记忆（失败不影响完成）
+      await syncTaskMemoryToXuanji(db, {
+        id: taskRow.id,
+        taskId: taskRow.taskId,
+        name: taskRow.name,
+        description: taskRow.description,
+        input: taskRow.input,
+        output: taskRow.output,
+        agentId: taskRow.agentId,
+        status: "done",
+        lifecycleStatus: "completed",
+      });
 
       const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
       wsManager.broadcastToDashboard({

@@ -7,6 +7,7 @@ import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-valid
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
+import { syncTaskMemoryToXuanji } from "./lib/xuanji-sync";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -464,6 +465,20 @@ export const taskboardRouter = createRouter({
         updateFields.status = "running";
       }
       await db.update(tasks).set(updateFields).where(eq(tasks.id, input.taskId));
+      if (to === "done") {
+        // 尽力而为地把完成结果写入璇玑记忆（失败不影响完成）
+        await syncTaskMemoryToXuanji(db, {
+          id: row.id,
+          taskId: row.taskId,
+          name: row.name,
+          description: row.description,
+          input: row.input,
+          output: row.output,
+          agentId: row.agentId,
+          status: "done",
+          lifecycleStatus: row.lifecycleStatus ?? "completed",
+        });
+      }
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,
@@ -569,6 +584,18 @@ export const taskboardRouter = createRouter({
           reviewResult: "approved",
         })
         .where(eq(tasks.id, input.taskId));
+      // 审批通过 → 尽力而为地把完成结果写入璇玑记忆（失败不影响完成）
+      await syncTaskMemoryToXuanji(db, {
+        id: row.id,
+        taskId: row.taskId,
+        name: row.name,
+        description: row.description,
+        input: row.input,
+        output: row.output,
+        agentId: row.agentId,
+        status: "done",
+        lifecycleStatus: row.lifecycleStatus ?? "completed",
+      });
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,

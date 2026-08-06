@@ -10,5 +10,8 @@ secrets/
 *.secret
 .tiangong-env
 
+# Runner-scoped New API secrets (never commit)
+scripts/openclaw-connector/.env.local
+
 # Build generated files
 api/commit.ts

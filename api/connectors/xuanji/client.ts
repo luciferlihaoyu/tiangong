@@ -233,22 +233,31 @@ export class XuanjiConnectorClient {
     responseSchema: ZodType<ResponseData>,
     methodName: XuanjiConnectorMethod
   ): ResponseData {
-    try {
-      return z.object({
-        result: z.object({
-          data: responseSchema,
-        }),
-      }).parse(payload).result.data;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        throw new XuanjiConnectorError({
-          code: "invalid_response",
-          message: `Xuanji ${methodName} returned an invalid tRPC envelope`,
-          cause: error,
-        });
-      }
-      throw error;
+    // Xuanji responses are superjson-encoded: { result: { data: { json: <payload> } } }.
+    // Plain tRPC responses ({ result: { data: <payload> } }) are also accepted.
+    const superjsonEnvelope = z.object({
+      result: z.object({
+        data: z.object({ json: responseSchema }),
+      }),
+    });
+    const superjsonParsed = superjsonEnvelope.safeParse(payload);
+    if (superjsonParsed.success) {
+      return superjsonParsed.data.result.data.json;
     }
+
+    const plainParsed = z.object({
+      result: z.object({
+        data: responseSchema,
+      }),
+    }).safeParse(payload);
+    if (plainParsed.success) {
+      return plainParsed.data.result.data;
+    }
+
+    throw new XuanjiConnectorError({
+      code: "invalid_response",
+      message: `Xuanji ${methodName} returned an invalid tRPC envelope`,
+    });
   }
 
   private createAbortRequest(): AbortRequest {

@@ -77,6 +77,13 @@ function trpcResponse(data: unknown, status = 200): Response {
   });
 }
 
+function superjsonTrpcResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify({ result: { data: { json: data } } }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function requestUrl(input: FetchInput): string {
   if (typeof input === "string") {
     return input;
@@ -175,6 +182,32 @@ describe("Xuanji connector", () => {
     expect(headers.get("Authorization")).toBe("Bearer test-secret-ref");
     const rawBody: unknown = JSON.parse(bodyText(recordedRequest?.init));
     expect(rawBody).toEqual({ json: writeInput });
+  });
+
+  it("Given a superjson envelope, When writeTaskMemory runs, Then the client unwraps result.data.json", async () => {
+    // Given
+    const fetchMock = vi.fn(async () =>
+      superjsonTrpcResponse({
+        documentId: 295,
+        nodeIds: [138, 139],
+        edgeIds: [326],
+        chunkCount: 1,
+        vectorized: true,
+      })
+    );
+    const client = new XuanjiConnectorClient({
+      baseUrl: "https://xuanji.example.com",
+      apiKey: "test-secret-ref",
+      fetchImpl: fetchMock,
+    });
+
+    // When
+    const result = await client.writeTaskMemory(writeInput);
+
+    // Then
+    expect(result.documentId).toBe(295);
+    expect(result.nodeIds).toEqual([138, 139]);
+    expect(result.edgeIds).toEqual([326]);
   });
 
   it("Given a tRPC envelope, When getMemoryDigest runs, Then the client unwraps result data", async () => {

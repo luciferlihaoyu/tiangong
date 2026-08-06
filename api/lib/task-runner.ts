@@ -27,6 +27,7 @@ import { tasks, agents, taskMessages, taskArtifacts, type TaskMessage, type Inse
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
+import { checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { spawn } from "node:child_process";
 
 // ─── Config ───
@@ -202,6 +203,13 @@ class TaskRunner {
         .limit(CONFIG.batchSize);
 
       for (const task of queued) {
+        // 执行审批闸门：高风险任务不得由 Runner 领取执行，停放待人工审批
+        const gate = checkExecutionGate(task);
+        if (gate.status === "blocked") {
+          await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+          console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
+          continue;
+        }
         await this.claimAndExecute(task);
       }
       this.consecutiveErrors = 0;

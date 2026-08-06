@@ -6,6 +6,7 @@ import { eq, and, or, like, desc, asc, inArray } from "drizzle-orm";
 import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-validator";
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
+import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -115,6 +116,13 @@ export const taskboardRouter = createRouter({
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
       if (row.boardStatus !== "ready") throw new Error(`Task is not ready (current: ${row.boardStatus})`);
+
+      // 执行审批闸门：高风险任务在 board 认领时同样被拦下
+      const gate = checkExecutionGate(row);
+      if (gate.status === "blocked") {
+        await parkTaskForApproval(db, row, { requiresApproval: true, riskTypes: gate.riskTypes });
+        throw new Error(gate.reason);
+      }
 
       await db
         .update(tasks)
@@ -441,6 +449,12 @@ export const taskboardRouter = createRouter({
       }
       const updateFields: Record<string, unknown> = { boardStatus: to };
       if (to === "done") {
+        // 执行审批闸门：高风险任务不得通过 updateStatus 自行完成
+        const gate = checkCompletionGate(row);
+        if (gate.status === "blocked") {
+          await parkTaskForApproval(db, row, { requiresApproval: true, riskTypes: gate.riskTypes });
+          throw new Error(gate.reason);
+        }
         updateFields.completedAt = new Date();
         updateFields.status = "done";
       } else if (to === "failed") {
@@ -493,6 +507,54 @@ export const taskboardRouter = createRouter({
       const db = getDb();
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
+
+      // 预执行审批：高风险任务被闸门停放（boardStatus=blocked + metadata approval.pending）时，
+      // 管理员批准后重新排队（ready/queued），任务随后可被认领执行。
+      const approvalState = getApprovalState(row.input);
+      const isPendingExecutionApproval =
+        row.boardStatus === "blocked" && approvalState.required && approvalState.decision === "pending";
+      if (isPendingExecutionApproval) {
+        await db
+          .update(tasks)
+          .set({
+            boardStatus: "ready",
+            status: "queued",
+            boardNotes: row.boardNotes ? `${row.boardNotes} · approved by ${input.agentId}` : `Approved by agent ${input.agentId}`,
+            reviewResult: "approved",
+            reviewerId: input.agentId,
+            input: approveTaskMetadata(row.input),
+            blockedAt: null,
+            readyAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(tasks.id, input.taskId));
+        await db.insert(taskMessages).values({
+          taskId: input.taskId,
+          fromAgentId: input.agentId,
+          eventType: "system",
+          content: input.comment ? `High-risk task approved for execution: ${input.comment}` : `High-risk task approved for execution by agent ${input.agentId}`,
+          metadata: stringifyJson({ action: "approve_execution", agentId: input.agentId, previousBoardStatus: row.boardStatus, comment: input.comment }),
+        });
+        wsManager.broadcastToDashboard({
+          type: "task_update",
+          action: "approved",
+          id: input.taskId,
+          taskId: row.taskId,
+          name: row.name,
+          status: "queued",
+          agentId: input.agentId,
+          timestamp: new Date().toISOString(),
+        });
+        await broadcastTaskNotification({
+          taskId: input.taskId,
+          taskName: row.name,
+          fromStatus: "blocked",
+          toStatus: "ready",
+          changedBy: input.agentId,
+        });
+        return { success: true, requeued: true };
+      }
+
       if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
       if (row.reviewerId && row.reviewerId !== input.agentId) {
         throw new Error("Only the assigned reviewer can approve this task");

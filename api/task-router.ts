@@ -7,6 +7,7 @@ import { eq, desc, asc, and, or, like, sql, isNotNull } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { mergeTaskMetadata, parseTaskMetadata } from "./lib/task-metadata";
+import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 
 export const taskRouter = createRouter({
   list: publicQuery
@@ -215,6 +216,21 @@ export const taskRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
+      const taskRow = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, input.id))
+        .then((r) => r[0]);
+
+      // 执行审批闸门：高风险任务不得通过 updateProgress 强制完成（connector 不得 self-approve）
+      if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
+        const gate = checkCompletionGate(taskRow);
+        if (gate.status === "blocked") {
+          await parkTaskForApproval(db, taskRow, { requiresApproval: true, riskTypes: gate.riskTypes });
+          return { success: false, error: gate.reason };
+        }
+      }
+
       const update: Record<string, unknown> = { progress: input.progress };
       if (input.status) update.status = input.status;
       if (input.lifecycleStatus) update.lifecycleStatus = input.lifecycleStatus;
@@ -327,6 +343,20 @@ export const taskRouter = createRouter({
     .input(z.object({ id: z.number(), comment: z.string().optional() }))
     .mutation(async ({ input }) => {
       const db = getDb();
+      const taskRow = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, input.id))
+        .then((r) => r[0]);
+      if (!taskRow) throw new Error("Task not found");
+
+      // 执行审批闸门：高风险任务不得通过该端点自动完成
+      const gate = checkCompletionGate(taskRow);
+      if (gate.status === "blocked") {
+        await parkTaskForApproval(db, taskRow, { requiresApproval: true, riskTypes: gate.riskTypes });
+        throw new Error(gate.reason);
+      }
+
       await db.update(tasks).set({
         lifecycleStatus: "completed",
         status: "done",

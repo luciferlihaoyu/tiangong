@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/schema";
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
 // 核心语义：
@@ -412,6 +413,15 @@ export const a2aRouter = createRouter({
       // 只能从 submitted 或 reviewing 进入 review
       if (!["submitted", "reviewing"].includes(task.lifecycleStatus ?? "")) {
         return { success: false, error: `Cannot review task from status ${task.lifecycleStatus}. Must be submitted or reviewing.` };
+      }
+
+      // 执行审批闸门：高风险任务不得被无条件批准完成（connector 不得 self-approve）
+      if (input.approved) {
+        const gate = checkCompletionGate(task);
+        if (gate.status === "blocked") {
+          await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+          return { success: false, error: gate.reason, lifecycleStatus: task.lifecycleStatus };
+        }
       }
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = input.approved ? "completed" : "reviewing";

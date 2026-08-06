@@ -5,6 +5,7 @@ import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type Agent, ty
 import { eq, like, and, or, isNotNull, isNull, sql, desc } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
+import { getApprovalState, selectExecutableTask, type Db } from "./lib/execution-gate";
 
 type AgentNode = Agent & { children: AgentNode[] };
 type AgentCapability = AgentCard["capabilities"][number];
@@ -40,6 +41,27 @@ function normalizeCapabilityItem(item: unknown): AgentCapability {
 
 function isCapabilityLevel(value: unknown): value is AgentCapability["level"] {
   return value === "expert" || value === "advanced" || value === "intermediate" || value === "beginner";
+}
+
+/**
+ * 查找该 Agent 可认领的 queued 任务（含通用任务 agentId=null）。
+ * 执行审批闸门：高风险且未批准的任务被停放待审批（不会返回），
+ * 已批准的高风险任务与低风险任务照常返回。
+ */
+async function findClaimableTask(db: Db, agentId: number) {
+  const claimableTasks = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.status, "queued"), eq(tasks.agentId, agentId)))
+    .orderBy(desc(tasks.priority))
+    .limit(20);
+  const genericTasks = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.status, "queued"), isNull(tasks.agentId)))
+    .orderBy(desc(tasks.priority))
+    .limit(20);
+  return selectExecutableTask(db, [...claimableTasks, ...genericTasks]);
 }
 
 export const agentRouter = createRouter({
@@ -255,39 +277,9 @@ export const agentRouter = createRouter({
         throw new Error("Agent not found");
       }
 
-      // 2. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务），按优先级降序
-      const claimableTasks = await db
-        .select()
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.status, "queued"),
-            agent.orgId
-              ? eq(tasks.agentId, input.agentId)
-              : eq(tasks.agentId, input.agentId),
-          )
-        )
-        .orderBy(desc(tasks.priority))
-        .limit(1);
-
-      // 也查询 agentId 为 null 的通用任务
-      const genericTasks = await db
-        .select()
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.status, "queued"),
-            isNull(tasks.agentId),
-          )
-        )
-        .orderBy(desc(tasks.priority))
-        .limit(1);
-
-      // 合并并取优先级最高的
-      const allClaimable = [...claimableTasks, ...genericTasks]
-        .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-      const task = allClaimable[0];
+      // 2. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务）。
+      //    执行审批闸门在此拦截高风险任务（停放待审批），只有低风险或已批准的任务才会被认领。
+      const task = await findClaimableTask(db, input.agentId);
 
       if (!task) {
         return { task: null };
@@ -318,6 +310,7 @@ export const agentRouter = createRouter({
           description: task.description,
           input: task.input,
           priority: task.priority,
+          approvalRequired: getApprovalState(task.input).required,
         },
       };
     }),
@@ -347,39 +340,11 @@ export const agentRouter = createRouter({
         .where(eq(agents.id, input.id));
       const agent = agentRows[0];
 
-      let claimedTask: { id: number; taskId: string; name: string } | null = null;
+      let claimedTask: { id: number; taskId: string; name: string; approvalRequired: boolean } | null = null;
 
       if (agent) {
-        // 查找匹配此 Agent 的 queued 任务
-        const matchedTasks = await db
-          .select()
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.status, "queued"),
-              eq(tasks.agentId, input.id),
-            )
-          )
-          .orderBy(desc(tasks.priority))
-          .limit(1);
-
-        // 查找通用任务（agentId 为 null）
-        const genericTasks = await db
-          .select()
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.status, "queued"),
-              isNull(tasks.agentId),
-            )
-          )
-          .orderBy(desc(tasks.priority))
-          .limit(1);
-
-        const allClaimable = [...matchedTasks, ...genericTasks]
-          .sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-        const bestTask = allClaimable[0];
+        // 查找可认领的任务（执行审批闸门拦截高风险任务）
+        const bestTask = await findClaimableTask(db, input.id);
 
         if (bestTask) {
           // 自动认领，A2A-lite lifecycle
@@ -402,6 +367,7 @@ export const agentRouter = createRouter({
             id: bestTask.id,
             taskId: bestTask.taskId,
             name: bestTask.name,
+            approvalRequired: getApprovalState(bestTask.input).required,
           };
         }
       }

@@ -16,6 +16,7 @@ import { wsManager } from "./ws-manager";
 import { verifyMcpKey } from "./mcp/auth";
 import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
+import { sweeperScheduler } from "./lib/sweepers/scheduler";
 import { agents, messages } from "@db/schema";
 import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
 
@@ -456,6 +457,14 @@ try {
   console.log("[Boot] Task Runner started");
 } catch (e: unknown) {
   console.warn("[Boot] Task Runner start failed:", e instanceof Error ? e.message : String(e));
+}
+
+// Start server-side maintenance sweepers (timeouts, watchdog, approval nag, memory, newapi patrol)
+try {
+  sweeperScheduler.start();
+  console.log("[Boot] Sweeper Scheduler started");
+} catch (e: unknown) {
+  console.warn("[Boot] Sweeper Scheduler start failed:", e instanceof Error ? e.message : String(e));
 }
 
 const port = parseInt(process.env.PORT || "3000");

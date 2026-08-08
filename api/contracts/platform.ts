@@ -126,6 +126,9 @@ export const ApprovalRequestSchema = z.object({
   target: z.string().min(1).max(500),
   preview: z.string().min(1).max(5000),
   decision: z.enum(["pending", "approved", "rejected"]),
+  // Sweeper bookkeeping: last time the approval-stale nag was sent (ISO-8601).
+  // Required so mergeTaskMetadata round-trips the throttle marker (zod strips unknown keys).
+  lastNagAt: z.string().max(40).optional(),
 });
 
 export const TaskMetadataSchema = z.object({

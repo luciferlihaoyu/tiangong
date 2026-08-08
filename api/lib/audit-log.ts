@@ -27,11 +27,25 @@ export const AUDIT_EVENT_NAMES = [
   "artifact:created",
   "artifact:updated",
   "artifact:deleted",
+  // ── Server-side sweeper events ──
+  "task:timeout",
+  "task:retry_storm",
+  "agent:heartbeat_timeout",
+  "task:approval_stale",
+  "connector:patrol_failed",
 ] as const;
 
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];
 
-export type AuditEntityType = "workspace" | "project" | "membership" | "secret" | "connector" | "artifact";
+export type AuditEntityType =
+  | "workspace"
+  | "project"
+  | "membership"
+  | "secret"
+  | "connector"
+  | "artifact"
+  | "task"
+  | "agent";
 
 /** Safe, explicitly-constructed metadata fields. No secrets, payloads, or free-form user text. */
 export type SafeAuditMetadata = {
@@ -43,6 +57,9 @@ export type SafeAuditMetadata = {
   connectorType?: string;
   status?: string;
   artifactType?: string;
+  taskId?: string;
+  agentId?: number;
+  count?: number;
 };
 
 export interface WriteAuditEventParams {

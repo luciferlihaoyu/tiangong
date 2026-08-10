@@ -24,6 +24,7 @@ import { externalAgentRouter } from "./external-agent-router";
 import { workspaceRouter } from "./workspace-router";
 import { secretVaultRouter } from "./secret-vault-router";
 import { auditRouter } from "./audit-router";
+import { eventsRouter } from "./events-router";
 import { connectorRouter } from "./connector-router";
 import { artifactRouter } from "./artifact-router";
 import { newapiRouter } from "./newapi-router";
@@ -61,6 +62,7 @@ export const appRouter = createRouter({
   workspace: workspaceRouter,
   secretVault: secretVaultRouter,
   audit: auditRouter,
+  events: eventsRouter,
   connector: connectorRouter,
   artifact: artifactRouter,
   newapi: newapiRouter,

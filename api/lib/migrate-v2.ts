@@ -86,6 +86,9 @@ const MIGRATIONS: { table: string; col: string; def: string }[] = [
   { table: "tasks", col: "review_at", def: "TIMESTAMP NULL" },
   { table: "tasks", col: "blocked_at", def: "TIMESTAMP NULL" },
 
+  // ── Audit hash chain columns (P14 hardening) ──
+  { table: "audit_events", col: "prev_hash", def: "VARCHAR(64) NULL" },
+  { table: "audit_events", col: "hash", def: "VARCHAR(64) NULL" },
 ];
 
 async function migrateMailboxColumns(conn: mysql.Connection, logs: string[]) {

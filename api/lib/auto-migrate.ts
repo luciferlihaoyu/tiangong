@@ -328,7 +328,10 @@ const CREATE_TABLES_SQL = [
     entity_type VARCHAR(50) NOT NULL,
     entity_id BIGINT UNSIGNED NULL,
     metadata TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    prev_hash VARCHAR(64) NULL,
+    hash VARCHAR(64) NULL,
+    KEY idx_audit_events_created_at (created_at)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
   // Phase 1: Connector registry foundation (metadata-only, no secrets in rows)

@@ -8,6 +8,7 @@ import {
   int,
   bigint,
   uniqueIndex,
+  index,
   decimal,
 } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
@@ -634,18 +635,31 @@ export type InsertSecretVaultItem = typeof secretVaultItems.$inferInsert;
 // 天宫 Phase 1: General audit/event ledger
 // ═══════════════════════════════════════════════════════════════
 
-export const auditEvents = mysqlTable("audit_events", {
-  id: serial("id").primaryKey(),
-  event: varchar("event", { length: 50 }).notNull(),
-  actorUserId: bigint("actor_user_id", { mode: "number", unsigned: true }).notNull(),
-  workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }),
-  projectId: bigint("project_id", { mode: "number", unsigned: true }),
-  targetUserId: bigint("target_user_id", { mode: "number", unsigned: true }),
-  entityType: varchar("entity_type", { length: 50 }).notNull(),
-  entityId: bigint("entity_id", { mode: "number", unsigned: true }),
-  metadata: text("metadata"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const auditEvents = mysqlTable(
+  "audit_events",
+  {
+    id: serial("id").primaryKey(),
+    event: varchar("event", { length: 50 }).notNull(),
+    actorUserId: bigint("actor_user_id", { mode: "number", unsigned: true }).notNull(),
+    workspaceId: bigint("workspace_id", { mode: "number", unsigned: true }),
+    projectId: bigint("project_id", { mode: "number", unsigned: true }),
+    targetUserId: bigint("target_user_id", { mode: "number", unsigned: true }),
+    entityType: varchar("entity_type", { length: 50 }).notNull(),
+    entityId: bigint("entity_id", { mode: "number", unsigned: true }),
+    metadata: text("metadata"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    // ── Audit hash chain (block-style hardening) ──
+    // sha256 hex of the previous chained row; NULL for pre-chain legacy rows.
+    prevHash: varchar("prev_hash", { length: 64 }),
+    // sha256 hex over [prevHash, event, actorUserId, entityType, entityId,
+    // metadataJson, createdAt]; NULL for pre-chain legacy rows.
+    hash: varchar("hash", { length: 64 }),
+  },
+  (table) => ({
+    // Chain walk + unified event stream order by time; non-unique by design.
+    createdAtIdx: index("idx_audit_events_created_at").on(table.createdAt),
+  })
+);
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
 export type InsertAuditEvent = typeof auditEvents.$inferInsert;

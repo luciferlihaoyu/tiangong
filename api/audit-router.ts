@@ -15,6 +15,14 @@ import { getDb } from "./queries/connection";
 import { auditEvents } from "@db/schema";
 import { desc, eq } from "drizzle-orm";
 import { requireCapability } from "./workspace/capability";
+import { adaptAuditDb } from "./lib/audit-log";
+import { auditStats, verifyAuditIntegrity } from "./lib/audit-integrity";
+
+function requireAdminRole(role: string): void {
+  if (role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "需要管理员权限" });
+  }
+}
 
 export const auditRouter = createRouter({
   list: userQuery
@@ -52,4 +60,17 @@ export const auditRouter = createRouter({
         .limit(input.limit)
         .offset(input.offset);
     }),
+
+  // P14: verify the audit hash chain (admin-only). Returns the integrity
+  // report: { total, verified, broken[], chainStartId, legacyRows }.
+  verifyIntegrity: userQuery.query(async ({ ctx }) => {
+    requireAdminRole(ctx.user.role);
+    return verifyAuditIntegrity(adaptAuditDb(getDb()));
+  }),
+
+  // P14: cheap ledger health summary (admin-only).
+  stats: userQuery.query(async ({ ctx }) => {
+    requireAdminRole(ctx.user.role);
+    return auditStats(adaptAuditDb(getDb()));
+  }),
 });

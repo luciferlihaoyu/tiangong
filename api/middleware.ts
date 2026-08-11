@@ -125,14 +125,17 @@ export const userQuery = publicProcedure.use(async ({ ctx, next }) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
-// Admin query - requires admin role
+// Admin query - requires an authenticated user with the admin role.
+//
+// 安全修复：此前实现允许"仅有有效 API Key（apiKeyAgentId !== null）但无登录
+// 用户"的请求通过管理员检查，导致任何 agent 级 MCP Key（如 connector Key）
+// 都能执行 admin 过程（auth.register / mcp.createKey / taskboard.approve 等），
+// 构成权限提升漏洞。admin 权限现在只授予登录用户的 admin 角色。
 export const adminQuery = publicProcedure.use(async ({ ctx, next }) => {
-  const hasUser = !!ctx.user;
-  const hasApiKey = ctx.apiKeyAgentId !== null;
-  if (!hasUser && !hasApiKey) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录或提供有效的 API Key" });
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "请先登录" });
   }
-  if (ctx.user && ctx.user.role !== "admin") {
+  if (ctx.user.role !== "admin") {
     throw new TRPCError({ code: "FORBIDDEN", message: "需要管理员权限" });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });

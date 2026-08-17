@@ -203,7 +203,7 @@ npm install
 
 # 环境变量
 cp .env.example .env
-# 编辑 .env: DATABASE_URL, APP_SECRET
+# 编辑 .env: DATABASE_URL, APP_SECRET, ADMIN_USER, ADMIN_PASSWORD
 
 # 初始化数据库
 npm run db:push      # 同步表结构
@@ -219,13 +219,15 @@ npm run dev           # http://localhost:3000
 # 数据库（必需）
 DATABASE_URL=mysql://user:password@host:port/database
 
-# JWT 密钥
+# JWT 密钥（必需，生产环境请使用 openssl rand -hex 32 生成）
 APP_SECRET=your-secret-key
 
-# 管理员账号（默认 admin/admin）
-ADMIN_USER=admin
-ADMIN_PASSWORD=admin
+# 管理员账号（必需，无默认值，未设置将拒绝启动；密码至少 8 位）
+ADMIN_USER=your-admin-username
+ADMIN_PASSWORD=your-strong-password
 ```
+
+> ⚠️ 切勿将真实凭据提交到 git 仓库（包括文档和 `.env.example`）。如曾泄露，请立即轮换。
 
 ---
 
@@ -233,8 +235,10 @@ ADMIN_PASSWORD=admin
 
 ### Zeabur
 
+详细步骤见 [ZEABUR_DEPLOY_GUIDE.md](ZEABUR_DEPLOY_GUIDE.md)；artifact 存储部署契约见 [ZEABUR_DEPLOY.md](ZEABUR_DEPLOY.md)。
+
 1. 连接 GitHub 仓库
-2. 设置环境变量（DATABASE_URL, APP_SECRET）
+2. 设置环境变量（DATABASE_URL, APP_SECRET, ADMIN_USER, ADMIN_PASSWORD）
 3. 自动构建部署
 
 ### Docker

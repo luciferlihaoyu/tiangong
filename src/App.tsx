@@ -27,6 +27,7 @@ import AgentDetail from './pages/AgentDetail'
 import SessionPanel from './pages/SessionPanel'
 import ConsolePanel from './pages/ConsolePanel'
 import { AppLayout } from './sections/Navigation'
+import { Toaster } from './components/ui/sonner'
 import { useAuth } from './hooks/useAuth'
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
@@ -64,6 +65,7 @@ function HomePage() {
 export default function App() {
   return (
     <div className="relative min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <Toaster position="top-right" />
       <Starfield />
       <Routes>
         {/* Public routes — no layout */}

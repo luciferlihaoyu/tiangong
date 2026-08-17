@@ -255,3 +255,77 @@
     box-shadow: 0 0 12px rgba(201, 168, 76, 0.15);
   }
 }
+
+@layer base {
+  /* ─────────────────────────────────────────────
+     shadcn/ui 主题桥接
+     tailwind.config.js 中的 bg-background / text-foreground /
+     border-border 等 token 映射到下面这些 HSL 变量。
+     必须与上方自定义变量保持同一套配色（朱红+金色+深空黑）。
+     ───────────────────────────────────────────── */
+  :root {
+    --background: 240 23% 3%;
+    --foreground: 222 25% 92%;
+    --card: 240 23% 5%;
+    --card-foreground: 222 25% 92%;
+    --popover: 240 23% 5%;
+    --popover-foreground: 222 25% 92%;
+    --primary: 4 60% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 15% 10%;
+    --secondary-foreground: 222 25% 92%;
+    --muted: 240 15% 10%;
+    --muted-foreground: 222 18% 58%;
+    --accent: 240 15% 12%;
+    --accent-foreground: 222 25% 92%;
+    --destructive: 2 77% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 228 20% 14%;
+    --input: 228 20% 14%;
+    --ring: 4 60% 47%;
+    --sidebar-background: 240 23% 5%;
+    --sidebar-foreground: 222 25% 92%;
+    --sidebar-primary: 4 60% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 15% 12%;
+    --sidebar-accent-foreground: 222 25% 92%;
+    --sidebar-border: 228 20% 14%;
+    --sidebar-ring: 4 60% 47%;
+  }
+
+  [data-theme="light"] {
+    --background: 223 23% 94%;
+    --foreground: 225 19% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 225 19% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 225 19% 13%;
+    --primary: 3 64% 44%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 21% 91%;
+    --secondary-foreground: 225 19% 13%;
+    --muted: 222 21% 91%;
+    --muted-foreground: 222 12% 45%;
+    --accent: 222 21% 88%;
+    --accent-foreground: 225 19% 13%;
+    --destructive: 3 64% 44%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 222 20% 84%;
+    --input: 222 20% 84%;
+    --ring: 3 64% 44%;
+    --sidebar-background: 222 21% 91%;
+    --sidebar-foreground: 225 19% 13%;
+    --sidebar-primary: 3 64% 44%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 21% 86%;
+    --sidebar-accent-foreground: 225 19% 13%;
+    --sidebar-border: 222 20% 84%;
+    --sidebar-ring: 3 64% 44%;
+  }
+}
+
+/* ── 尊重系统"减弱动态效果"设置 ── */
+@media (prefers-reduced-motion: reduce) {
+  .ring-container { animation: none; }
+  html { scroll-behavior: auto; }
+}

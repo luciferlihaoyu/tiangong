@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,7 +57,11 @@ describe("immutable artifact volume", () => {
     await storage.install({ stageId: "first", sha256: digest, size: bytes.length });
     await storage.stage({ stageId: "second", bytes, expectedSha256: digest, expectedSize: bytes.length });
     expect((await storage.install({ stageId: "second", sha256: digest, size: bytes.length })).reused).toBe(true);
-    await writeFile(join(storage.root, "by-sha", digest), "corrupt", { mode: 0o444 });
+    // 封存对象为 0444 只读（设计契约），先模拟有写权限的篡改者再写入损坏内容
+    const sealedPath = join(storage.root, "by-sha", digest);
+    await chmod(sealedPath, 0o600);
+    await writeFile(sealedPath, "corrupt");
+    await chmod(sealedPath, 0o444);
     await storage.stage({ stageId: "third", bytes, expectedSha256: digest, expectedSize: bytes.length });
     await expect(storage.install({ stageId: "third", sha256: digest, size: bytes.length })).rejects.toMatchObject({ code: "seal_object_reuse_mismatch" });
     expect(await stat(join(storage.root, "gc", "quarantine-third"))).toBeDefined();

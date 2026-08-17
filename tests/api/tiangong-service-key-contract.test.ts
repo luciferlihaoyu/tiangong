@@ -2,7 +2,7 @@
  * Todo 20 (Beidou plan): verifier-only record contract audit.
  *
  * The source-controlled contract file
- * `tianGong/contracts/tiangong_service_key_records.v1.schema.json` documents
+ * `contracts/schemas/tiangong_service_key_records.v1.schema.json` documents
  * the schema and field names ONLY — `key_id -> {verifier, key_prefix,
  * issued_at, rotation_window_end, revoked_at, version}` — with redacted
  * examples. Actual verifier values live only in the runtime DB; F2 inspects
@@ -20,7 +20,7 @@ import {
 } from "@db/schema";
 
 const CONTRACT_PATH = fileURLToPath(
-  new URL("../../tianGong/contracts/tiangong_service_key_records.v1.schema.json", import.meta.url),
+  new URL("../../contracts/schemas/tiangong_service_key_records.v1.schema.json", import.meta.url),
 );
 
 /**

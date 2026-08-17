@@ -14,6 +14,9 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // 同步 .dark class：tailwind.config.js 的 darkMode 为 ["class"]，
+    // 只有挂上 .dark，shadcn 组件里的 dark: 变体才会生效
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('tiangong-theme', theme);
   }, [theme]);
 

@@ -267,11 +267,11 @@ docker run -p 3000:3000 --env-file .env tiangong
 
 ## License
 
-MIT License
+[MIT License](LICENSE)
 
 ## P8.1 Reliable Message Bus
 
-详见 `TIANGONG_P8_RELIABLE_MESSAGE_BUS_SPEC.md`。
+详见 [`docs/TIANGONG_P8_RELIABLE_MESSAGE_BUS_SPEC.md`](docs/TIANGONG_P8_RELIABLE_MESSAGE_BUS_SPEC.md)。
 
 核心增强：
 - **幂等发送**：`fromAgent + idempotencyKey` 唯一约束
@@ -284,7 +284,7 @@ MIT License
 
 ## P8.2 Collaboration Orchestration
 
-详见 `TIANGONG_P8_2_COLLABORATION_ORCHESTRATION_SPEC.md`。
+详见 [`docs/TIANGONG_P8_2_COLLABORATION_ORCHESTRATION_SPEC.md`](docs/TIANGONG_P8_2_COLLABORATION_ORCHESTRATION_SPEC.md)。
 
 核心增强：
 - **任务拆解**：`collab.delegate` 将 parent task 拆成显式子任务
@@ -295,7 +295,7 @@ MIT License
 
 ## P8.3 Collaboration Command Center
 
-详见 `TIANGONG_P8_3_COLLABORATION_COMMAND_CENTER_SPEC.md`。
+详见 [`docs/TIANGONG_P8_3_COLLABORATION_COMMAND_CENTER_SPEC.md`](docs/TIANGONG_P8_3_COLLABORATION_COMMAND_CENTER_SPEC.md)。
 
 核心增强：
 - **协作面板**：任务指挥中心内选择父任务/协调 Agent 并显式输入子任务

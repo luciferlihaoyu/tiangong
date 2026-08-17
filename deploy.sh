@@ -23,7 +23,7 @@ git push origin main
 echo ""
 echo "✅ 已推送，Zeabur 正在自动部署..."
 echo "   构建: vite build + esbuild"
-echo "   启动: drizzle-kit push (自动同步DB) + node dist/boot.js"
+echo "   启动: 应用启动时自动迁移 schema (autoMigrate) + node dist/boot.js"
 echo ""
 echo "🔗 部署状态: https://dash.zeabur.com"
 echo "🌐 访问地址: https://tiangg.zeabur.app"

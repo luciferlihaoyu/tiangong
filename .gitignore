@@ -15,3 +15,10 @@ scripts/openclaw-connector/.env.local
 
 # Build generated files
 api/commit.ts
+
+# Runtime artifacts (never commit)
+openclaw-0/
+openclaw_security_alerts.json
+node-compile-cache/
+tiangong-git-backup/
+backups/

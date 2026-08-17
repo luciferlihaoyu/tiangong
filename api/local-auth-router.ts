@@ -30,6 +30,16 @@ if (!APP_SECRET) {
 }
 const SECRET = new TextEncoder().encode(APP_SECRET);
 
+// Admin credentials from env — 禁止默认值，杜绝弱口令兜底
+const ADMIN_USER = process.env.ADMIN_USER;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!ADMIN_USER || !ADMIN_PASSWORD) {
+  throw new Error("ADMIN_USER / ADMIN_PASSWORD 环境变量未设置，拒绝启动。请在 Zeabur 环境变量中配置。");
+}
+if (ADMIN_PASSWORD.length < 8) {
+  throw new Error("ADMIN_PASSWORD 长度至少 8 位，拒绝启动。请设置强密码。");
+}
+
 async function createToken(userId: number, role: string): Promise<string> {
   return new SignJWT({ sub: String(userId), role })
     .setProtectedHeader({ alg: "HS256" })
@@ -45,14 +55,6 @@ export async function verifyToken(token: string) {
   } catch {
     return null;
   }
-}
-
-// Get admin credentials from env
-function getAdminCreds() {
-  return {
-    username: process.env.ADMIN_USER || "admin",
-    password: process.env.ADMIN_PASSWORD || "admin",
-  };
 }
 
 export const localAuthRouter = createRouter({
@@ -75,8 +77,7 @@ export const localAuthRouter = createRouter({
       }
 
       // Check against env admin credentials first
-      const adminCreds = getAdminCreds();
-      if (username === adminCreds.username && password === adminCreds.password) {
+      if (username === ADMIN_USER && password === ADMIN_PASSWORD) {
         // Find or create admin user in DB
         let user = await db.select().from(users).where(eq(users.username, username)).then(rows => rows[0]);
         if (!user) {
@@ -116,7 +117,7 @@ export const localAuthRouter = createRouter({
     .input(
       z.object({
         username: z.string().min(3).max(50),
-        password: z.string().min(4).max(100),
+        password: z.string().min(8).max(100),
         name: z.string().optional(),
         role: z.enum(["user", "admin"]).default("user"),
       })
@@ -174,7 +175,7 @@ export const localAuthRouter = createRouter({
   changePassword: userQuery
     .input(z.object({
       oldPassword: z.string(),
-      newPassword: z.string().min(4),
+      newPassword: z.string().min(8),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();

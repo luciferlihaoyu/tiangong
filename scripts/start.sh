@@ -28,19 +28,19 @@ else
 fi
 
 if [ -z "$APP_SECRET" ]; then
-  echo "⚠️  APP_SECRET: NOT SET (使用默认值，不安全)"
+  echo "❌ APP_SECRET: NOT SET — 应用将拒绝启动，请在 Zeabur 环境变量中配置"
 else
   echo "✅ APP_SECRET: SET"
 fi
 
 if [ -z "$ADMIN_USER" ]; then
-  echo "⚠️  ADMIN_USER: NOT SET (使用默认值 admin)"
+  echo "❌ ADMIN_USER: NOT SET — 应用将拒绝启动，请在 Zeabur 环境变量中配置"
 else
   echo "✅ ADMIN_USER: SET ($ADMIN_USER)"
 fi
 
 if [ -z "$ADMIN_PASSWORD" ]; then
-  echo "⚠️  ADMIN_PASSWORD: NOT SET (使用默认值，不安全)"
+  echo "❌ ADMIN_PASSWORD: NOT SET — 应用将拒绝启动，请在 Zeabur 环境变量中配置"
 else
   echo "✅ ADMIN_PASSWORD: SET"
 fi

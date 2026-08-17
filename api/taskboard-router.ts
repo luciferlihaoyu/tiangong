@@ -522,6 +522,7 @@ export const taskboardRouter = createRouter({
       const db = getDb();
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
+      if (row.originSystem === "beidou") throw new Error("External tasks require the actor-bound external approval flow");
 
       // 预执行审批：高风险任务被闸门停放（boardStatus=blocked + metadata approval.pending）时，
       // 管理员批准后重新排队（ready/queued），任务随后可被认领执行。
@@ -647,6 +648,7 @@ export const taskboardRouter = createRouter({
       const db = getDb();
       const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!row) throw new Error("Task not found");
+      if (row.originSystem === "beidou") throw new Error("External tasks reject weak taskboard rejection mutations");
       if (row.boardStatus !== "review") throw new Error(`Task is not in review (current: ${row.boardStatus})`);
       if (row.reviewerId && row.reviewerId !== input.agentId) {
         throw new Error("Only the assigned reviewer can reject this task");

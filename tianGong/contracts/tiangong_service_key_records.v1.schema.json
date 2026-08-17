@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tiangong.local/contracts/tiangong_service_key_records.v1.schema.json",
+  "title": "tiangong_service_key_records.v1 — verifier-only Beidou service key record",
+  "description": "Canonical verifier record schema for Beidou-to-Tiangong service keys (Todo 20, Beidou plan). This file documents the schema and field names ONLY, with redacted examples. Actual verifier values are NEVER stored in source control — they live only in the runtime DB table `tiangong_service_keys`. The server pepper (TIANGONG_SERVICE_KEY_PEPPER) is a deployment secret (env/vault); the plaintext token is shown to the operator exactly once at issuance and never persisted anywhere.",
+  "type": "object",
+  "required": ["key_id", "verifier", "key_prefix", "issued_at", "version"],
+  "properties": {
+    "key_id": {
+      "type": "string",
+      "description": "Public key identifier: \"tgsk_<base64url(16 random bytes)>\". The only identifier a caller presents, via the X-TG-Service-Key-ID header.",
+      "example": "tgsk_<key_id: public identifier, 22-char base64url suffix; not committed>"
+    },
+    "verifier": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Full 32-byte HMAC-SHA-256(server_pepper, token), hex. NOT HMAC(token, server_pepper). Stored only in the Tiangong DB; comparison uses crypto.timingSafeEqual. The plaintext token is never stored.",
+      "example": "<verifier: 32-byte HMAC-SHA-256(server_pepper, token); not committed>"
+    },
+    "key_prefix": {
+      "type": "string",
+      "description": "One-way-redacted 6-byte prefix of the token (base64url, 8 chars). Used for audit/operator identification only; cannot reconstruct the token.",
+      "example": "<key_prefix: 6-byte prefix; not committed>"
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 issuance timestamp. The token is shown to the operator exactly once at this moment and can never be retrieved again.",
+      "example": "<issued_at: ISO-8601 timestamp; not committed>"
+    },
+    "rotation_window_end": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "For a rotated key: end of the key-overlap retention window (= max callback retry window). The previous key remains valid until this instant, then is revoked.",
+      "example": "<rotation_window_end: ISO-8601 timestamp or null; not committed>"
+    },
+    "revoked_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Revocation invalidates the key_id immediately; the verifier row is retained (marked revoked), never deleted.",
+      "example": "<revoked_at: ISO-8601 timestamp or null; not committed>"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic key version; rotation issues version+1.",
+      "example": "<version: integer >= 1; not committed>"
+    }
+  },
+  "additionalProperties": true,
+  "bindingNotes": [
+    "Directional keyring (frozen): this Beidou-to-Tiangong service key (verifier lives only in the Tiangong DB; holder is the Beidou caller) is independent from the Tiangong-to-Beidou callback HMAC keyring (deployment-injected on both sides; consumed by Todo 22).",
+    "The DB row additionally binds the principal: origin_system (fixed 'beidou'), workspace_slug, project_slug, scopes (least-privilege allowlist; no wildcard scope).",
+    "Every auth decision is audit-logged (service_key_audit_log) with key_id, originSystem and a one-way-redacted token prefix only."
+  ]
+}

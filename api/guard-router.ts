@@ -25,7 +25,7 @@ import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
  * 高价模型判定阈值（costCents per call）
  * GPT-5.5 high 等模型 costCents >= 100 视为高价
  */
-const HIGH_COST_THRESHOLD_CENTS = 100;
+export const HIGH_COST_THRESHOLD_CENTS = 100;
 type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
 
 function getInsertId(result: InsertResult): number {
@@ -33,7 +33,7 @@ function getInsertId(result: InsertResult): number {
 }
 
 /** 已知高价模型列表（硬编码 + 数据库动态维护） */
-const KNOWN_HIGH_COST_MODELS = [
+export const KNOWN_HIGH_COST_MODELS = [
   "4sapi/gpt-5.5-high",
   "4sapi/claude-opus-4-8",
   "zeabur-ai/gpt-5.4-pro",

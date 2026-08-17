@@ -134,6 +134,11 @@ export const tasks = mysqlTable("tasks", {
   sourceUrl: varchar("source_url", { length: 500 }),
   lastHeartbeatAt: timestamp("last_heartbeat_at"),
   heartbeatIntervalMs: int("heartbeat_interval_ms").default(300000),
+  workerLeaseToken: varchar("worker_lease_token", { length: 64 }),
+  workerLeaseGeneration: int("worker_lease_generation").default(0).notNull(),
+  workerLeaseExpiresAt: timestamp("worker_lease_expires_at"),
+  cancelRequestedAt: timestamp("cancel_requested_at"),
+  cancelAcknowledgedAt: timestamp("cancel_acknowledged_at"),
   reviewerId: bigint("reviewer_id", { mode: "number", unsigned: true }),
   reviewResult: varchar("review_result", { length: 30 }),
   triagedAt: timestamp("triaged_at"),
@@ -141,12 +146,160 @@ export const tasks = mysqlTable("tasks", {
   readyAt: timestamp("ready_at"),
   reviewAt: timestamp("review_at"),
   blockedAt: timestamp("blocked_at"),
+  originSystem: varchar("origin_system", { length: 32 }),
+  externalRef: varchar("external_ref", { length: 255 }),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }),
+  canonicalRequestHash: varchar("canonical_request_hash", { length: 64 }),
+  canonicalRequestHashVersion: varchar("canonical_request_hash_version", { length: 32 }),
+  stateRevision: bigint("state_revision", { mode: "number", unsigned: true }).default(1).notNull(),
+  taskRetainUntil: timestamp("task_retain_until"),
+  idempotencyRetainUntil: timestamp("idempotency_retain_until"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
-});
+}, (table) => ({
+  externalRefIdx: uniqueIndex("uq_tasks_origin_external_ref").on(table.originSystem, table.externalRef),
+  idempotencyKeyIdx: uniqueIndex("uq_tasks_origin_idempotency_key").on(table.originSystem, table.idempotencyKey),
+}));
 
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = typeof tasks.$inferInsert;
+
+export const tiangongTaskLimits = mysqlTable("tiangong_task_limits", {
+  id: serial("id").primaryKey(),
+  principalKey: varchar("principal_key", { length: 255 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  maxConcurrentTasks: int("max_concurrent_tasks").default(8).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+}, (table) => ({
+  principalWorkspaceIdx: uniqueIndex("uq_tiangong_task_limits_principal_workspace").on(table.principalKey, table.workspaceSlug),
+}));
+
+export const taskExecutionSlots = mysqlTable("task_execution_slots", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  principalKey: varchar("principal_key", { length: 255 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  leaseToken: varchar("lease_token", { length: 64 }).notNull(),
+  acquiredAt: timestamp("acquired_at").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+}, (table) => ({
+  taskIdx: uniqueIndex("uq_task_execution_slots_task").on(table.taskId),
+  scopeIdx: index("idx_task_execution_slots_scope").on(table.principalKey, table.workspaceSlug, table.expiresAt),
+}));
+
+export const tiangongWorkerLeases = mysqlTable("tiangong_worker_leases", {
+  id: serial("id").primaryKey(),
+  leaseToken: varchar("lease_token", { length: 64 }).notNull().unique(),
+  workerId: varchar("worker_id", { length: 128 }).notNull(),
+  principalKey: varchar("principal_key", { length: 255 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  generation: int("generation").notNull(),
+  issuedAt: timestamp("issued_at").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+}, (table) => ({
+  workerScopeIdx: index("idx_tiangong_worker_leases_worker_scope").on(table.workerId, table.principalKey, table.workspaceSlug, table.expiresAt),
+}));
+
+export const taskOutboxEvents = mysqlTable("task_outbox_events", {
+  id: serial("id").primaryKey(),
+  eventId: varchar("event_id", { length: 36 }).notNull().unique(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  taskPublicId: varchar("task_public_id", { length: 20 }).notNull(),
+  externalRef: varchar("external_ref", { length: 255 }).notNull(),
+  originSystem: varchar("origin_system", { length: 32 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  projectSlug: varchar("project_slug", { length: 100 }).notNull(),
+  eventType: mysqlEnum("event_type", ["state", "approval", "terminal"]).notNull(),
+  status: varchar("status", { length: 30 }).notNull(),
+  lifecycleStatus: varchar("lifecycle_status", { length: 30 }),
+  boardStatus: varchar("board_status", { length: 20 }),
+  reviewResult: varchar("review_result", { length: 30 }),
+  stateRevision: bigint("state_revision", { mode: "number", unsigned: true }).notNull(),
+  traceId: varchar("trace_id", { length: 64 }).notNull(),
+  payloadDigest: varchar("payload_digest", { length: 64 }).notNull(),
+  manifestIdentity: varchar("manifest_identity", { length: 64 }),
+  keyId: varchar("key_id", { length: 64 }).notNull(),
+  attempts: int("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at").notNull(),
+  firstAttemptAt: timestamp("first_attempt_at"),
+  deliveredAt: timestamp("delivered_at"),
+  deadLetterAt: timestamp("dead_letter_at"),
+  lastErrorCode: varchar("last_error_code", { length: 64 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+}, (table) => ({
+  taskRevisionIdx: uniqueIndex("uq_task_outbox_task_revision").on(table.taskId, table.stateRevision),
+  dueIdx: index("idx_task_outbox_due").on(table.nextAttemptAt, table.deliveredAt, table.deadLetterAt),
+}));
+
+export type TaskOutboxEvent = typeof taskOutboxEvents.$inferSelect;
+
+export const tiangongProviderIdentity = mysqlTable("tiangong_provider_identity", {
+  providerInstanceId: varchar("provider_instance_id", { length: 64 }).primaryKey(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const tiangongArtifactLimits = mysqlTable("tiangong_artifact_limits", {
+  id: serial("id").primaryKey(),
+  principalKey: varchar("principal_key", { length: 255 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  storageQuotaBytes: bigint("storage_quota_bytes", { mode: "number", unsigned: true }).notNull(),
+  retentionSeconds: int("retention_seconds").notNull(),
+  gcGraceSeconds: int("gc_grace_seconds").notNull(),
+  gcReaperConcurrency: int("gc_reaper_concurrency").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+}, (table) => ({
+  scopeIdx: uniqueIndex("uq_tiangong_artifact_limits_scope").on(table.principalKey, table.workspaceSlug),
+}));
+
+export const stagedObjects = mysqlTable("staged_objects", {
+  stageId: varchar("stage_id", { length: 128 }).primaryKey(),
+  expectedSha256: varchar("expected_sha256", { length: 64 }).notNull(),
+  expectedSize: bigint("expected_size", { mode: "number", unsigned: true }).notNull(),
+  expectedMime: varchar("expected_mime", { length: 255 }).notNull(),
+  generationId: int("generation_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  ownerPrincipal: varchar("owner_principal", { length: 255 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  state: mysqlEnum("state", ["staging", "verified", "sealed", "abandoned"]).default("staging").notNull(),
+});
+
+export const sealedArtifactDescriptors = mysqlTable("sealed_artifact_descriptors", {
+  id: serial("id").primaryKey(),
+  artifactUuid: varchar("artifact_uuid", { length: 36 }).notNull(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull(),
+  taskPublicId: varchar("task_public_id", { length: 20 }).notNull(),
+  externalRef: varchar("external_ref", { length: 255 }).notNull(),
+  taskRevision: bigint("task_revision", { mode: "number", unsigned: true }).notNull(),
+  creatorAgentId: bigint("creator_agent_id", { mode: "number", unsigned: true }),
+  ownerPrincipal: varchar("owner_principal", { length: 255 }).notNull(),
+  workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+  projectSlug: varchar("project_slug", { length: 100 }).notNull(),
+  providerInstanceId: varchar("provider_instance_id", { length: 64 }).notNull(),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  generationId: int("generation_id").notNull(),
+  size: bigint("size", { mode: "number", unsigned: true }).notNull(),
+  mime: varchar("mime", { length: 255 }).notNull(),
+  storedPath: varchar("stored_path", { length: 500 }).notNull(),
+  sealedAt: timestamp("sealed_at").notNull(),
+  retainUntil: timestamp("retain_until").notNull(),
+}, (table) => ({
+  taskArtifactIdx: uniqueIndex("uq_sealed_artifact_task_uuid").on(table.taskId, table.artifactUuid),
+  taskRevisionIdx: index("idx_sealed_artifact_task_revision").on(table.taskId, table.taskRevision),
+}));
+
+export const sealedArtifactManifests = mysqlTable("sealed_artifact_manifests", {
+  id: serial("id").primaryKey(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).notNull().unique(),
+  taskPublicId: varchar("task_public_id", { length: 20 }).notNull(),
+  externalRef: varchar("external_ref", { length: 255 }).notNull(),
+  taskRevision: bigint("task_revision", { mode: "number", unsigned: true }).notNull(),
+  providerInstanceId: varchar("provider_instance_id", { length: 64 }).notNull(),
+  manifestIdentity: varchar("manifest_identity", { length: 64 }).notNull().unique(),
+  canonicalManifest: text("canonical_manifest").notNull(),
+  sealedAt: timestamp("sealed_at").notNull(),
+});
 
 // ─── Messages (P8.1: reliable message bus) ───
 export const messages = mysqlTable(
@@ -262,6 +415,63 @@ export const mcpApiKeys = mysqlTable("mcp_api_keys", {
 
 export type McpApiKey = typeof mcpApiKeys.$inferSelect;
 export type InsertMcpApiKey = typeof mcpApiKeys.$inferInsert;
+
+// ─── Beidou service keys (verifier-only, Todo 20) ───
+// Directional keyring: Beidou-to-Tiangong service credentials (this table) are
+// independent from the Tiangong-to-Beidou callback HMAC keyring (Todo 22).
+// The plaintext token is NEVER stored here — only the full 32-byte
+// HMAC-SHA-256(server_pepper, token) verifier plus the key_id and a 6-byte
+// key-id prefix. The server pepper is a deployment secret (env/vault).
+export const tiangongServiceKeys = mysqlTable(
+  "tiangong_service_keys",
+  {
+    id: serial("id").primaryKey(),
+    // Public key identifier: "tgsk_<base64url(16 random bytes)>".
+    keyId: varchar("key_id", { length: 64 }).notNull().unique(),
+    // 32-byte HMAC-SHA-256(server_pepper, token), hex (64 chars). Verifier only.
+    verifier: varchar("verifier", { length: 64 }).notNull(),
+    // One-way-redacted 6-byte prefix of the token (base64url, 8 chars).
+    keyPrefix: varchar("key_prefix", { length: 12 }).notNull(),
+    // Service principal binding: origin system is fixed to "beidou"; the key
+    // is scoped to exactly one workspace + project (no wildcard scope).
+    originSystem: varchar("origin_system", { length: 32 }).notNull().default("beidou"),
+    workspaceSlug: varchar("workspace_slug", { length: 100 }).notNull(),
+    projectSlug: varchar("project_slug", { length: 100 }).notNull(),
+    // Least-privilege allowlist, JSON array of BeidouServiceScope values.
+    scopes: text("scopes").notNull(),
+    issuedAt: timestamp("issued_at").notNull(),
+    // Rotation: previous key remains valid through the overlap retention
+    // window (max callback retry window), then is lazily revoked.
+    rotationWindowEnd: timestamp("rotation_window_end"),
+    revokedAt: timestamp("revoked_at"),
+    revokedReason: varchar("revoked_reason", { length: 100 }),
+    version: int("version").notNull().default(1),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    keyIdIdx: uniqueIndex("uq_tiangong_service_keys_key_id").on(table.keyId),
+  })
+);
+
+export type TiangongServiceKey = typeof tiangongServiceKeys.$inferSelect;
+export type InsertTiangongServiceKey = typeof tiangongServiceKeys.$inferInsert;
+
+// ─── Beidou service key auth audit (Todo 20) ───
+// Every auth decision is audit-logged with key_id, originSystem and a
+// one-way-redacted token prefix only — never the token or verifier.
+export const serviceKeyAuditLog = mysqlTable("service_key_audit_log", {
+  id: serial("id").primaryKey(),
+  keyId: varchar("key_id", { length: 64 }),
+  originSystem: varchar("origin_system", { length: 32 }),
+  tokenPrefix: varchar("token_prefix", { length: 12 }),
+  decision: mysqlEnum("decision", ["authenticated", "denied"]).notNull(),
+  reason: varchar("reason", { length: 100 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ServiceKeyAuditEntry = typeof serviceKeyAuditLog.$inferSelect;
+export type InsertServiceKeyAuditEntry = typeof serviceKeyAuditLog.$inferInsert;
 
 // ─── MCP Audit Log ───
 export const mcpAuditLog = mysqlTable("mcp_audit_log", {

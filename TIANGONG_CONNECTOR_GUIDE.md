@@ -780,4 +780,50 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/fusion.submitReview \
 
 ---
 
+## 20. MCP 管理工具面（Phase 1）
+
+天宫 MCP Server 除任务类工具（create_task / update_task_status / send_message 等）外，新增一组管理工具，供本地 Agent 辅助平台运维与工作流管理。
+
+### 20.1 只读工具（任何有效 MCP Key 可用）
+
+| 工具 | 用途 |
+|------|------|
+| `ops_agent_status` | Agent 在线状态总览（心跳检测、预算使用率） |
+| `ops_task_stats` | 任务流状态统计 |
+| `ops_recent_tasks` | 最近任务列表 |
+| `ops_today_overview` | 今日概览（Agent / 任务 / 用量一站式摘要） |
+| `usage_recent` | 最近模型调用记录（支持 Agent / 模型 / 高价过滤） |
+| `usage_cost_summary` | 最近 N 天成本摘要（按模型聚合） |
+| `list_recent_events` | 统一事件流（审计 / 任务线程 / 用量合并倒序） |
+| `guard_status` | 高价模型白名单、生效授权、已知高价模型 |
+| `guard_check` | 调用前检查：某模型调用是否被允许 |
+
+### 20.2 受控写工具
+
+| 工具 | 权限 | 说明 |
+|------|------|------|
+| `cancel_task` | 任意有效 Key | 取消未完成任务（置 failed + 记录原因），不扩大既有权限 |
+| `set_agent_budget` | `admin` | 设置 Agent 预算上限 |
+| `guard_add_allowlist` | `admin` | 添加模型白名单；**禁止为 Key 绑定的 Agent 自身添加** |
+| `guard_create_auth` | `admin` | 创建高价模型授权（可带过期时间）；**禁止自我授权** |
+| `guard_revoke_auth` | `admin` | 撤销高价模型授权 |
+
+### 20.3 授予 admin 权限
+
+管理写工具要求 Key 的 `permissions` 字段包含 `admin`（JSON 数组或逗号分隔均可）：
+
+```bash
+curl -X POST https://tiangg.zeabur.app/api/trpc/mcp.updateKey \
+  -H "content-type: application/json" \
+  -d '{ "id": 3, "permissions": "[\"admin\"]" }'
+```
+
+规则：
+
+1. 默认所有 Key（含存量 Key 与 env-only Key）都没有 admin 权限，管理写工具直接拒绝
+2. `guard_add_allowlist` / `guard_create_auth` 拒绝 MCP Key 为其绑定的 Agent 自我授权，防止 Agent 自行解锁高价模型
+3. 所有 MCP 调用进入审计日志（`mcp.getAuditLog` 可查），授权类写操作的 `createdBy / authorizedBy` 记录为 `mcp-key:{keyId}`
+
+---
+
 > 如有问题，联系天宫管理员。

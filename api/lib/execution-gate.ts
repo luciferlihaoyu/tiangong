@@ -150,6 +150,14 @@ export function checkCompletionGate(task: TaskLike): GateCheck {
       riskTypes: state.riskTypes,
     };
   }
+  const decision = evaluateTaskExecution(task);
+  if (decision.requiresApproval && state.decision !== "approved") {
+    return {
+      status: "blocked",
+      reason: `Task requires human approval before completion (${decision.riskTypes.join(", ")})`,
+      riskTypes: decision.riskTypes,
+    };
+  }
   return { status: "allowed" };
 }
 

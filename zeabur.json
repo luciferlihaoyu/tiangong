@@ -1,3 +1,6 @@
 {
-  "builder": "docker"
+  "builder": "docker",
+  "mountPaths": {
+    "/app/data/tiangong-artifacts": "tiangong-artifacts"
+  }
 }

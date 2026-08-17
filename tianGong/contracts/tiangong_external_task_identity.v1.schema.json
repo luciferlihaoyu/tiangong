@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tiangong.local/contracts/tiangong_external_task_identity.v1.schema.json",
+  "title": "Tiangong external task identity v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "origin_system",
+    "external_ref",
+    "idempotency_key",
+    "canonical_request_hash",
+    "canonical_request_hash_version",
+    "state_revision",
+    "task_retain_until",
+    "idempotency_retain_until"
+  ],
+  "properties": {
+    "origin_system": { "const": "beidou" },
+    "external_ref": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "canonical_request_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "canonical_request_hash_version": { "const": "rfc8785-jcs-v1" },
+    "state_revision": { "type": "integer", "minimum": 1 },
+    "task_retain_until": { "type": "string", "format": "date-time" },
+    "idempotency_retain_until": { "type": "string", "format": "date-time" }
+  }
+}

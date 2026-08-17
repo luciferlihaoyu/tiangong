@@ -9,6 +9,13 @@ process.env.APP_SECRET = "test-secret-key-for-vitest";
 process.env.ADMIN_USER = "admin";
 process.env.ADMIN_PASSWORD = "admin";
 process.env.DATABASE_URL = "mysql://test:test@localhost:3306/test_db";
+process.env.TIANGONG_CALLBACK_BINDINGS = JSON.stringify([{
+  originSystem: "beidou",
+  workspaceSlug: "beidou-ws",
+  projectSlug: "research",
+  destination: "https://beidou.test/api/tiangong/events",
+  keys: [{ keyId: "tgcb_test", secret: "test-callback-secret", retainUntil: "2099-01-01T00:00:00Z" }],
+}]);
 
 import { vi, beforeAll, afterAll } from "vitest";
 

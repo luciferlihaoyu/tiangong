@@ -4,13 +4,95 @@
  *
  * 暴露给外部 Agent 系统（OpenClaw、Dify、Claude、GPT 等）
  * 通过标准 MCP 协议接入天宫平台
+ *
+ * Phase 1 扩展（管理工具面）：
+ * - 只读 ops/usage/events/guard 查询：任何有效 MCP Key 可用
+ * - 受控写操作（cancel_task）：任何有效 MCP Key 可用（不扩大既有权限）
+ * - 管理写操作（预算/guard 白名单/授权）：需要 Key 的 permissions 含 "admin"；
+ *   白名单与授权禁止 MCP Key 为其绑定的 Agent 自我授权
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb } from "../queries/connection";
-import { agents, tasks, messages, organizations, departments, taskDependencies } from "@db/schema";
-import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import {
+  agents,
+  tasks,
+  messages,
+  organizations,
+  departments,
+  taskDependencies,
+  tokenUsage,
+  modelAllowlist,
+  highCostModelAuth,
+  auditEvents,
+  taskMessages,
+  type InsertHighCostModelAuth,
+  type InsertModelAllowlist,
+} from "@db/schema";
+import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
+import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
+
+// ─── Caller context (Key 身份 + 权限，由 transport 注入) ───
+
+export interface McpToolContext {
+  /** mcp_api_keys.id；env-only Key 为 0 */
+  apiKeyId: number;
+  /** Key 绑定的 Agent ID；env-only Key 为 null */
+  agentId: number | null;
+  /** 解析后的权限 token 列表 */
+  permissions: readonly string[];
+}
+
+const EMPTY_CONTEXT: McpToolContext = { apiKeyId: 0, agentId: null, permissions: [] };
+
+/**
+ * 解析 mcp_api_keys.permissions 字段。
+ * 约定：JSON 数组（createKey 文档约定），兼容逗号/空白分隔的字符串。
+ * 特殊 token："admin" 或 "*" 授予管理写工具。
+ */
+export function parsePermissions(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((p): p is string => typeof p === "string")
+          .map((p) => p.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // 非法 JSON：回落到分隔符解析
+    }
+  }
+  return trimmed
+    .split(/[,\s]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+function hasAdminPermission(ctx: McpToolContext): boolean {
+  return ctx.permissions.includes("admin") || ctx.permissions.includes("*");
+}
+
+// ─── Response helpers ───
+
+function textResult(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+function failResult(error: string) {
+  return textResult({ success: false, error });
+}
+
+function adminDeniedResult() {
+  return failResult(
+    "此 MCP Key 缺少 admin 权限。请管理员在 MCP 面板为该 Key 的 permissions 字段添加 \"admin\"（mcp.updateKey）。"
+  );
+}
 
 // ─── Helpers (same as orchestration-router) ───
 
@@ -60,7 +142,9 @@ async function triggerDownstream(completedTaskId: number) {
 
 // ─── Server factory (new instance per session for stateless MCP HTTP) ───
 
-export function getMcpServer(): McpServer {
+export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
+  const requireAdmin = (): ReturnType<typeof adminDeniedResult> | null =>
+    hasAdminPermission(ctx) ? null : adminDeniedResult();
   const server = new McpServer({
     name: "Tiangong",
     version: "2.0.0",
@@ -414,7 +498,7 @@ export function getMcpServer(): McpServer {
     },
     async (params) => {
       const db = getDb();
-      let query = db.select().from(agents).orderBy(agents.updatedAt);
+      const query = db.select().from(agents).orderBy(agents.updatedAt);
       const result = await query;
 
       let filtered = result;
@@ -458,7 +542,7 @@ export function getMcpServer(): McpServer {
     async (params) => {
       const db = getDb();
 
-      let query = db
+      const query = db
         .select()
         .from(tasks)
         .orderBy(desc(tasks.createdAt));
@@ -518,6 +602,597 @@ export function getMcpServer(): McpServer {
           },
         ],
       };
+    }
+  );
+
+  // ═══════════════════════════════════════════
+  // TOOLS — Phase 1 扩展：Ops / Usage / Events / Guard 只读查询
+  // ═══════════════════════════════════════════
+
+  // Tool 9: Ops — Agent 在线状态总览
+  server.tool(
+    "ops_agent_status",
+    "[天宫] Ops 查询：所有 Agent 在线状态总览（含心跳检测、预算使用率）",
+    {},
+    async () => {
+      const db = getDb();
+      const rows = await db
+        .select({
+          id: agents.id,
+          agentId: agents.agentId,
+          name: agents.name,
+          status: agents.status,
+          model: agents.model,
+          currentTask: agents.currentTask,
+          lastHeartbeat: agents.lastHeartbeat,
+          spentCents: agents.spentCents,
+          budgetCents: agents.budgetCents,
+        })
+        .from(agents);
+
+      const now = Date.now();
+      const heartbeatTimeoutMs = 300_000;
+      const result = rows.map((a) => ({
+        ...a,
+        heartbeatOk: a.lastHeartbeat
+          ? now - new Date(a.lastHeartbeat).getTime() < heartbeatTimeoutMs
+          : false,
+        budgetUsed:
+          a.budgetCents && a.budgetCents > 0
+            ? ((a.spentCents ?? 0) / a.budgetCents) * 100
+            : 0,
+      }));
+
+      return textResult({ success: true, agents: result });
+    }
+  );
+
+  // Tool 10: Ops — 任务流统计
+  server.tool(
+    "ops_task_stats",
+    "[天宫] Ops 查询：任务流状态统计（各状态数量）",
+    {},
+    async () => {
+      const db = getDb();
+      const rows = await db.select({ status: tasks.status }).from(tasks);
+      const stats: Record<string, number> = { queued: 0, pending: 0, running: 0, done: 0, failed: 0 };
+      for (const r of rows) {
+        if (r.status in stats) stats[r.status] += 1;
+      }
+      return textResult({ success: true, stats, total: rows.length });
+    }
+  );
+
+  // Tool 11: Ops — 最近任务
+  server.tool(
+    "ops_recent_tasks",
+    "[天宫] Ops 查询：最近任务列表",
+    {
+      limit: z.number().int().min(1).max(50).optional().default(10).describe("返回数量"),
+    },
+    async (params) => {
+      const db = getDb();
+      const rows = await db
+        .select({
+          id: tasks.id,
+          taskId: tasks.taskId,
+          name: tasks.name,
+          status: tasks.status,
+          priority: tasks.priority,
+          agentId: tasks.agentId,
+          createdAt: tasks.createdAt,
+          updatedAt: tasks.updatedAt,
+        })
+        .from(tasks);
+      const sorted = rows
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, params.limit ?? 10);
+      return textResult({ success: true, tasks: sorted });
+    }
+  );
+
+  // Tool 12: Ops — 今日概览
+  server.tool(
+    "ops_today_overview",
+    "[天宫] Ops 查询：今日概览（Agent 状态 / 今日任务 / 今日用量）",
+    {},
+    async () => {
+      const db = getDb();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const agentRows = await db.select({ status: agents.status }).from(agents);
+      const agentStats: Record<string, number> = { online: 0, busy: 0, idle: 0 };
+      for (const r of agentRows) {
+        if (r.status in agentStats) agentStats[r.status] += 1;
+      }
+
+      const taskRows = await db
+        .select({ status: tasks.status, createdAt: tasks.createdAt })
+        .from(tasks);
+      const todaysTasks = taskRows.filter((t) => new Date(t.createdAt) >= today);
+      const taskStats: Record<string, number> = { queued: 0, pending: 0, running: 0, done: 0, failed: 0 };
+      for (const t of todaysTasks) {
+        if (t.status in taskStats) taskStats[t.status] += 1;
+      }
+
+      const usageRows = await db
+        .select({
+          totalTokens: tokenUsage.totalTokens,
+          costCents: tokenUsage.costCents,
+          callCount: tokenUsage.callCount,
+          highCostModel: tokenUsage.highCostModel,
+          createdAt: tokenUsage.createdAt,
+        })
+        .from(tokenUsage)
+        .where(gte(tokenUsage.createdAt, today));
+      const usage = { totalTokens: 0, costCents: 0, callCount: 0, highCostCount: 0 };
+      for (const u of usageRows) {
+        usage.totalTokens += u.totalTokens ?? 0;
+        usage.costCents += u.costCents ?? 0;
+        usage.callCount += u.callCount ?? 0;
+        if (u.highCostModel === "true") usage.highCostCount += u.callCount ?? 0;
+      }
+
+      return textResult({ success: true, agents: agentStats, tasks: taskStats, usage });
+    }
+  );
+
+  // Tool 13: Usage — 最近模型调用
+  server.tool(
+    "usage_recent",
+    "[天宫] 用量查询：最近模型调用记录（支持 Agent/模型/高价过滤）",
+    {
+      agentId: z.number().optional().describe("按 Agent ID 过滤"),
+      model: z.string().max(100).optional().describe("按模型名过滤"),
+      highCostOnly: z.boolean().optional().describe("只返回高价模型调用"),
+      limit: z.number().int().min(1).max(100).optional().default(20).describe("返回数量"),
+    },
+    async (params) => {
+      const db = getDb();
+      const rows = await db
+        .select({
+          id: tokenUsage.id,
+          model: tokenUsage.model,
+          provider: tokenUsage.provider,
+          totalTokens: tokenUsage.totalTokens,
+          costCents: tokenUsage.costCents,
+          highCostModel: tokenUsage.highCostModel,
+          source: tokenUsage.source,
+          sessionKey: tokenUsage.sessionKey,
+          traceId: tokenUsage.traceId,
+          agentId: tokenUsage.agentId,
+          createdAt: tokenUsage.createdAt,
+        })
+        .from(tokenUsage);
+
+      let filtered = rows;
+      if (params.agentId !== undefined) filtered = filtered.filter((r) => r.agentId === params.agentId);
+      if (params.model) filtered = filtered.filter((r) => r.model === params.model);
+      if (params.highCostOnly) filtered = filtered.filter((r) => r.highCostModel === "true");
+      filtered = filtered
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, params.limit ?? 20);
+
+      return textResult({ success: true, calls: filtered });
+    }
+  );
+
+  // Tool 14: Usage — 成本摘要
+  server.tool(
+    "usage_cost_summary",
+    "[天宫] 用量查询：最近 N 天成本摘要（按模型聚合）",
+    {
+      days: z.number().int().min(1).max(90).optional().default(7).describe("回溯天数 1-90"),
+    },
+    async (params) => {
+      const db = getDb();
+      const days = params.days ?? 7;
+      const since = new Date(Date.now() - days * 86_400_000);
+      const rows = await db
+        .select({
+          model: tokenUsage.model,
+          totalTokens: tokenUsage.totalTokens,
+          callCount: tokenUsage.callCount,
+          costCents: tokenUsage.costCents,
+        })
+        .from(tokenUsage)
+        .where(gte(tokenUsage.createdAt, since));
+
+      const byModel: Record<string, { totalTokens: number; callCount: number; costCents: number }> = {};
+      for (const r of rows) {
+        const entry = byModel[r.model] ?? { totalTokens: 0, callCount: 0, costCents: 0 };
+        entry.totalTokens += r.totalTokens ?? 0;
+        entry.callCount += r.callCount ?? 0;
+        entry.costCents += r.costCents ?? 0;
+        byModel[r.model] = entry;
+      }
+
+      return textResult({
+        success: true,
+        days,
+        models: byModel,
+        totals: {
+          totalTokens: rows.reduce((s, r) => s + (r.totalTokens ?? 0), 0),
+          callCount: rows.reduce((s, r) => s + (r.callCount ?? 0), 0),
+          costCents: rows.reduce((s, r) => s + (r.costCents ?? 0), 0),
+        },
+      });
+    }
+  );
+
+  // Tool 15: Events — 统一事件流
+  server.tool(
+    "list_recent_events",
+    "[天宫] 事件流查询：最近审计 / 任务线程 / 模型用量事件（合并按时间倒序）",
+    {
+      kind: z.enum(["audit", "task", "usage"]).optional().describe("按事件来源过滤"),
+      limit: z.number().int().min(1).max(50).optional().default(20).describe("返回数量（合并后）"),
+    },
+    async (params) => {
+      const db = getDb();
+      const limit = params.limit ?? 20;
+      const items: Array<Record<string, unknown>> = [];
+
+      if (!params.kind || params.kind === "audit") {
+        const rows = await db
+          .select({
+            id: auditEvents.id,
+            entityType: auditEvents.entityType,
+            entityId: auditEvents.entityId,
+            event: auditEvents.event,
+            actorUserId: auditEvents.actorUserId,
+            createdAt: auditEvents.createdAt,
+          })
+          .from(auditEvents)
+          .orderBy(desc(auditEvents.createdAt))
+          .limit(limit);
+        for (const r of rows) {
+          items.push({
+            kind: "audit",
+            id: `audit:${r.id}`,
+            ts: new Date(r.createdAt).toISOString(),
+            summary: r.event,
+            entityType: r.entityType,
+            entityId: r.entityId,
+            actorUserId: r.actorUserId,
+          });
+        }
+      }
+
+      if (!params.kind || params.kind === "task") {
+        const rows = await db
+          .select({
+            id: taskMessages.id,
+            taskId: taskMessages.taskId,
+            eventType: taskMessages.eventType,
+            content: taskMessages.content,
+            fromAgentId: taskMessages.fromAgentId,
+            toAgentId: taskMessages.toAgentId,
+            createdAt: taskMessages.createdAt,
+          })
+          .from(taskMessages)
+          .orderBy(desc(taskMessages.createdAt))
+          .limit(limit);
+        for (const r of rows) {
+          items.push({
+            kind: "task",
+            id: `task:${r.id}`,
+            ts: new Date(r.createdAt).toISOString(),
+            summary: r.eventType,
+            taskId: r.taskId,
+            contentPreview: r.content ? r.content.slice(0, 120) : null,
+            fromAgentId: r.fromAgentId,
+            toAgentId: r.toAgentId,
+          });
+        }
+      }
+
+      if (!params.kind || params.kind === "usage") {
+        const rows = await db
+          .select({
+            id: tokenUsage.id,
+            model: tokenUsage.model,
+            provider: tokenUsage.provider,
+            totalTokens: tokenUsage.totalTokens,
+            costCents: tokenUsage.costCents,
+            agentId: tokenUsage.agentId,
+            taskId: tokenUsage.taskId,
+            createdAt: tokenUsage.createdAt,
+          })
+          .from(tokenUsage)
+          .orderBy(desc(tokenUsage.createdAt))
+          .limit(limit);
+        for (const r of rows) {
+          items.push({
+            kind: "usage",
+            id: `usage:${r.id}`,
+            ts: new Date(r.createdAt).toISOString(),
+            summary: `${r.model} ${r.totalTokens}t`,
+            model: r.model,
+            provider: r.provider,
+            totalTokens: r.totalTokens,
+            costCents: r.costCents,
+            agentId: r.agentId,
+            taskId: r.taskId,
+          });
+        }
+      }
+
+      items.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+      return textResult({ success: true, events: items.slice(0, limit) });
+    }
+  );
+
+  // Tool 16: Guard — 状态
+  server.tool(
+    "guard_status",
+    "[天宫] Guard 查询：高价模型白名单、生效中的授权、已知高价模型列表",
+    {},
+    async () => {
+      const db = getDb();
+      const allowlist = await db.select().from(modelAllowlist).orderBy(desc(modelAllowlist.createdAt));
+      const allAuths = await db.select().from(highCostModelAuth);
+      const now = Date.now();
+      const activeAuths = allAuths.filter(
+        (a) => a.active === "true" && (!a.expiresAt || new Date(a.expiresAt).getTime() >= now)
+      );
+      return textResult({
+        success: true,
+        highCostThresholdCents: HIGH_COST_THRESHOLD_CENTS,
+        knownHighCostModels: KNOWN_HIGH_COST_MODELS,
+        allowlist,
+        activeAuths,
+      });
+    }
+  );
+
+  // Tool 17: Guard — 调用前检查
+  server.tool(
+    "guard_check",
+    "[天宫] Guard 查询：检查一次模型调用是否被允许（高价熔断 + 预算前置检查）",
+    {
+      model: z.string().min(1).max(100).describe("模型名（如 4sapi/gpt-5.5-high）"),
+      agentId: z.number().optional().describe("调用方 Agent ID"),
+      costCents: z.number().int().min(0).optional().default(0).describe("本次调用费用（美分）"),
+    },
+    async (params) => {
+      const db = getDb();
+      const isHighCost =
+        (params.costCents ?? 0) >= HIGH_COST_THRESHOLD_CENTS ||
+        KNOWN_HIGH_COST_MODELS.includes(params.model);
+
+      if (!isHighCost) {
+        return textResult({ success: true, allowed: true, reason: "low_cost_model", highCost: false });
+      }
+
+      if (params.agentId !== undefined) {
+        const allowlistRows = await db
+          .select()
+          .from(modelAllowlist)
+          .where(and(eq(modelAllowlist.agentId, params.agentId), eq(modelAllowlist.model, params.model)));
+        if (allowlistRows.length > 0) {
+          return textResult({
+            success: true,
+            allowed: true,
+            reason: "allowlisted",
+            highCost: true,
+            allowlistReason: allowlistRows[0].reason,
+          });
+        }
+
+        const authRows = await db
+          .select()
+          .from(highCostModelAuth)
+          .where(
+            and(
+              eq(highCostModelAuth.agentId, params.agentId),
+              eq(highCostModelAuth.model, params.model),
+              eq(highCostModelAuth.active, "true")
+            )
+          );
+        const now = Date.now();
+        const valid = authRows.find((a) => !a.expiresAt || new Date(a.expiresAt).getTime() >= now);
+        if (valid) {
+          return textResult({
+            success: true,
+            allowed: true,
+            reason: "authorized",
+            highCost: true,
+            auth: {
+              authorizedBy: valid.authorizedBy,
+              reason: valid.reason,
+              expiresAt: valid.expiresAt,
+            },
+          });
+        }
+      }
+
+      return textResult({
+        success: true,
+        allowed: false,
+        reason: "high_cost_not_authorized",
+        highCost: true,
+        message: `模型 ${params.model} 是高价模型，未授权使用。请在管理面板添加白名单或授权，或使用具备 admin 权限的 MCP guard 工具。`,
+      });
+    }
+  );
+
+  // ═══════════════════════════════════════════
+  // TOOLS — Phase 1 扩展：受控写操作
+  // ═══════════════════════════════════════════
+
+  // Tool 18: 取消任务（只终止工作，不产生新能力：等价于既有 update_task_status 置 failed）
+  server.tool(
+    "cancel_task",
+    "[天宫] 取消任务：把未完成任务标记为 failed 并记录取消原因",
+    {
+      taskId: z.number().describe("任务 ID（数字）"),
+      reason: z.string().max(500).optional().describe("取消原因"),
+    },
+    async (params) => {
+      const db = getDb();
+      const task = await db
+        .select({ id: tasks.id, status: tasks.status })
+        .from(tasks)
+        .where(eq(tasks.id, params.taskId))
+        .then((r) => r[0]);
+
+      if (!task) return failResult("任务不存在");
+      if (task.status === "done" || task.status === "failed") {
+        return failResult(`任务已处于终态 ${task.status}，无法取消`);
+      }
+
+      const reason = params.reason?.trim() || "通过 MCP 取消";
+      await db
+        .update(tasks)
+        .set({ status: "failed", error: `[cancelled] ${reason}` })
+        .where(eq(tasks.id, params.taskId));
+
+      return textResult({ success: true, taskId: params.taskId, status: "failed", reason });
+    }
+  );
+
+  // Tool 19: 设置 Agent 预算（admin）
+  server.tool(
+    "set_agent_budget",
+    "[天宫] 设置 Agent 预算上限（需要 admin 权限）",
+    {
+      agentId: z.number().describe("Agent ID"),
+      budgetCents: z.number().int().min(0).max(10_000_000).describe("预算上限（美分，0 = 不限制）"),
+    },
+    async (params) => {
+      const denied = requireAdmin();
+      if (denied) return denied;
+
+      const db = getDb();
+      const agent = await db
+        .select({ id: agents.id, name: agents.name })
+        .from(agents)
+        .where(eq(agents.id, params.agentId))
+        .then((r) => r[0]);
+      if (!agent) return failResult("Agent 不存在");
+
+      await db
+        .update(agents)
+        .set({ budgetCents: params.budgetCents })
+        .where(eq(agents.id, params.agentId));
+
+      return textResult({
+        success: true,
+        agentId: params.agentId,
+        name: agent.name,
+        budgetCents: params.budgetCents,
+      });
+    }
+  );
+
+  // Tool 20: Guard — 添加白名单（admin，禁止自我授权）
+  server.tool(
+    "guard_add_allowlist",
+    "[天宫] 为 Agent 添加模型白名单（需要 admin 权限；禁止为 Key 绑定的 Agent 自身添加）",
+    {
+      agentId: z.number().describe("目标 Agent ID"),
+      model: z.string().min(1).max(100).describe("模型名"),
+      reason: z.string().max(500).optional().describe("白名单原因"),
+    },
+    async (params) => {
+      const denied = requireAdmin();
+      if (denied) return denied;
+      if (ctx.agentId !== null && ctx.agentId === params.agentId) {
+        return failResult("禁止自我授权：此 MCP Key 不能为其绑定的 Agent 添加白名单");
+      }
+
+      const db = getDb();
+      const values = {
+        agentId: params.agentId,
+        model: params.model,
+        reason: params.reason ?? null,
+        createdBy: `mcp-key:${ctx.apiKeyId}`,
+      } satisfies InsertModelAllowlist;
+      await db.insert(modelAllowlist).values(values);
+
+      const created = await db
+        .select()
+        .from(modelAllowlist)
+        .where(and(eq(modelAllowlist.agentId, params.agentId), eq(modelAllowlist.model, params.model)))
+        .then((r) => r[0]);
+
+      return textResult({
+        success: true,
+        id: created?.id,
+        agentId: params.agentId,
+        model: params.model,
+      });
+    }
+  );
+
+  // Tool 21: Guard — 创建高价模型授权（admin，禁止自我授权）
+  server.tool(
+    "guard_create_auth",
+    "[天宫] 创建高价模型授权（需要 admin 权限；禁止为 Key 绑定的 Agent 自身授权）",
+    {
+      agentId: z.number().describe("目标 Agent ID"),
+      model: z.string().min(1).max(100).describe("模型名"),
+      reason: z.string().min(1).max(500).describe("授权原因（必填）"),
+      expiresAt: z
+        .string()
+        .refine((v) => !isNaN(new Date(v).getTime()), "无效的时间格式")
+        .optional()
+        .describe("过期时间（ISO 8601，如 2026-09-01T00:00:00Z；不填 = 永不过期）"),
+    },
+    async (params) => {
+      const denied = requireAdmin();
+      if (denied) return denied;
+      if (ctx.agentId !== null && ctx.agentId === params.agentId) {
+        return failResult("禁止自我授权：此 MCP Key 不能为其绑定的 Agent 创建高价模型授权");
+      }
+
+      const db = getDb();
+      const values: InsertHighCostModelAuth = {
+        agentId: params.agentId,
+        model: params.model,
+        reason: params.reason,
+        authorizedBy: `mcp-key:${ctx.apiKeyId}`,
+        active: "true",
+      };
+      if (params.expiresAt) values.expiresAt = new Date(params.expiresAt);
+      await db.insert(highCostModelAuth).values(values);
+
+      const created = await db
+        .select()
+        .from(highCostModelAuth)
+        .where(and(eq(highCostModelAuth.agentId, params.agentId), eq(highCostModelAuth.model, params.model)))
+        .then((r) => r[0]);
+
+      return textResult({
+        success: true,
+        id: created?.id,
+        agentId: params.agentId,
+        model: params.model,
+        expiresAt: created?.expiresAt ?? null,
+      });
+    }
+  );
+
+  // Tool 22: Guard — 撤销授权（admin）
+  server.tool(
+    "guard_revoke_auth",
+    "[天宫] 撤销高价模型授权（需要 admin 权限）",
+    {
+      id: z.number().describe("授权记录 ID（可通过 guard_status 查询）"),
+    },
+    async (params) => {
+      const denied = requireAdmin();
+      if (denied) return denied;
+
+      const db = getDb();
+      await db
+        .update(highCostModelAuth)
+        .set({ active: "false" })
+        .where(eq(highCostModelAuth.id, params.id));
+
+      return textResult({ success: true, revoked: true, id: params.id });
     }
   );
 

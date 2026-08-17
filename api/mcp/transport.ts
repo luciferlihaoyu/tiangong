@@ -11,10 +11,18 @@
 
 import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { getMcpServer } from "./server";
-import { verifyMcpKey, extractApiKey, writeAuditLog } from "./auth";
+import { getMcpServer, parsePermissions, type McpToolContext } from "./server";
+import { verifyMcpKey, extractApiKey, writeAuditLog, type McpAuthResult } from "./auth";
 
 type JsonObject = Record<string, unknown>;
+
+function buildToolContext(authResult: McpAuthResult): McpToolContext {
+  return {
+    apiKeyId: authResult.apiKey?.id ?? 0,
+    agentId: authResult.agent?.id ?? null,
+    permissions: parsePermissions(authResult.apiKey?.permissions ?? null),
+  };
+}
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -139,13 +147,13 @@ export function createMcpApp(): Hono {
     if (incomingSessionId && sessions.has(incomingSessionId)) {
       transport = sessions.get(incomingSessionId)!.transport;
     } else {
-      // New transport
+      // New transport: MCP server 实例绑定本 session 的 Key 身份与权限
       transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () =>
           `tg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
       });
 
-      const server = getMcpServer();
+      const server = getMcpServer(buildToolContext(authResult));
       await server.connect(transport);
 
       transport.onclose = () => {

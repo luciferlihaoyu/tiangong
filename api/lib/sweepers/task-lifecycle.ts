@@ -9,8 +9,8 @@
  * - If >= 5 tasks failed within the last hour, a single task:retry_storm
  *   audit is emitted with the failure count.
  */
-import { and, eq, gt } from "drizzle-orm";
-import { tasks } from "@db/schema";
+import { and, eq, gt, lte } from "drizzle-orm";
+import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
 import type { Db } from "./db";
@@ -24,23 +24,31 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
   const running = await db.select().from(tasks).where(eq(tasks.status, "running"));
 
   for (const task of running) {
-    const startedAt = task.claimedAt ?? task.updatedAt;
-    const timeoutMs = task.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    if (now.getTime() - startedAt.getTime() <= timeoutMs) continue;
+    const expiresAt = task.workerLeaseExpiresAt ?? new Date((task.claimedAt ?? task.updatedAt).getTime() + (task.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+    if (expiresAt.getTime() > now.getTime()) continue;
 
     const retryCount = task.retryCount ?? 0;
     const maxRetries = task.maxRetries ?? DEFAULT_MAX_RETRIES;
     if (retryCount < maxRetries) {
       // Requeue, keeping the exact retry fields used by the MCP retry path.
-      await db
+       await db
         .update(tasks)
-        .set({ status: "queued", retryCount: retryCount + 1, error: null })
-        .where(eq(tasks.id, task.id));
+        .set({
+          status: "queued",
+          lifecycleStatus: "queued",
+          retryCount: retryCount + 1,
+          error: null,
+          agentId: null,
+          workerLeaseToken: null,
+          workerLeaseExpiresAt: null,
+          updatedAt: now,
+        })
+        .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
     } else {
       await db
         .update(tasks)
-        .set({ status: "failed", failedAt: now, updatedAt: now })
-        .where(eq(tasks.id, task.id));
+        .set({ status: "failed", lifecycleStatus: "failed", failedAt: now, workerLeaseToken: null, workerLeaseExpiresAt: null, updatedAt: now })
+        .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
       emitSweeperAudit({
         event: "task:timeout",
         entityType: "task",
@@ -49,6 +57,8 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
       });
     }
   }
+
+  await db.delete(taskExecutionSlots).where(lte(taskExecutionSlots.expiresAt, now));
 
   // Retry-storm breaker: recent failure count, independent of this tick's actions.
   const stormCutoff = new Date(now.getTime() - STORM_WINDOW_MS);

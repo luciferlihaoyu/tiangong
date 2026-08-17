@@ -223,6 +223,13 @@ export const taskRouter = createRouter({
         .where(eq(tasks.id, input.id))
         .then((r) => r[0]);
 
+      if (taskRow?.originSystem === "beidou") {
+        return { success: false, error: "External tasks reject weak updateProgress mutations" };
+      }
+      if (taskRow && (taskRow.status === "done" || taskRow.status === "failed" || ["completed", "failed", "timeout", "cancelled"].includes(taskRow.lifecycleStatus ?? ""))) {
+        return { success: false, error: "Terminal task state is immutable" };
+      }
+
       // 执行审批闸门：高风险任务不得通过 updateProgress 强制完成（connector 不得 self-approve）
       if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
         const gate = checkCompletionGate(taskRow);
@@ -364,6 +371,8 @@ export const taskRouter = createRouter({
         .where(eq(tasks.id, input.id))
         .then((r) => r[0]);
       if (!taskRow) throw new Error("Task not found");
+      if (taskRow.originSystem === "beidou") throw new Error("External tasks reject weak approve mutations");
+      if (taskRow.status === "done" || taskRow.status === "failed") throw new Error("Terminal task state is immutable");
 
       // 执行审批闸门：高风险任务不得通过该端点自动完成
       const gate = checkCompletionGate(taskRow);
@@ -416,6 +425,10 @@ export const taskRouter = createRouter({
     .input(z.object({ id: z.number(), comment: z.string().optional() }))
     .mutation(async ({ input }) => {
       const db = getDb();
+      const taskRow = await db.select().from(tasks).where(eq(tasks.id, input.id)).then((rows) => rows[0]);
+      if (!taskRow) throw new Error("Task not found");
+      if (taskRow.originSystem === "beidou") throw new Error("External tasks reject weak reject mutations");
+      if (taskRow.status === "done" || taskRow.status === "failed") throw new Error("Terminal task state is immutable");
       await db.update(tasks).set({
         status: "running",
         lifecycleStatus: "working",

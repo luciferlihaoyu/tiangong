@@ -77,8 +77,152 @@ const CREATE_TABLES_SQL = [
     completed_at TIMESTAMP NULL,
     failed_at TIMESTAMP NULL,
     timeout_at TIMESTAMP NULL,
+    worker_lease_token VARCHAR(64) NULL,
+    worker_lease_generation INT NOT NULL DEFAULT 0,
+    worker_lease_expires_at TIMESTAMP NULL,
+    cancel_requested_at TIMESTAMP NULL,
+    cancel_acknowledged_at TIMESTAMP NULL,
+    origin_system VARCHAR(32) NULL,
+    external_ref VARCHAR(255) NULL,
+    idempotency_key VARCHAR(128) NULL,
+    canonical_request_hash VARCHAR(64) NULL,
+    canonical_request_hash_version VARCHAR(32) NULL,
+    state_revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    task_retain_until TIMESTAMP NULL,
+    idempotency_retain_until TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tasks_origin_external_ref (origin_system, external_ref),
+    UNIQUE KEY uq_tasks_origin_idempotency_key (origin_system, idempotency_key)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS tiangong_task_limits (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    principal_key VARCHAR(255) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    max_concurrent_tasks INT NOT NULL DEFAULT 8,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tiangong_task_limits_principal_workspace (principal_key, workspace_slug)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS task_execution_slots (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT UNSIGNED NOT NULL,
+    principal_key VARCHAR(255) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    lease_token VARCHAR(64) NOT NULL,
+    acquired_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    UNIQUE KEY uq_task_execution_slots_task (task_id),
+    KEY idx_task_execution_slots_scope (principal_key, workspace_slug, expires_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS tiangong_worker_leases (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    lease_token VARCHAR(64) NOT NULL UNIQUE,
+    worker_id VARCHAR(128) NOT NULL,
+    principal_key VARCHAR(255) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    generation INT NOT NULL,
+    issued_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP NULL,
+    KEY idx_tiangong_worker_leases_worker_scope (worker_id, principal_key, workspace_slug, expires_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS task_outbox_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_id VARCHAR(36) NOT NULL UNIQUE,
+    task_id BIGINT UNSIGNED NOT NULL,
+    task_public_id VARCHAR(20) NOT NULL,
+    external_ref VARCHAR(255) NOT NULL,
+    origin_system VARCHAR(32) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    project_slug VARCHAR(100) NOT NULL,
+    event_type ENUM('state','approval','terminal') NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    lifecycle_status VARCHAR(30),
+    board_status VARCHAR(20),
+    review_result VARCHAR(30),
+    state_revision BIGINT UNSIGNED NOT NULL,
+    trace_id VARCHAR(64) NOT NULL,
+    payload_digest VARCHAR(64) NOT NULL,
+    manifest_identity VARCHAR(64) NULL,
+    key_id VARCHAR(64) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP NOT NULL,
+    first_attempt_at TIMESTAMP NULL,
+    delivered_at TIMESTAMP NULL,
+    dead_letter_at TIMESTAMP NULL,
+    last_error_code VARCHAR(64),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_task_outbox_task_revision (task_id, state_revision),
+    KEY idx_task_outbox_due (next_attempt_at, delivered_at, dead_letter_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS tiangong_provider_identity (
+    provider_instance_id VARCHAR(64) PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS tiangong_artifact_limits (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    principal_key VARCHAR(255) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    storage_quota_bytes BIGINT UNSIGNED NOT NULL,
+    retention_seconds INT NOT NULL,
+    gc_grace_seconds INT NOT NULL,
+    gc_reaper_concurrency INT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tiangong_artifact_limits_scope (principal_key, workspace_slug)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS staged_objects (
+    stage_id VARCHAR(128) PRIMARY KEY,
+    expected_sha256 VARCHAR(64) NOT NULL,
+    expected_size BIGINT UNSIGNED NOT NULL,
+    expected_mime VARCHAR(255) NOT NULL,
+    generation_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    owner_principal VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    state ENUM('staging','verified','sealed','abandoned') DEFAULT 'staging' NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS sealed_artifact_descriptors (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    artifact_uuid VARCHAR(36) NOT NULL,
+    task_id BIGINT UNSIGNED NOT NULL,
+    task_public_id VARCHAR(20) NOT NULL,
+    external_ref VARCHAR(255) NOT NULL,
+    task_revision BIGINT UNSIGNED NOT NULL,
+    creator_agent_id BIGINT UNSIGNED NULL,
+    owner_principal VARCHAR(255) NOT NULL,
+    workspace_slug VARCHAR(100) NOT NULL,
+    project_slug VARCHAR(100) NOT NULL,
+    provider_instance_id VARCHAR(64) NOT NULL,
+    sha256 VARCHAR(64) NOT NULL,
+    generation_id INT NOT NULL,
+    size BIGINT UNSIGNED NOT NULL,
+    mime VARCHAR(255) NOT NULL,
+    stored_path VARCHAR(500) NOT NULL,
+    sealed_at TIMESTAMP NOT NULL,
+    retain_until TIMESTAMP NOT NULL,
+    UNIQUE KEY uq_sealed_artifact_task_uuid (task_id, artifact_uuid),
+    KEY idx_sealed_artifact_task_revision (task_id, task_revision)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS sealed_artifact_manifests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT UNSIGNED NOT NULL UNIQUE,
+    task_public_id VARCHAR(20) NOT NULL,
+    external_ref VARCHAR(255) NOT NULL,
+    task_revision BIGINT UNSIGNED NOT NULL,
+    provider_instance_id VARCHAR(64) NOT NULL,
+    manifest_identity VARCHAR(64) NOT NULL UNIQUE,
+    canonical_manifest TEXT NOT NULL,
+    sealed_at TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
   `CREATE TABLE IF NOT EXISTS task_dependencies (
@@ -160,6 +304,40 @@ const CREATE_TABLES_SQL = [
     result VARCHAR(20),
     error TEXT,
     duration_ms INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Todo 20: Beidou-to-Tiangong service keys — verifier-only storage.
+  // The plaintext token is NEVER stored; only the full 32-byte
+  // HMAC-SHA-256(server_pepper, token) verifier + key_id + 6-byte key prefix.
+  `CREATE TABLE IF NOT EXISTS tiangong_service_keys (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    key_id VARCHAR(64) NOT NULL UNIQUE,
+    verifier VARCHAR(64) NOT NULL,
+    key_prefix VARCHAR(12) NOT NULL,
+    origin_system VARCHAR(32) NOT NULL DEFAULT 'beidou',
+    workspace_slug VARCHAR(100) NOT NULL,
+    project_slug VARCHAR(100) NOT NULL,
+    scopes TEXT NOT NULL,
+    issued_at TIMESTAMP NOT NULL,
+    rotation_window_end TIMESTAMP NULL,
+    revoked_at TIMESTAMP NULL,
+    revoked_reason VARCHAR(100),
+    version INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tiangong_service_keys_key_id (key_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Todo 20: service key auth audit — key_id, originSystem and a one-way
+  // redacted token prefix only; never the token or verifier.
+  `CREATE TABLE IF NOT EXISTS service_key_audit_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    key_id VARCHAR(64),
+    origin_system VARCHAR(32),
+    token_prefix VARCHAR(12),
+    decision ENUM('authenticated','denied') NOT NULL,
+    reason VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -446,6 +624,52 @@ async function migrateP13Columns(conn: mysql.Connection, logs: string[]) {
   }
 }
 
+async function migrateExternalTaskIdentity(conn: mysql.Connection, logs: string[]) {
+  const columns = [
+    { name: "origin_system", def: "VARCHAR(32) NULL" },
+    { name: "external_ref", def: "VARCHAR(255) NULL" },
+    { name: "idempotency_key", def: "VARCHAR(128) NULL" },
+    { name: "canonical_request_hash", def: "VARCHAR(64) NULL" },
+    { name: "canonical_request_hash_version", def: "VARCHAR(32) NULL" },
+    { name: "state_revision", def: "BIGINT UNSIGNED NOT NULL DEFAULT 1" },
+    { name: "task_retain_until", def: "TIMESTAMP NULL" },
+    { name: "idempotency_retain_until", def: "TIMESTAMP NULL" },
+    { name: "worker_lease_token", def: "VARCHAR(64) NULL" },
+    { name: "worker_lease_generation", def: "INT NOT NULL DEFAULT 0" },
+    { name: "worker_lease_expires_at", def: "TIMESTAMP NULL" },
+    { name: "cancel_requested_at", def: "TIMESTAMP NULL" },
+    { name: "cancel_acknowledged_at", def: "TIMESTAMP NULL" },
+  ] as const;
+  for (const column of columns) {
+    try {
+      await conn.execute(`ALTER TABLE tasks ADD COLUMN \`${column.name}\` ${column.def}`);
+      logs.push(`tasks.${column.name}: ADDED`);
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_FIELD_NAME" || error?.message?.includes("Duplicate column")) {
+        logs.push(`tasks.${column.name}: already exists`);
+      } else {
+        throw error;
+      }
+    }
+  }
+  const indexes = [
+    { name: "uq_tasks_origin_external_ref", columns: "origin_system, external_ref" },
+    { name: "uq_tasks_origin_idempotency_key", columns: "origin_system, idempotency_key" },
+  ] as const;
+  for (const indexDef of indexes) {
+    try {
+      await conn.execute(`ALTER TABLE tasks ADD UNIQUE KEY \`${indexDef.name}\` (${indexDef.columns})`);
+      logs.push(`tasks.${indexDef.name}: ADDED`);
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_KEYNAME" || error?.message?.includes("Duplicate key name")) {
+        logs.push(`tasks.${indexDef.name}: already exists`);
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
 async function seedModelPricing(conn: mysql.Connection, logs: string[]) {
   const seeds = [
     { model: "deepseek-v4-flash", provider: "deepseek-official", input_price: 0.0003, output_price: 0.0006, cached_input_price: 0.000075 },
@@ -640,6 +864,7 @@ export async function autoMigrate(force = false): Promise<string[]> {
 
     await migrateMailboxColumns(conn, logs);
     await migrateP13Columns(conn, logs);
+    await migrateExternalTaskIdentity(conn, logs);
     await migrateAgentMcpToken(conn, logs);
     await seedModelPricing(conn, logs);
 

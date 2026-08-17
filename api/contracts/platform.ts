@@ -11,7 +11,7 @@ export const TASK_TYPES = [
   "delivery_task",
 ] as const;
 
-export const AGENT_SOURCES = ["system", "openclaw", "opencode", "mcp", "human"] as const;
+export const AGENT_SOURCES = ["system", "openclaw", "opencode", "mcp", "human", "beidou"] as const;
 
 export const AGENT_CAPABILITIES = [
   "triage",

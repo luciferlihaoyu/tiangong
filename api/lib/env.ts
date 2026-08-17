@@ -35,4 +35,20 @@ export const env = {
   // Phase 1: Secret Vault encryption key
   secretVaultKey: optional("TIANGONG_SECRET_VAULT_KEY"),
   secretVaultKeyId: optional("TIANGONG_SECRET_VAULT_KEY_ID", "default"),
+
+  // Todo 20: Beidou service key server pepper (deployment secret).
+  // The verifier stored in `tiangong_service_keys` is
+  // HMAC-SHA-256(TIANGONG_SERVICE_KEY_PEPPER, token); the plaintext token is
+  // never stored anywhere. Absent pepper ⇒ fail-closed verification.
+  serviceKeyPepper: optional("TIANGONG_SERVICE_KEY_PEPPER"),
+  // Rotation overlap retention = max callback retry window (default 24h).
+  serviceKeyRotationRetentionMs: optional(
+    "TIANGONG_SERVICE_KEY_ROTATION_RETENTION_MS",
+    String(24 * 60 * 60 * 1000)
+  ),
+  callbackBindings: optional("TIANGONG_CALLBACK_BINDINGS", "[]"),
+  artifactRoot: optional("TIANGONG_ARTIFACT_ROOT", "/app/data/tiangong-artifacts"),
+  artifactVolumeId: optional("TIANGONG_ARTIFACT_VOLUME_ID"),
+  artifactGenerationId: optional("TIANGONG_ARTIFACT_GENERATION_ID", "1"),
+  tiangongProviderInstanceId: optional("TIANGONG_PROVIDER_INSTANCE_ID"),
 };

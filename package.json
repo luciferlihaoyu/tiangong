@@ -7,7 +7,7 @@
     "prebuild": "node scripts/generate-build-meta.mjs",
     "predev": "node scripts/generate-build-meta.mjs",
     "dev": "vite",
-    "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
+    "build": "vite build && esbuild api/boot.ts api/artifact-volume-cli.ts --platform=node --bundle --format=esm --outdir=dist --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
     "start": "sh scripts/start.sh",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -20,7 +20,8 @@
     "smoke:connector": "node scripts/smoke/connector-a2a-e2e.mjs",
     "smoke:mailbox": "node scripts/smoke/mailbox-static-smoke.mjs",
     "smoke:mailbox:online": "node scripts/smoke/mailbox-online-smoke.mjs",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "artifact-volume": "node scripts/artifact-volume.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.965.0",

@@ -256,6 +256,17 @@ describe("Execution approval gate", () => {
     expect(String(result.error)).toContain("requires human approval");
   });
 
+  it("blocks completion when a high-risk phrase was never parked at execution", async () => {
+    const unparked = { ...highRiskTask, status: "running", lifecycleStatus: "submitted" };
+    dbMocks.queueSelectResults([[unparked]]);
+
+    const caller = createTaskCaller(mockCtx());
+    const result = await caller.updateProgress({ id: 20, progress: 100, status: "done", lifecycleStatus: "completed" });
+
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain("requires human approval");
+  });
+
   it("still auto-completes a low-risk task via updateProgress (regression)", async () => {
     // Given: low-risk row + broadcast row
     const broadcastRow = { taskId: "T-LOW001", name: "计算 17*23", agentId: 16 };

@@ -272,10 +272,16 @@ export const a2aRouter = createRouter({
       progress: z.number().min(0).max(100).optional(),
       note: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
+      if (task.agentId !== input.agentId || (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== input.agentId)) {
+        return { success: false, error: "Agent is not the assigned executor of this task" };
+      }
+      if (["completed", "failed", "timeout", "cancelled"].includes(task.lifecycleStatus ?? "")) {
+        return { success: false, error: "Terminal task state is immutable" };
+      }
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "working";
       await db.update(tasks).set({
@@ -472,10 +478,13 @@ export const a2aRouter = createRouter({
 
   fail: authedQuery
     .input(z.object({ taskId: z.number(), error: z.string().optional(), agentId: z.number().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
+      if (task.agentId !== input.agentId || (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== input.agentId)) {
+        return { success: false, error: "Agent is not the assigned executor of this task" };
+      }
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "failed";
       if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {

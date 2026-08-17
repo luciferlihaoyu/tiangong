@@ -28,6 +28,7 @@ import { eventsRouter } from "./events-router";
 import { connectorRouter } from "./connector-router";
 import { artifactRouter } from "./artifact-router";
 import { newapiRouter } from "./newapi-router";
+import { beidouExternalRouter } from "./beidou-external-router";
 import { createRouter, publicQuery } from "./middleware";
 
 import { executionRouter } from "./execution-router";
@@ -66,6 +67,7 @@ export const appRouter = createRouter({
   connector: connectorRouter,
   artifact: artifactRouter,
   newapi: newapiRouter,
+  beidouExternal: beidouExternalRouter,
 });
 
 export type AppRouter = typeof appRouter;

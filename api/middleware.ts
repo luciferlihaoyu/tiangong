@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
 import { verifyMcpKey } from "./mcp/auth";
+import { verifyServiceKey, type ServicePrincipal } from "./lib/beidou-service-keys";
 
 // ─── API Key validation ───
 // Global token set populated by boot.ts on startup
@@ -62,6 +63,23 @@ async function verifyApiKey(headerValue: string | null): Promise<ApiKeyResolutio
 export async function createContext(opts: { req: Request }) {
   let user: { id: number; role: string } | null = null;
   let apiKeyAgentId: number | null = null;
+  let servicePrincipal: ServicePrincipal | null = null;
+
+  // ─── Todo 20: Beidou-to-Tiangong service principal ───
+  // Exact headers: `Authorization: Bearer <token>` + `X-TG-Service-Key-ID`.
+  // When the service key id header is present the request is a service call:
+  // it is verified against the verifier-only key store and NEVER falls
+  // through to user-session or agent-key authentication.
+  const serviceKeyId = opts.req.headers.get("x-tg-service-key-id");
+  if (serviceKeyId) {
+    const authHeader = opts.req.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const resolution = await verifyServiceKey(serviceKeyId, token);
+    if (resolution.valid && resolution.principal) {
+      servicePrincipal = resolution.principal;
+    }
+    return { req: opts.req, user: null, apiKeyAgentId: null, servicePrincipal };
+  }
 
   // Try to get user from Bearer token
   const authHeader = opts.req.headers.get("authorization");
@@ -79,7 +97,7 @@ export async function createContext(opts: { req: Request }) {
     apiKeyAgentId = apiKeyResolution.boundAgentId ?? -1;
   }
 
-  return { req: opts.req, user, apiKeyAgentId };
+  return { req: opts.req, user, apiKeyAgentId, servicePrincipal };
 }
 
 type Context = Awaited<ReturnType<typeof createContext>>;

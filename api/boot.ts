@@ -17,11 +17,19 @@ import { verifyMcpKey } from "./mcp/auth";
 import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { sweeperScheduler } from "./lib/sweepers/scheduler";
+import { taskOutboxDispatcher } from "./lib/task-outbox";
+import { ArtifactVolume } from "./lib/artifacts/artifact-volume";
 import { agents, messages } from "@db/schema";
 import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
+const artifactGenerationId = Number(env.artifactGenerationId);
+if (!env.artifactVolumeId || !Number.isSafeInteger(artifactGenerationId) || artifactGenerationId < 1) {
+  throw new Error("mount_validation_failed: TIANGONG_ARTIFACT_VOLUME_ID and positive generation are required");
+}
+await new ArtifactVolume({ root: env.artifactRoot, volumeId: env.artifactVolumeId, generationId: artifactGenerationId }).probe();
 
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
@@ -465,6 +473,13 @@ try {
   console.log("[Boot] Sweeper Scheduler started");
 } catch (e: unknown) {
   console.warn("[Boot] Sweeper Scheduler start failed:", e instanceof Error ? e.message : String(e));
+}
+
+try {
+  taskOutboxDispatcher.start();
+  console.log("[Boot] Task outbox dispatcher started");
+} catch (e: unknown) {
+  console.warn("[Boot] Task outbox dispatcher start failed:", e instanceof Error ? e.name : "unknown");
 }
 
 const port = parseInt(process.env.PORT || "3000");

@@ -7,6 +7,15 @@ const fullSchema = { ...schema, ...relations };
 
 let instance: ReturnType<typeof drizzle<typeof fullSchema>> | null = null;
 
+/**
+ * Test/QA harness seam (Todo 20): replaces the singleton with an in-memory
+ * fake so end-to-end HTTP QA can run without a database. Production never
+ * calls this; the runtime path is unaffected when unused.
+ */
+export function setDbInstance(db: unknown): void {
+  instance = db as ReturnType<typeof drizzle<typeof fullSchema>>;
+}
+
 export function getDb() {
   if (!instance) {
     if (!env.databaseUrl) {

@@ -27,9 +27,12 @@ import { tasks, agents, taskMessages, taskArtifacts, type TaskMessage, type Inse
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
-import { checkExecutionGate, parkTaskForApproval } from "./execution-gate";
+import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { syncTaskMemoryToXuanji } from "./xuanji-sync";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
+import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 
 // ─── Config ───
 
@@ -250,12 +253,35 @@ class TaskRunner {
   private async claimAndExecute(task: typeof tasks.$inferSelect): Promise<void> {
     const db = getDb();
     const startedAt = new Date();
+    const leaseToken = randomUUID();
+    const leaseExpiresAt = new Date(startedAt.getTime() + (task.timeoutMs ?? CONFIG.timeoutMs));
+    const scope = this.executionScope(task);
+    const slot = await acquireTaskSlot({
+      taskId: task.id,
+      principalKey: scope.principalKey,
+      workspaceSlug: scope.workspaceSlug,
+      leaseToken,
+      now: startedAt,
+      expiresAt: leaseExpiresAt,
+    });
+    if (!slot.acquired) return;
+    const cancellation = registerExecutor(task.id);
 
     try {
       // 安全领取：只有 status 仍是 queued 才更新
       await db
         .update(tasks)
-        .set({ status: "running", lifecycleStatus: "claimed", progress: 10, claimedAt: new Date(), updatedAt: new Date() })
+        .set({
+          status: "running",
+          lifecycleStatus: "claimed",
+          progress: 10,
+          claimedAt: startedAt,
+          lastHeartbeatAt: startedAt,
+          workerLeaseToken: leaseToken,
+          workerLeaseGeneration: (task.workerLeaseGeneration ?? 0) + 1,
+          workerLeaseExpiresAt: leaseExpiresAt,
+          updatedAt: startedAt,
+        })
         .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
 
       // 重新读取确认领取成功
@@ -269,6 +295,7 @@ class TaskRunner {
         // 已被其他 Runner 领取
         return;
       }
+      if (cancellation.aborted) return;
 
       await this.recordEvent(task.id, "system", `TaskRunner claimed task ${task.taskId}`, undefined, task.agentId ?? undefined);
 
@@ -343,7 +370,7 @@ class TaskRunner {
             output: outputText || null,
             updatedAt: new Date(),
           })
-          .where(eq(tasks.id, task.id));
+          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
         await this.recordEvent(task.id, "system", "Gateway returned 'started' only. Task is awaiting final result.", { mode: CONFIG.mode }, task.agentId ?? undefined);
 
@@ -364,6 +391,21 @@ class TaskRunner {
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) awaiting final result (gateway returned started only)`
         );
       } else if (result.success) {
+        const completionGate = checkCompletionGate(task);
+        if (completionGate.status === "blocked") {
+          await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: completionGate.riskTypes });
+          return;
+        }
+        if (cancellation.aborted) {
+          await db.update(tasks).set({
+            status: "failed",
+            lifecycleStatus: "cancelled",
+            cancelAcknowledgedAt: new Date(),
+            failedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken)));
+          return;
+        }
         // A2A-lite: submit result first; completion happens only after explicit review/auto-review
         await db
           .update(tasks)
@@ -375,7 +417,7 @@ class TaskRunner {
             error: errorText ?? null,
             updatedAt: new Date(),
           })
-          .where(eq(tasks.id, task.id));
+          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
         await this.recordEvent(task.id, "result", outputText, { artifactType: "task_result", lifecycleStatus: "submitted" }, task.agentId ?? undefined);
         await this.recordArtifact(task.id, "task_result", outputText, task.agentId ?? undefined);
@@ -390,7 +432,7 @@ class TaskRunner {
             completedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(eq(tasks.id, task.id));
+          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
         // 完成（通过执行闸门）→ 尽力而为地把结果写入璇玑记忆（失败不影响完成）
         await syncTaskMemoryToXuanji(db, {
@@ -435,9 +477,9 @@ class TaskRunner {
             output: outputText || null,
             error: errorText,
             failedAt: new Date(),
-            updatedAt: new Date() as any,
+            updatedAt: new Date(),
           })
-          .where(eq(tasks.id, task.id));
+          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
         await this.recordEvent(task.id, "error", errorText || "Task execution failed", undefined, task.agentId ?? undefined);
 
@@ -473,7 +515,7 @@ class TaskRunner {
             failedAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(eq(tasks.id, task.id));
+          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
         await this.recordEvent(task.id, "error", `Runner internal error: ${e.message}`, undefined, task.agentId ?? undefined);
 
@@ -491,7 +533,29 @@ class TaskRunner {
       } catch {
         // 回写失败也忽略，避免 Runner 崩溃
       }
+    } finally {
+      unregisterExecutor(task.id);
+      await releaseTaskSlot(task.id, leaseToken);
     }
+  }
+
+  private executionScope(task: typeof tasks.$inferSelect): { principalKey: string; workspaceSlug: string } {
+    let workspaceSlug = task.originSystem ?? "internal";
+    if (task.input) {
+      try {
+        const parsed: unknown = JSON.parse(task.input);
+        if (typeof parsed === "object" && parsed !== null) {
+          const external = (parsed as Record<string, unknown>).external;
+          if (typeof external === "object" && external !== null) {
+            const workspace = (external as Record<string, unknown>).workspaceSlug;
+            if (typeof workspace === "string" && workspace.length > 0) workspaceSlug = workspace;
+          }
+        }
+      } catch {
+        workspaceSlug = task.originSystem ?? "internal";
+      }
+    }
+    return { principalKey: task.agentId === null ? `origin:${task.originSystem ?? "internal"}` : `agent:${task.agentId}`, workspaceSlug };
   }
 
   /** 构造执行 prompt */

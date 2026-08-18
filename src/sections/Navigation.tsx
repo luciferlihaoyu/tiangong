@@ -26,6 +26,7 @@ import {
   LogOut,
   Menu,
   Terminal,
+  Cpu,
 } from 'lucide-react';
 
 function SunIcon() {
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
   {
     title: '系统',
     items: [
+      { path: '/models', label: '模型', icon: <Cpu size={15} /> },
       { path: '/pricing', label: '定价', icon: <DollarSign size={15} /> },
       { path: '/guard', label: '熔断', icon: <Shield size={15} /> },
       { path: '/ops', label: 'Ops', icon: <Zap size={15} /> },

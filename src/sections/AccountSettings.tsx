@@ -127,6 +127,9 @@ export default function AccountSettings() {
           <div className="text-xs font-mono font-bold mb-1" style={{ color: "var(--accent-gold)" }}>
             修改密码 · CHANGE PASSWORD
           </div>
+          <div className="text-[10px] font-mono p-2 rounded" style={{ color: "var(--text-muted)", background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-default)" }}>
+            提示：修改成功后，Zeabur 环境变量中的旧管理员密码将失效，之后请使用此处设置的新密码登录。
+          </div>
 
           <div>
             <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>

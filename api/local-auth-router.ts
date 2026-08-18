@@ -5,6 +5,7 @@ import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { hashPassword, verifyPassword } from "./lib/password";
+import { getSetting, setSetting } from "./lib/settings";
 
 // ─── Login rate limiting ───
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -76,11 +77,22 @@ export const localAuthRouter = createRouter({
         return { success: false, error: "登录尝试过于频繁，请稍后再试" };
       }
 
-      // Check against env admin credentials first
-      if (username === ADMIN_USER && password === ADMIN_PASSWORD) {
-        // Find or create admin user in DB
+// 环境变量管理员账号（引导 + 轮换 + 系统内改密码三种场景）
+      //
+      // 规则：
+      // 1) 首次登录：必须提供环境变量密码，自动创建管理员账号（bootstrap）。
+      // 2) 未在系统内改过密码：账号处于"环境变量托管"状态 —— 环境变量密码可登录，
+      //    且 Zeabur 里轮换 ADMIN_PASSWORD 后，下次用新密码登录时自动同步 DB 哈希（旧密码失效）。
+      // 3) 在"账户设置"里修改过密码：账号切换为"系统内托管"—— 以修改后的密码为准，
+      //    环境变量密码不再能登录（防止设置里改密码形同虚设）。
+      //    恢复环境变量托管：删除 system_settings 中 admin_password_customized:<用户名> 记录，
+      //    或在 Zeabur 换一个新的 ADMIN_USER 用户名重新引导。
+      if (username === ADMIN_USER) {
+        const envMatch = password === ADMIN_PASSWORD;
         let user = await db.select().from(users).where(eq(users.username, username)).then(rows => rows[0]);
+
         if (!user) {
+          if (!envMatch) return { success: false, error: "用户名或密码错误" };
           const hashed = await hashPassword(password);
           await db.insert(users).values({
             username,
@@ -89,15 +101,22 @@ export const localAuthRouter = createRouter({
             role: "admin",
           });
           user = await db.select().from(users).where(eq(users.username, username)).then(rows => rows[0]);
-        } else {
-          // 环境变量密码可能已轮换：若 DB 里的哈希与当前环境变量密码不一致，立即同步，
-          // 使旧密码失效（否则旧密码仍可通过下方的数据库校验分支登录）。
+        } else if (envMatch) {
+          const customized = await getSetting(`admin_password_customized:${username}`).catch(() => null);
+          if (customized === "1") {
+            return { success: false, error: "该账号密码已在账户设置中修改，环境变量密码已失效，请使用修改后的密码登录" };
+          }
+          // 环境变量托管：轮换 ADMIN_PASSWORD 后同步 DB 哈希，使旧密码立即失效
           const matchesCurrent = await verifyPassword(password, user.passwordHash);
           if (!matchesCurrent || user.role !== "admin") {
             const hashed = matchesCurrent ? user.passwordHash : await hashPassword(password);
             await db.update(users).set({ passwordHash: hashed, role: "admin" }).where(eq(users.id, user.id));
           }
+        } else {
+          const dbMatch = await verifyPassword(password, user.passwordHash);
+          if (!dbMatch) return { success: false, error: "用户名或密码错误" };
         }
+
         if (!user) return { success: false, error: "创建用户失败" };
 
         // Update last sign in
@@ -195,6 +214,10 @@ export const localAuthRouter = createRouter({
 
       const hashed = await hashPassword(input.newPassword);
       await db.update(users).set({ passwordHash: hashed }).where(eq(users.id, user.id));
+      // 若修改的是环境变量管理员账号：切换为"系统内托管"，环境变量密码此后失效
+      if (user.username === ADMIN_USER) {
+        await setSetting(`admin_password_customized:${user.username}`, "1", "auth");
+      }
       return { success: true };
     }),
 

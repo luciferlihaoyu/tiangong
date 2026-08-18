@@ -13,6 +13,7 @@ import MissionLog from './pages/MissionLog'
 import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
 import PricingPanel from './pages/PricingPanel'
+import ModelsPanel from './pages/ModelsPanel'
 import GuardPanel from './pages/GuardPanel'
 import OpsPanel from './pages/OpsPanel'
 import FusionPanel from './pages/FusionPanel'
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="/task-center" element={<TaskCenter />} />
           <Route path="/usage" element={<UsagePanel />} />
           <Route path="/pricing" element={<PricingPanel />} />
+          <Route path="/models" element={<ModelsPanel />} />
           <Route path="/guard" element={<GuardPanel />} />
           <Route path="/ops" element={<OpsPanel />} />
           <Route path="/fusion" element={<FusionPanel />} />

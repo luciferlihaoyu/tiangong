@@ -225,6 +225,11 @@ APP_SECRET=your-secret-key
 # 管理员账号（必需，无默认值，未设置将拒绝启动；密码至少 8 位）
 ADMIN_USER=your-admin-username
 ADMIN_PASSWORD=your-strong-password
+
+# 天枢模型网关（配置 TIANSHU_API_KEY 后任务执行自动经天枢路由，无需其他配置）
+TIANSHU_API_KEY=sk-xxx
+# TIANSHU_BASE_URL=https://woppis1.zeabur.app   （默认值，可省略）
+# TIANSHU_MODEL=deepseek-v4-flash               （可选：固定执行模型）
 ```
 
 > ⚠️ 切勿将真实凭据提交到 git 仓库（包括文档和 `.env.example`）。如曾泄露，请立即轮换。

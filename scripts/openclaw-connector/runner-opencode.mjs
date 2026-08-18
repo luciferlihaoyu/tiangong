@@ -66,7 +66,7 @@ function resolveModel() {
   if (legacy && legacy.startsWith(`${PROVIDER_ID}/`)) {
     return legacy.slice(PROVIDER_ID.length + 1);
   }
-  return process.env.NEW_API_MODEL || DEFAULT_MODEL;
+  return process.env.NEW_API_MODEL || process.env.TIANSHU_MODEL || DEFAULT_MODEL;
 }
 
 /**
@@ -76,11 +76,12 @@ function resolveModel() {
  */
 function runOpenCode(prompt, workDir) {
   return new Promise((resolve, reject) => {
-    const baseURL = (process.env.NEW_API_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
-    const apiKey = process.env.NEW_API_API_KEY || "";
+    // TIANSHU_* 是 NEW_API_* 的别名兜底：天枢 (Tianshu) 即 New API 兼容网关
+    const baseURL = (process.env.NEW_API_BASE_URL || process.env.TIANSHU_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+    const apiKey = process.env.NEW_API_API_KEY || process.env.TIANSHU_API_KEY || "";
     const modelId = resolveModel();
     if (!apiKey) {
-      reject(Object.assign(new Error("NEW_API_API_KEY is required (New API gateway API key)"), { usage: null }));
+      reject(Object.assign(new Error("NEW_API_API_KEY or TIANSHU_API_KEY is required (New API / Tianshu gateway API key)"), { usage: null }));
       return;
     }
     const configContent = JSON.stringify(buildProviderConfig({ baseURL, apiKey, modelId }));

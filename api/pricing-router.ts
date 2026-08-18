@@ -68,6 +68,62 @@ export const pricingRouter = createRouter({
     }),
 
   /**
+   * 从天枢 (Tianshu / New API 兼容网关) 同步模型列表到定价表。
+   * 拉取 {TIANSHU_BASE_URL}/v1/models（需 TIANSHU_API_KEY），
+   * 新模型以 provider="tianshu"、价格 0 占位插入（价格需后续人工维护），
+   * 已存在的模型不覆盖价格。
+   */
+  syncFromTianshu: adminQuery.mutation(async () => {
+    const baseUrl = (process.env.TIANSHU_BASE_URL || "https://woppis1.zeabur.app").replace(/\/+$/, "");
+    const apiKey = process.env.TIANSHU_API_KEY || "";
+    if (!apiKey) {
+      return { success: false as const, error: "TIANSHU_API_KEY 未配置" };
+    }
+
+    let modelIds: string[];
+    try {
+      const resp = await fetch(`${baseUrl}/v1/models`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        return { success: false as const, error: `天枢返回 HTTP ${resp.status}` };
+      }
+      const payload = (await resp.json()) as { data?: Array<{ id?: unknown }> };
+      modelIds = (payload.data ?? [])
+        .map((m) => m.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 100);
+    } catch (e) {
+      return { success: false as const, error: `天枢请求失败: ${e instanceof Error ? e.message : String(e)}` };
+    }
+
+    const db = getDb();
+    const existing = await db.select({ model: modelPricing.model }).from(modelPricing);
+    const existingSet = new Set(existing.map((r) => r.model));
+
+    let created = 0;
+    for (const id of modelIds) {
+      if (existingSet.has(id)) continue;
+      await db.insert(modelPricing).values({
+        model: id,
+        provider: "tianshu",
+        inputPrice: "0",
+        outputPrice: "0",
+        currency: "USD",
+        notes: "Synced from Tianshu /v1/models — 价格待人工维护",
+      });
+      created++;
+    }
+
+    return {
+      success: true as const,
+      total: modelIds.length,
+      created,
+      skipped: modelIds.length - created,
+    };
+  }),
+
+  /**
    * Delete a model pricing entry
    */
   delete: adminQuery

@@ -34,6 +34,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
+import { resolveTianshuDefaultModel } from "../tianshu-router";
 
 // ─── Config ───
 
@@ -906,11 +907,12 @@ class TaskRunner {
       };
     }
 
-    const model = CONFIG.tianshuModel || agent?.model || "";
+    // 模型解析优先级：智能体自带模型 > 设置页选择的默认模型 > TIANSHU_MODEL 环境变量
+    const model = agent?.model || (await resolveTianshuDefaultModel()) || "";
     if (!model) {
       return {
         output: "",
-        error: "Tianshu runner: no model resolved — set TIANSHU_MODEL or assign an agent with a model field",
+        error: "Tianshu runner: no model resolved — 请在「模型」页面选择默认模型，或设置 TIANSHU_MODEL / 为智能体分配模型",
         success: false,
       };
     }

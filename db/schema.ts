@@ -503,6 +503,17 @@ export const modelPricing = mysqlTable("model_pricing", {
 export type ModelPricing = typeof modelPricing.$inferSelect;
 export type InsertModelPricing = typeof modelPricing.$inferInsert;
 
+// ─── System Settings (KV 配置：模型默认选择、密码托管标记等) ───
+export const systemSettings = mysqlTable("system_settings", {
+  key: varchar("key", { length: 100 }).primaryKey(),
+  value: text("value"),
+  category: varchar("category", { length: 50 }).default("general"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type SystemSetting = typeof systemSettings.$inferSelect;
+export type InsertSystemSetting = typeof systemSettings.$inferInsert;
+
 // ─── Token Usage (P9: 用量监测 + P13: 缓存区分) ───
 export const tokenUsage = mysqlTable("token_usage", {
   id: serial("id").primaryKey(),

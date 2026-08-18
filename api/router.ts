@@ -28,6 +28,7 @@ import { eventsRouter } from "./events-router";
 import { connectorRouter } from "./connector-router";
 import { artifactRouter } from "./artifact-router";
 import { newapiRouter } from "./newapi-router";
+import { tianshuRouter } from "./tianshu-router";
 import { beidouExternalRouter } from "./beidou-external-router";
 import { createRouter, publicQuery } from "./middleware";
 
@@ -67,6 +68,7 @@ export const appRouter = createRouter({
   connector: connectorRouter,
   artifact: artifactRouter,
   newapi: newapiRouter,
+  tianshu: tianshuRouter,
   beidouExternal: beidouExternalRouter,
 });
 

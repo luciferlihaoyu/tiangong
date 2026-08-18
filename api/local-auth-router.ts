@@ -89,6 +89,14 @@ export const localAuthRouter = createRouter({
             role: "admin",
           });
           user = await db.select().from(users).where(eq(users.username, username)).then(rows => rows[0]);
+        } else {
+          // 环境变量密码可能已轮换：若 DB 里的哈希与当前环境变量密码不一致，立即同步，
+          // 使旧密码失效（否则旧密码仍可通过下方的数据库校验分支登录）。
+          const matchesCurrent = await verifyPassword(password, user.passwordHash);
+          if (!matchesCurrent || user.role !== "admin") {
+            const hashed = matchesCurrent ? user.passwordHash : await hashPassword(password);
+            await db.update(users).set({ passwordHash: hashed, role: "admin" }).where(eq(users.id, user.id));
+          }
         }
         if (!user) return { success: false, error: "创建用户失败" };
 

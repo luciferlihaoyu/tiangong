@@ -5,7 +5,8 @@
  *
  * 配置（环境变量，默认安全）：
  *   TIANGONG_TASK_RUNNER_ENABLED          默认 true
- *   TIANGONG_TASK_RUNNER_MODE             mock | command | gateway | tianshu，默认 mock
+ *   TIANGONG_TASK_RUNNER_MODE             mock | command | gateway | tianshu
+ *                                         （缺省：已配置 TIANSHU_API_KEY → tianshu；否则 mock）
  *   TIANGONG_TASK_RUNNER_INTERVAL_MS      默认 5000
  *   TIANGONG_TASK_RUNNER_BATCH_SIZE       默认 1，最大 5
  *   TIANGONG_TASK_RUNNER_EXEC_FILE        command 模式执行文件（推荐 argv 模式）
@@ -67,9 +68,15 @@ function envJsonArray(name: string): { value: string[] | null; configured: boole
 
 const execArgsConfig = envJsonArray("TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON");
 
+// 默认执行模式：显式 TIANGONG_TASK_RUNNER_MODE 优先；
+// 未显式指定时，只要配置了 TIANSHU_API_KEY 就默认经天枢网关执行（统一模型来源与用量管理），否则 mock。
+const tianshuApiKeyEnv = envStr("TIANSHU_API_KEY", "");
+const resolvedMode =
+  envStr("TIANGONG_TASK_RUNNER_MODE", "") || (tianshuApiKeyEnv ? "tianshu" : "mock");
+
 const CONFIG = {
   enabled: envBool("TIANGONG_TASK_RUNNER_ENABLED", true),
-  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway" | "tianshu" | "none",
+  mode: resolvedMode as "mock" | "command" | "gateway" | "tianshu" | "none",
   intervalMs: envInt("TIANGONG_TASK_RUNNER_INTERVAL_MS", 5000, 500),
   batchSize: envInt("TIANGONG_TASK_RUNNER_BATCH_SIZE", 1, 1, 5),
   // P6: argv-mode (recommended)
@@ -89,7 +96,7 @@ const CONFIG = {
   gatewaySessionPrefix: envStr("TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX", "tiangong"),
   // 天枢 (Tianshu / New API) 直连模式 — OpenAI 兼容聚合网关
   tianshuBaseUrl: envStr("TIANSHU_BASE_URL", "https://woppis1.zeabur.app"),
-  tianshuApiKey: envStr("TIANSHU_API_KEY", ""),
+  tianshuApiKey: tianshuApiKeyEnv,
   tianshuModel: envStr("TIANSHU_MODEL", ""),
   tianshuTimeoutMs: envInt("TIANSHU_TIMEOUT_MS", 120000, 1000),
 };

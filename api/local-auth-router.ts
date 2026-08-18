@@ -198,6 +198,20 @@ export const localAuthRouter = createRouter({
       return { success: true };
     }),
 
+  // Delete user (admin only, cannot delete self)
+  deleteUser: adminQuery
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      if (input.id === ctx.user!.id) {
+        return { success: false, error: "不能删除当前登录的账号" };
+      }
+      const db = getDb();
+      const target = await db.select().from(users).where(eq(users.id, input.id)).then(rows => rows[0]);
+      if (!target) return { success: false, error: "用户不存在" };
+      await db.delete(users).where(eq(users.id, input.id));
+      return { success: true };
+    }),
+
   // Logout (client-side only, but we keep this for consistency)
   logout: publicQuery.mutation(() => {
     return { success: true };

@@ -24,7 +24,7 @@
  */
 
 import { getDb } from "../queries/connection";
-import { tasks, agents, taskMessages, taskArtifacts, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
+import { tasks, agents, taskMessages, taskArtifacts, tokenUsage, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
@@ -35,6 +35,7 @@ import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel } from "../tianshu-router";
+import { getModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
 
 // ─── Config ───
 
@@ -966,6 +967,9 @@ class TaskRunner {
         };
       }
 
+      // 尽力而为地记录 token 用量（定价/用量页面按任务与智能体归因成本；失败不影响任务结果）
+      await this.recordTianshuUsage(raw, model, task);
+
       return { output: text, error: null, success: true };
     } catch (e: unknown) {
       const isAbort = typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
@@ -975,6 +979,55 @@ class TaskRunner {
       return { output: "", error: `Tianshu request failed: ${e instanceof Error ? e.message : String(e)}`, success: false };
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 解析天枢 chat completion 响应中的 usage 并写入 token_usage 表（尽力而为，绝不抛错）。
+   * 使定价/用量页面能按任务、按智能体归因天枢调用的成本。
+   */
+  private async recordTianshuUsage(
+    raw: string,
+    model: string,
+    task: typeof tasks.$inferSelect
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(raw);
+      const usage = parsed?.usage;
+      if (!usage || typeof usage !== "object") return;
+
+      const promptTokens = Number(usage.prompt_tokens ?? 0) || 0;
+      const completionTokens = Number(usage.completion_tokens ?? 0) || 0;
+      if (promptTokens === 0 && completionTokens === 0) return;
+
+      // 缓存命中（DeepSeek/New API 风格字段，尽力解析）
+      const cachedPromptTokens =
+        Number(usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0) || 0;
+      const uncachedPromptTokens = Math.max(0, promptTokens - cachedPromptTokens);
+
+      const pricing = await getModelPricing(model);
+      const costResult = calculateCost(pricing, cachedPromptTokens, uncachedPromptTokens, completionTokens);
+
+      const db = getDb();
+      await db.insert(tokenUsage).values(
+        buildTokenUsageValues(
+          {
+            model,
+            provider: "tianshu",
+            promptTokens,
+            completionTokens,
+            cachedPromptTokens,
+            uncachedPromptTokens,
+            callCount: 1,
+            taskId: task.id,
+            agentId: task.agentId ?? undefined,
+            source: "runner",
+          },
+          costResult
+        )
+      );
+    } catch (e) {
+      console.warn(`[TaskRunner] tianshu usage record failed for task ${task.taskId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

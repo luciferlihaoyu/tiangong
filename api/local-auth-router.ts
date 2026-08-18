@@ -235,6 +235,19 @@ export const localAuthRouter = createRouter({
       return { success: true };
     }),
 
+  // 恢复环境变量托管：清除"系统内改密码"标记，此后环境变量密码重新生效
+  // （下次用环境变量密码登录时会自动同步 DB 哈希）
+  resetToEnvManaged: adminQuery.mutation(async ({ ctx }) => {
+    const db = getDb();
+    const user = await db.select().from(users).where(eq(users.id, ctx.user!.id)).then(rows => rows[0]);
+    if (!user) return { success: false, error: "用户不存在" };
+    if (user.username !== ADMIN_USER) {
+      return { success: false, error: "仅环境变量管理员账号可执行此操作" };
+    }
+    await setSetting(`admin_password_customized:${user.username}`, "", "auth");
+    return { success: true };
+  }),
+
   // Logout (client-side only, but we keep this for consistency)
   logout: publicQuery.mutation(() => {
     return { success: true };

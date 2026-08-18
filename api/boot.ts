@@ -149,6 +149,10 @@ app.get("/api/runner/status", async (c) => {
       gatewayAgent: s.gatewayAgent,
       gatewayModelConfigured: s.gatewayModelConfigured,
       gatewaySessionPrefixConfigured: s.gatewaySessionPrefixConfigured,
+      // 天枢 safe diagnostics
+      tianshuConfigured: s.tianshuConfigured,
+      tianshuBaseUrlHost: s.tianshuBaseUrlHost,
+      tianshuModelConfigured: s.tianshuModelConfigured,
       consecutiveErrors: s.consecutiveErrors,
     },
     timestamp: new Date().toISOString(),

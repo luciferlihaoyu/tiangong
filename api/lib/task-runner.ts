@@ -5,7 +5,7 @@
  *
  * 配置（环境变量，默认安全）：
  *   TIANGONG_TASK_RUNNER_ENABLED          默认 true
- *   TIANGONG_TASK_RUNNER_MODE             mock | command | gateway，默认 mock
+ *   TIANGONG_TASK_RUNNER_MODE             mock | command | gateway | tianshu，默认 mock
  *   TIANGONG_TASK_RUNNER_INTERVAL_MS      默认 5000
  *   TIANGONG_TASK_RUNNER_BATCH_SIZE       默认 1，最大 5
  *   TIANGONG_TASK_RUNNER_EXEC_FILE        command 模式执行文件（推荐 argv 模式）
@@ -69,7 +69,7 @@ const execArgsConfig = envJsonArray("TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON");
 
 const CONFIG = {
   enabled: envBool("TIANGONG_TASK_RUNNER_ENABLED", true),
-  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway" | "none",
+  mode: envStr("TIANGONG_TASK_RUNNER_MODE", "mock") as "mock" | "command" | "gateway" | "tianshu" | "none",
   intervalMs: envInt("TIANGONG_TASK_RUNNER_INTERVAL_MS", 5000, 500),
   batchSize: envInt("TIANGONG_TASK_RUNNER_BATCH_SIZE", 1, 1, 5),
   // P6: argv-mode (recommended)
@@ -87,6 +87,11 @@ const CONFIG = {
   gatewayAgent: envStr("TIANGONG_OPENCLAW_GATEWAY_AGENT", "codemaster"),
   gatewayModel: envStr("TIANGONG_OPENCLAW_GATEWAY_MODEL", ""),
   gatewaySessionPrefix: envStr("TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX", "tiangong"),
+  // 天枢 (Tianshu / New API) 直连模式 — OpenAI 兼容聚合网关
+  tianshuBaseUrl: envStr("TIANSHU_BASE_URL", "https://woppis1.zeabur.app"),
+  tianshuApiKey: envStr("TIANSHU_API_KEY", ""),
+  tianshuModel: envStr("TIANSHU_MODEL", ""),
+  tianshuTimeoutMs: envInt("TIANSHU_TIMEOUT_MS", 120000, 1000),
 };
 
 // ─── Helpers ───
@@ -110,6 +115,18 @@ function isCommandConfigured(): boolean {
 
 function isGatewayConfigured(): boolean {
   return CONFIG.gatewayUrl.length > 0 && CONFIG.gatewayAgent.length > 0;
+}
+
+function isTianshuConfigured(): boolean {
+  return CONFIG.tianshuApiKey.length > 0;
+}
+
+function safeTianshuHost(): string | null {
+  try {
+    return new URL(CONFIG.tianshuBaseUrl).host;
+  } catch {
+    return "invalid-url";
+  }
 }
 
 function safeGatewayHost(): string | null {
@@ -158,6 +175,10 @@ class TaskRunner {
       gatewayAgent: CONFIG.gatewayAgent || null,
       gatewayModelConfigured: CONFIG.gatewayModel.length > 0,
       gatewaySessionPrefixConfigured: CONFIG.gatewaySessionPrefix.length > 0,
+      // 天枢 diagnostics (safe; no API key / full URL)
+      tianshuConfigured: isTianshuConfigured(),
+      tianshuBaseUrlHost: safeTianshuHost(),
+      tianshuModelConfigured: CONFIG.tianshuModel.length > 0,
       consecutiveErrors: this.consecutiveErrors,
     };
   }
@@ -353,6 +374,8 @@ class TaskRunner {
         result = await this.executeCommand(prompt, effectiveTimeout);
       } else if (CONFIG.mode === "gateway") {
         result = await this.executeGateway(prompt, task, effectiveTimeout);
+      } else if (CONFIG.mode === "tianshu") {
+        result = await this.executeTianshu(prompt, task, agent, effectiveTimeout);
       } else {
         result = await this.executeMock(task, agent, effectiveTimeout);
       }
@@ -850,6 +873,97 @@ class TaskRunner {
         return { output: "", error: `Gateway request timed out after ${timeoutMs}ms`, success: false };
       }
       return { output: "", error: `Gateway request failed: ${e instanceof Error ? e.message : String(e)}`, success: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * 天枢 (Tianshu) 模式 — 直连 New API 兼容聚合网关执行。
+   *
+   * 调用 {TIANSHU_BASE_URL}/v1/chat/completions（OpenAI 兼容），
+   * 模型优先级：TIANSHU_MODEL > 任务分配 Agent 的 model 字段。
+   * 同步等待完整响应（非 A2A-lite awaiting_result 语义）。
+   */
+  private async executeTianshu(
+    prompt: string,
+    task: typeof tasks.$inferSelect,
+    agent: typeof agents.$inferSelect | null,
+    timeoutMs: number
+  ): Promise<{ output: string; error: string | null; success: boolean }> {
+    if (!isTianshuConfigured()) {
+      return {
+        output: "",
+        error: "Tianshu runner not configured: set TIANSHU_API_KEY (and optionally TIANSHU_BASE_URL / TIANSHU_MODEL)",
+        success: false,
+      };
+    }
+
+    const model = CONFIG.tianshuModel || agent?.model || "";
+    if (!model) {
+      return {
+        output: "",
+        error: "Tianshu runner: no model resolved — set TIANSHU_MODEL or assign an agent with a model field",
+        success: false,
+      };
+    }
+
+    let endpoint: URL;
+    try {
+      const base = CONFIG.tianshuBaseUrl.replace(/\/+$/, "");
+      endpoint = new URL(`${base}/v1/chat/completions`);
+    } catch {
+      return { output: "", error: "Invalid TIANSHU_BASE_URL", success: false };
+    }
+
+    const effectiveTimeout = Math.min(timeoutMs, CONFIG.tianshuTimeoutMs);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
+
+    console.log(
+      `[TaskRunner] tianshu mode: host=${safeTianshuHost()}, model=${model}, task=${task.taskId}, timeout=${effectiveTimeout}ms`
+    );
+
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${CONFIG.tianshuApiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+
+      const raw = await resp.text();
+      if (!resp.ok) {
+        return {
+          output: "",
+          error: `Tianshu HTTP ${resp.status}: ${this.summarizeGatewayError(raw)}`,
+          success: false,
+        };
+      }
+
+      const text = this.extractChatCompletionText(raw);
+      if (!text.trim()) {
+        return {
+          output: "",
+          error: "Tianshu returned empty chat completion text",
+          success: false,
+        };
+      }
+
+      return { output: text, error: null, success: true };
+    } catch (e: unknown) {
+      const isAbort = typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
+      if (isAbort) {
+        return { output: "", error: `Tianshu request timed out after ${effectiveTimeout}ms`, success: false };
+      }
+      return { output: "", error: `Tianshu request failed: ${e instanceof Error ? e.message : String(e)}`, success: false };
     } finally {
       clearTimeout(timer);
     }

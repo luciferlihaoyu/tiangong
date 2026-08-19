@@ -3,9 +3,10 @@
  *
  * 环境变量配置（Zeabur）：
  *   ALIST_BASE_URL    AList 站点地址，如 https://alist.example.com
- *   ALIST_USERNAME    AList 账号（建议在 AList 为天宫单独建号）
+ *   ALIST_USERNAME    AList 账号（建议在 AList 为天宫单独建号，并把账号「基本路径」设为天宫专用目录，如 /115/天宫）
  *   ALIST_PASSWORD    AList 密码
- *   ALIST_BASE_PATH   上传根目录，默认 /tiangong
+ *   ALIST_BASE_PATH   可选：上传子目录。默认 "/" —— 跟随账号在 AList 中的根目录
+ *                     （若 AList 后台为该账号配置了「基本路径」，"/" 自动映射到该目录）
  *   ALIST_AUTO_UPLOAD 任务完成后自动上传产物，默认 true（设 0/false 关闭）
  *
  * 凭据仅存在于环境变量，不写入数据库、日志或错误消息。
@@ -27,13 +28,14 @@ export function getAlistConfig(): AlistEnvConfig | null {
   const password = process.env.ALIST_PASSWORD || "";
   if (!baseUrl || !username || !password) return null;
   if (!/^https?:\/\//i.test(baseUrl)) return null;
-  const basePath = (process.env.ALIST_BASE_PATH || "/tiangong").trim() || "/tiangong";
+  const basePathRaw = (process.env.ALIST_BASE_PATH || "/").trim() || "/";
+  const basePath = basePathRaw === "/" ? "/" : `/${basePathRaw.replace(/^\/+|\/+$/g, "")}`;
   const autoRaw = (process.env.ALIST_AUTO_UPLOAD || "").trim().toLowerCase();
   return {
     baseUrl,
     username,
     password,
-    basePath: basePath.startsWith("/") ? basePath : `/${basePath}`,
+    basePath,
     autoUpload: autoRaw !== "0" && autoRaw !== "false",
   };
 }
@@ -167,12 +169,33 @@ export async function alistDownloadUrl(cfg: AlistEnvConfig, path: string): Promi
   return payload.code === 200 ? payload.data?.raw_url ?? null : null;
 }
 
-/** 连接测试：登录 + 列根目录 + 确保基础目录存在 */
+/** 查询当前账号信息（AList /api/me，含账号基本路径 base_path） */
+export async function alistMe(cfg: AlistEnvConfig): Promise<{ username: string; basePath: string } | null> {
+  try {
+    const token = await login(cfg);
+    const res = await fetch(`${cfg.baseUrl}/api/me`, {
+      headers: { Authorization: token },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as { code?: number; data?: { username?: string; base_path?: string } };
+    if (payload.code !== 200 || !payload.data) return null;
+    return { username: payload.data.username ?? cfg.username, basePath: payload.data.base_path || "/" };
+  } catch {
+    return null;
+  }
+}
+
+/** 连接测试：登录 + 列根目录 + 报告账号基本路径（上传实际落点） */
 export async function alistTestConnection(cfg: AlistEnvConfig): Promise<{ success: boolean; message: string }> {
   try {
     const root = await alistList(cfg, "/");
-    // 确保 basePath 存在（上传一个空标记文件即可自动建目录）
-    return { success: true, message: `连接成功，根目录 ${root.length} 个条目，上传目录 ${cfg.basePath}` };
+    const me = await alistMe(cfg);
+    const accountRoot = me?.basePath && me.basePath !== "/" ? me.basePath : null;
+    const where = cfg.basePath === "/"
+      ? (accountRoot ? `账号根目录（${accountRoot}）` : "账号根目录")
+      : cfg.basePath;
+    return { success: true, message: `连接成功，根目录 ${root.length} 个条目，上传落点：${where}` };
   } catch (e) {
     return { success: false, message: e instanceof Error ? e.message : "连接失败" };
   }

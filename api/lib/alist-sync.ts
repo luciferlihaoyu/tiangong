@@ -1,8 +1,9 @@
 // 天宫 → AList 任务产物同步
 //
 // 任务完成（status=done 且通过执行审批闸门）后，尽力而为地把任务产出上传到 AList：
-//   {ALIST_BASE_PATH}/tasks/{taskId}/output.md      —— 任务输出文本
-//   {ALIST_BASE_PATH}/tasks/{taskId}/artifacts/...  —— task_artifacts 中的文本/JSON 产物
+//   {basePath}/tasks/{taskId}/output.md      —— 任务输出文本
+//   {basePath}/tasks/{taskId}/artifacts/...  —— task_artifacts 中的文本/JSON 产物
+// basePath 默认为 "/"，即账号在 AList 中的根目录（若账号配置了「基本路径」则自动映射）。
 //
 // 非致命保证：与 xuanji-sync 相同 —— AList 不可用 / 超时 / 本地异常一律 catch + log，
 // 绝不向完成路径抛出。未配置 ALIST_BASE_URL 时静默 no-op。
@@ -58,7 +59,8 @@ export async function syncTaskArtifactsToAlist(db: Db, task: CompletedTaskForAli
       .then((rows) => rows[0]);
     if (existing) return { synced: false, reason: "duplicate" };
 
-    const base = `${cfg.basePath}/tasks/${task.taskId}`;
+    const prefix = cfg.basePath === "/" ? "" : cfg.basePath;
+    const base = `${prefix}/tasks/${task.taskId}`;
     const uploaded: string[] = [];
 
     // 1) 任务输出 → output.md

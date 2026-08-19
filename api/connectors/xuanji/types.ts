@@ -28,7 +28,8 @@ export const SearchContextResponseSchema = z.object({
   results: z.array(z.object({
     kind: z.string().min(1).max(100),
     documentId: z.number().int().positive(),
-    chunkId: z.number().int().positive(),
+    // 契约要求正整数；容忍 null 以兼容历史璇玑版本（返回 chunkId: null）
+    chunkId: z.number().int().positive().nullable(),
     title: z.string().min(1).max(500),
     snippet: z.string().min(1).max(5000),
     score: z.number(),

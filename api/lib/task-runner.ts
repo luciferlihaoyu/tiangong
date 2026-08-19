@@ -36,7 +36,7 @@ import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel } from "../tianshu-router";
-import { getModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
+import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
 
 // ─── Config ───
 
@@ -1015,7 +1015,8 @@ class TaskRunner {
         Number(usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0) || 0;
       const uncachedPromptTokens = Math.max(0, promptTokens - cachedPromptTokens);
 
-      const pricing = await getModelPricing(model);
+      // 分层定价模型按本次请求的实际上下文长度选档计价
+      const pricing = await resolveModelPricing(model, promptTokens);
       const costResult = calculateCost(pricing, cachedPromptTokens, uncachedPromptTokens, completionTokens);
 
       const db = getDb();

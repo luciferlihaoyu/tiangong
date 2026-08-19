@@ -6,6 +6,7 @@ import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { modelPricing } from "@db/schema";
 import { eq } from "drizzle-orm";
+import { getOfficialPricingStatus, syncOfficialPricing } from "./lib/pricing-sync";
 
 export const pricingRouter = createRouter({
   /**
@@ -122,6 +123,15 @@ export const pricingRouter = createRouter({
       skipped: modelIds.length - created,
     };
   }),
+
+  /**
+   * 从官方定价源（BaseLLM ratio_config，与天枢 New API 同源）全量同步模型定价。
+   * 覆盖已有价格；分层定价模型按上下文分档存储。可用 PRICING_SYNC_URL 覆盖数据源。
+   */
+  syncOfficial: adminQuery.mutation(async () => syncOfficialPricing()),
+
+  /** 官方定价同步状态（最近同步时间 / 数量 / 来源） */
+  officialStatus: publicQuery.query(async () => getOfficialPricingStatus()),
 
   /**
    * Delete a model pricing entry

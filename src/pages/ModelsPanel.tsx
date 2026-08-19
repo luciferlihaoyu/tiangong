@@ -6,13 +6,28 @@
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
-import { Cpu, RefreshCw, Star, Check, Users } from "lucide-react";
+import { Cpu, RefreshCw, Star, Check, Users, CloudDownload } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ModelsPanel() {
   const utils = trpc.useUtils();
   const listQuery = trpc.tianshu.listModels.useQuery(undefined, { retry: 1, staleTime: 30_000 });
   const agentsQuery = trpc.tianshu.listAgents.useQuery(undefined, { retry: 1, staleTime: 30_000 });
+  const pricingStatusQuery = trpc.pricing.officialStatus.useQuery(undefined, { retry: 1, staleTime: 30_000 });
+
+  const syncPricingMutation = trpc.pricing.syncOfficial.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(`官方定价已同步：共 ${data.total} 个模型（新增 ${data.created} / 更新 ${data.updated}${data.tiered ? `，含分层定价 ${data.tiered}` : ""}）`);
+      } else {
+        toast.error(`同步失败: ${data.error ?? "未知错误"}`);
+      }
+      utils.tianshu.listModels.invalidate();
+      utils.pricing.officialStatus.invalidate();
+      utils.pricing.list.invalidate();
+    },
+    onError: (e) => toast.error(`同步失败: ${e.message}`),
+  });
 
   const setDefaultMutation = trpc.tianshu.setDefaultModel.useMutation({
     onSuccess: (data) => {
@@ -56,13 +71,25 @@ export default function ModelsPanel() {
               TIANSHU MODELS · 模型来源：天枢聚合网关
             </p>
           </div>
-          <button
-            onClick={() => { listQuery.refetch(); agentsQuery.refetch(); }}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
-            style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
-          >
-            <RefreshCw size={14} /> 刷新
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => syncPricingMutation.mutate()}
+              disabled={syncPricingMutation.isPending}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors disabled:opacity-50"
+              style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
+              title={`从官方定价源（${pricingStatusQuery.data?.sourceHost ?? "basellm.github.io"}）同步最新定价，与天枢同源`}
+            >
+              <CloudDownload size={14} className={syncPricingMutation.isPending ? "animate-pulse" : ""} />
+              {syncPricingMutation.isPending ? "同步中..." : "同步官方定价"}
+            </button>
+            <button
+              onClick={() => { listQuery.refetch(); agentsQuery.refetch(); }}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
+              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+            >
+              <RefreshCw size={14} /> 刷新
+            </button>
+          </div>
         </div>
 
         {/* 状态卡片 */}
@@ -82,6 +109,16 @@ export default function ModelsPanel() {
           <div>
             <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>可用模型数</div>
             <div className="text-sm font-mono" style={{ color: "var(--text-primary)" }}>{models.length}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+              官方定价（{pricingStatusQuery.data?.sourceHost ?? "basellm.github.io"}）
+            </div>
+            <div className="text-sm font-mono" style={{ color: "var(--text-primary)" }}>
+              {pricingStatusQuery.data?.syncedAt
+                ? `${new Date(pricingStatusQuery.data.syncedAt).toLocaleString("zh-CN", { hour12: false })} · ${pricingStatusQuery.data.total} 个模型`
+                : "未同步 · 点击右上角「同步官方定价」"}
+            </div>
           </div>
         </div>
 
@@ -104,7 +141,7 @@ export default function ModelsPanel() {
               <table className="w-full text-xs font-mono">
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
-                    {["模型 ID", "输入价/1K", "输出价/1K", "默认", "操作"].map((h) => (
+                    {["模型 ID", "输入价/1K", "输出价/1K", "缓存价/1K", "默认", "操作"].map((h) => (
                       <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
                     ))}
                   </tr>
@@ -116,9 +153,19 @@ export default function ModelsPanel() {
                       <tr key={m} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                         <td className="py-2 px-3" style={{ color: isDefault ? "var(--accent-gold)" : "var(--text-primary)", fontWeight: isDefault ? 700 : 400 }}>
                           {m}
+                          {pricing[m]?.tiered && (
+                            <span
+                              className="ml-1.5 text-[9px] px-1 py-0.5 rounded align-middle"
+                              style={{ background: "rgba(180,200,255,0.08)", color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+                              title="分层定价：价格随上下文长度分档，表中为基础档，成本核算按实际长度选档"
+                            >
+                              分层
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 px-3" style={{ color: "var(--accent-cyan)" }}>{fmtPrice(pricing[m]?.inputPrice)}</td>
                         <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtPrice(pricing[m]?.outputPrice)}</td>
+                        <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{fmtPrice(pricing[m]?.cachedInputPrice ?? undefined)}</td>
                         <td className="py-2 px-3">
                           {isDefault && <Star size={13} style={{ color: "var(--accent-gold)" }} fill="currentColor" />}
                         </td>

@@ -30,6 +30,7 @@ import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { syncTaskMemoryToXuanji } from "./xuanji-sync";
+import { syncTaskArtifactsToAlist } from "./alist-sync";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
@@ -477,6 +478,15 @@ class TaskRunner {
           agentId: task.agentId,
           status: "done",
           lifecycleStatus: "completed",
+        });
+
+        // 完成 → 尽力而为地把任务产物上传到 AList（失败不影响完成）
+        await syncTaskArtifactsToAlist(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          output: outputText ?? task.output,
+          agentId: task.agentId,
         });
 
         await this.recordEvent(task.id, "system", "Task auto-reviewed and completed by runner", { previousStatus: "submitted", lifecycleStatus: "completed" }, task.agentId ?? undefined);

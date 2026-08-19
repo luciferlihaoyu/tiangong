@@ -10,9 +10,18 @@ import { getDb } from "./queries/connection";
 import { agents, modelPricing } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { getSetting, setSetting } from "./lib/settings";
+import { parseTieredPricing } from "./lib/model-pricing";
 
 const DEFAULT_BASE_URL = "https://woppis1.zeabur.app";
 export const TIANSHU_DEFAULT_MODEL_KEY = "tianshu_default_model";
+
+type PricingInfo = Record<string, {
+  inputPrice: string;
+  outputPrice: string;
+  cachedInputPrice: string | null;
+  tiered: boolean;
+}>;
+const NO_PRICING: PricingInfo = {};
 
 function tianshuBaseUrl(): string {
   return (process.env.TIANSHU_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
@@ -52,7 +61,7 @@ export const tianshuRouter = createRouter({
   listModels: userQuery.query(async () => {
     const apiKey = tianshuApiKey();
     if (!apiKey) {
-      return { ok: false as const, error: "TIANSHU_API_KEY 未配置", models: [] as string[], defaultModel: "", pricing: {} as Record<string, { inputPrice: string; outputPrice: string }> };
+      return { ok: false as const, error: "TIANSHU_API_KEY 未配置", models: [] as string[], defaultModel: "", pricing: NO_PRICING };
     }
 
     let modelIds: string[];
@@ -62,7 +71,7 @@ export const tianshuRouter = createRouter({
         signal: AbortSignal.timeout(15000),
       });
       if (!resp.ok) {
-        return { ok: false as const, error: `天枢返回 HTTP ${resp.status}`, models: [] as string[], defaultModel: "", pricing: {} as Record<string, { inputPrice: string; outputPrice: string }> };
+        return { ok: false as const, error: `天枢返回 HTTP ${resp.status}`, models: [] as string[], defaultModel: "", pricing: NO_PRICING };
       }
       const payload = (await resp.json()) as TianshuModelsPayload;
       modelIds = (payload.data ?? [])
@@ -70,14 +79,19 @@ export const tianshuRouter = createRouter({
         .filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 100)
         .sort();
     } catch (e) {
-      return { ok: false as const, error: `天枢请求失败: ${e instanceof Error ? e.message : String(e)}`, models: [] as string[], defaultModel: "", pricing: {} as Record<string, { inputPrice: string; outputPrice: string }> };
+      return { ok: false as const, error: `天枢请求失败: ${e instanceof Error ? e.message : String(e)}`, models: [] as string[], defaultModel: "", pricing: NO_PRICING };
     }
 
     const db = getDb();
     const pricingRows = await db.select().from(modelPricing);
-    const pricing: Record<string, { inputPrice: string; outputPrice: string }> = {};
+    const pricing: PricingInfo = {};
     for (const row of pricingRows) {
-      pricing[row.model] = { inputPrice: String(row.inputPrice), outputPrice: String(row.outputPrice) };
+      pricing[row.model] = {
+        inputPrice: String(row.inputPrice),
+        outputPrice: String(row.outputPrice),
+        cachedInputPrice: row.cachedInputPrice != null ? String(row.cachedInputPrice) : null,
+        tiered: parseTieredPricing(row.notes) != null,
+      };
     }
 
     return {

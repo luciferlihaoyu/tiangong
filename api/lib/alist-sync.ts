@@ -31,6 +31,8 @@ export type AlistSyncResult = Readonly<{
   synced: boolean;
   reason: "not_configured" | "disabled" | "duplicate" | "nothing_to_upload" | "uploaded" | "upload_failed" | "unexpected_failure";
   uploaded?: readonly string[];
+  /** 失败时的具体错误信息（便于无日志环境下诊断） */
+  error?: string;
 }>;
 
 function sanitizeFileName(name: string): string {
@@ -102,6 +104,6 @@ export async function syncTaskArtifactsToAlist(db: Db, task: CompletedTaskForAli
     return { synced: true, reason: "uploaded", uploaded };
   } catch (e) {
     console.warn(`[alist-sync] unexpected failure for task ${task.taskId}: ${describeError(e)}`);
-    return { synced: false, reason: "unexpected_failure" };
+    return { synced: false, reason: "unexpected_failure", error: describeError(e) };
   }
 }

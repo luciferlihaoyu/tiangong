@@ -101,10 +101,42 @@ export async function alistList(cfg: AlistEnvConfig, path: string): Promise<Alis
   }));
 }
 
+/** 建目录；目录已存在视为成功 */
+export async function alistMkdir(cfg: AlistEnvConfig, path: string): Promise<void> {
+  const token = await login(cfg);
+  const res = await fetch(`${cfg.baseUrl}/api/fs/mkdir`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: token },
+    body: JSON.stringify({ path }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  const payload = (await res.json().catch(() => null)) as { code?: number; message?: string } | null;
+  if (res.ok && payload?.code === 200) return;
+  if (payload?.message && /exist|已存在/i.test(payload.message)) return;
+  throw new Error(`AList 建目录失败 (${path}): HTTP ${res.status}${payload?.message ? ` ${payload.message}` : ""}`);
+}
+
+/** 逐级确保目录存在（部分存储驱动不会在上传时自动创建父目录） */
+export async function alistEnsureDir(cfg: AlistEnvConfig, path: string): Promise<void> {
+  const segs = path.split("/").filter(Boolean);
+  let cur = "";
+  for (const seg of segs) {
+    cur += `/${seg}`;
+    try {
+      await alistMkdir(cfg, cur);
+    } catch (e) {
+      // 已存在等错误忽略；真正的权限/写失败会在上传时暴露
+      console.warn(`[alist] mkdir ${cur}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
 export async function alistUpload(cfg: AlistEnvConfig, relPath: string, content: Buffer): Promise<string> {
   if (relPath.split("/").some((seg) => seg === "..")) throw new Error("Invalid upload path");
   const token = await login(cfg);
   const target = relPath.startsWith("/") ? relPath : `/${relPath}`;
+  const parent = target.slice(0, target.lastIndexOf("/")) || "/";
+  if (parent !== "/") await alistEnsureDir(cfg, parent);
   const res = await fetch(`${cfg.baseUrl}/api/fs/put`, {
     method: "PUT",
     headers: {
@@ -115,9 +147,10 @@ export async function alistUpload(cfg: AlistEnvConfig, relPath: string, content:
     body: new Uint8Array(content),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`AList 上传失败: HTTP ${res.status}`);
-  const payload = (await res.json().catch(() => null)) as { code?: number } | null;
-  if (payload && payload.code !== 200) throw new Error("AList 上传失败");
+  const payload = (await res.json().catch(() => null)) as { code?: number; message?: string } | null;
+  if (!res.ok || (payload && payload.code !== 200)) {
+    throw new Error(`AList 上传失败 (${target}): HTTP ${res.status}${payload?.message ? ` ${payload.message}` : ""}`);
+  }
   return target;
 }
 

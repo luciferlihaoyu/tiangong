@@ -82,7 +82,7 @@ export const alistRouter = createRouter({
       });
       return {
         success: result.synced,
-        error: result.synced ? undefined : result.reason,
+        error: result.synced ? undefined : (result.error ? `${result.reason}: ${result.error}` : result.reason),
         uploaded: result.uploaded ?? [],
       };
     }),

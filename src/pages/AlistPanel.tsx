@@ -96,7 +96,7 @@ export default function AlistPanel() {
             <pre className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{`ALIST_BASE_URL=https://你的alist地址
 ALIST_USERNAME=天宫专用账号
 ALIST_PASSWORD=账号密码
-ALIST_BASE_PATH=/tiangong        （可选，默认 /tiangong）
+ALIST_BASE_PATH=/子目录           （可选，默认为账号在 AList 的根目录）
 ALIST_AUTO_UPLOAD=true            （可选，默认开启）`}</pre>
           </div>
         )}

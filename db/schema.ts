@@ -527,6 +527,8 @@ export const tokenUsage = mysqlTable("token_usage", {
   uncachedPromptTokens: int("uncached_prompt_tokens").default(0),
   callCount: int("call_count").default(1).notNull(),
   costCents: int("cost_cents").default(0).notNull(),
+  // 高精度成本（微美元，1 USD = 1,000,000 micros）：解决小额调用按分四舍五入后成本全为 0 的问题
+  costMicros: bigint("cost_micros", { mode: "number" }).default(0).notNull(),
   // P13: currency + exchange
   currency: varchar("currency", { length: 3 }).default("USD"),
   exchangeRate: decimal("exchange_rate", { precision: 10, scale: 6 }).default("1.0"),

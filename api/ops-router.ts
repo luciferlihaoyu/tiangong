@@ -133,6 +133,7 @@ export const opsRouter = createRouter({
           provider: tokenUsage.provider,
           totalTokens: tokenUsage.totalTokens,
           costCents: tokenUsage.costCents,
+          costMicros: tokenUsage.costMicros,
           highCostModel: tokenUsage.highCostModel,
           source: tokenUsage.source,
           sessionKey: tokenUsage.sessionKey,
@@ -170,6 +171,7 @@ export const opsRouter = createRouter({
           totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(gte(tokenUsage.createdAt, since))
@@ -179,19 +181,20 @@ export const opsRouter = createRouter({
       // 按日期分组
       const byDate: Record<
         string,
-        { totalTokens: number; callCount: number; costCents: number; models: Record<string, { tokens: number; cost: number }> }
+        { totalTokens: number; callCount: number; costCents: number; costMicros: number; models: Record<string, { tokens: number; cost: number }> }
       > = {};
 
       for (const r of rows) {
         if (!byDate[r.date]) {
-          byDate[r.date] = { totalTokens: 0, callCount: 0, costCents: 0, models: {} };
+          byDate[r.date] = { totalTokens: 0, callCount: 0, costCents: 0, costMicros: 0, models: {} };
         }
-        byDate[r.date].totalTokens += r.totalTokens;
-        byDate[r.date].callCount += r.callCount;
-        byDate[r.date].costCents += r.costCents;
+        byDate[r.date].totalTokens += Number(r.totalTokens);
+        byDate[r.date].callCount += Number(r.callCount);
+        byDate[r.date].costCents += Number(r.costCents);
+        byDate[r.date].costMicros += Number(r.costMicros);
         byDate[r.date].models[r.model] = {
-          tokens: r.totalTokens,
-          cost: r.costCents,
+          tokens: Number(r.totalTokens),
+          cost: Number(r.costMicros),
         };
       }
 
@@ -199,7 +202,8 @@ export const opsRouter = createRouter({
         days: Object.entries(byDate)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([date, data]) => ({ date, ...data })),
-        totalCostCents: rows.reduce((s, r) => s + r.costCents, 0),
+        totalCostCents: rows.reduce((s, r) => s + Number(r.costCents), 0),
+        totalCostMicros: rows.reduce((s, r) => s + Number(r.costMicros), 0),
         totalTokens: rows.reduce((s, r) => s + r.totalTokens, 0),
         totalCalls: rows.reduce((s, r) => s + r.callCount, 0),
       };
@@ -249,6 +253,7 @@ export const opsRouter = createRouter({
       .select({
         totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
         costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+        costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
         highCostCount: sql<number>`COALESCE(SUM(CASE WHEN ${tokenUsage.highCostModel} = 'true' THEN ${tokenUsage.callCount} ELSE 0 END), 0)`,
       })
@@ -260,7 +265,7 @@ export const opsRouter = createRouter({
         )
       );
 
-    const usage = usageRows[0] || { totalTokens: 0, costCents: 0, callCount: 0, highCostCount: 0 };
+    const usage = usageRows[0] || { totalTokens: 0, costCents: 0, costMicros: 0, callCount: 0, highCostCount: 0 };
 
     return {
       agents: agentStats,
@@ -268,6 +273,7 @@ export const opsRouter = createRouter({
       usage: {
         totalTokens: Number(usage.totalTokens),
         costCents: Number(usage.costCents),
+        costMicros: Number(usage.costMicros),
         callCount: Number(usage.callCount),
         highCostCount: Number(usage.highCostCount),
       },

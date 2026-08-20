@@ -158,9 +158,11 @@ function EventRow({
           {event.sourceAgentId && (
             <span style={{ color: "var(--text-muted)" }}>#{event.sourceAgentId}</span>
           )}
-          {!!event.payload?.costCents && (
+          {!!(event.payload?.costMicros ?? event.payload?.costCents) && (
             <span style={{ color: "var(--accent-gold)" }}>
-              ${(Number(event.payload.costCents) / 100).toFixed(2)}
+              {event.payload?.costMicros
+                ? `$${(Number(event.payload.costMicros) / 1_000_000).toFixed(6)}`
+                : `$${(Number(event.payload.costCents) / 100).toFixed(2)}`}
             </span>
           )}
           <span style={{ color: "var(--text-muted)" }}>{fmtTime(event.timestamp)}</span>

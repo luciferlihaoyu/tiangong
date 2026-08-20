@@ -7,6 +7,7 @@ import { getDb } from "./queries/connection";
 import { modelPricing } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { getOfficialPricingStatus, syncOfficialPricing } from "./lib/pricing-sync";
+import { recalcAllUsageCosts } from "./lib/usage-recalc";
 
 export const pricingRouter = createRouter({
   /**
@@ -128,7 +129,13 @@ export const pricingRouter = createRouter({
    * 从官方定价源（BaseLLM ratio_config，与天枢 New API 同源）全量同步模型定价。
    * 覆盖已有价格；分层定价模型按上下文分档存储。可用 PRICING_SYNC_URL 覆盖数据源。
    */
-  syncOfficial: adminQuery.mutation(async () => syncOfficialPricing()),
+  syncOfficial: adminQuery.mutation(async () => {
+    const result = await syncOfficialPricing();
+    if (!result.success) return result;
+    // 定价更新后，用最新价格重算全部历史用量成本
+    const recalc = await recalcAllUsageCosts().catch(() => null);
+    return { ...result, usageRecalculated: recalc?.updated ?? null };
+  }),
 
   /** 官方定价同步状态（最近同步时间 / 数量 / 来源） */
   officialStatus: publicQuery.query(async () => getOfficialPricingStatus()),

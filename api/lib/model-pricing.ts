@@ -140,11 +140,11 @@ export function calculateCost(
   cachedPromptTokens: number,
   uncachedPromptTokens: number,
   completionTokens: number
-): { costUsd: number; costCents: number; savedByCacheUsd: number } {
+): { costUsd: number; costCents: number; costMicros: number; savedByCacheUsd: number } {
   if (!pricing) {
     const totalTokens = cachedPromptTokens + uncachedPromptTokens + completionTokens;
     const costUsd = (totalTokens * FALLBACK_PRICE_PER_1K) / 1000;
-    return { costUsd, costCents: Math.round(costUsd * 100), savedByCacheUsd: 0 };
+    return { costUsd, costCents: Math.round(costUsd * 100), costMicros: Math.round(costUsd * 1_000_000), savedByCacheUsd: 0 };
   }
 
   const inputPrice = Number(pricing.inputPrice) || 0;
@@ -164,6 +164,7 @@ export function calculateCost(
   return {
     costUsd,
     costCents: Math.round(costUsd * 100),
+    costMicros: Math.round(costUsd * 1_000_000),
     savedByCacheUsd,
   };
 }
@@ -189,7 +190,7 @@ export function buildTokenUsageValues(
     traceId?: string;
     startedAt?: Date | string;
   },
-  costResult: { costUsd: number; costCents: number; savedByCacheUsd: number }
+  costResult: { costUsd: number; costCents: number; costMicros: number; savedByCacheUsd: number }
 ): typeof tokenUsage.$inferInsert {
   const total =
     params.totalTokens ??
@@ -205,6 +206,7 @@ export function buildTokenUsageValues(
     uncachedPromptTokens: params.uncachedPromptTokens ?? 0,
     callCount: params.callCount ?? 1,
     costCents: costResult.costCents,
+    costMicros: costResult.costMicros,
     currency: "USD",
     exchangeRate: String(DEFAULT_EXCHANGE_RATE),
     costDisplay: String((costResult.costUsd * DEFAULT_EXCHANGE_RATE).toFixed(4)),

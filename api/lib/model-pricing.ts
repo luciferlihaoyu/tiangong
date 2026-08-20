@@ -21,7 +21,18 @@ export async function getModelPricing(model: string) {
     .from(modelPricing)
     .where(eq(modelPricing.model, model))
     .limit(1);
-  return rows[0] ?? null;
+  if (rows[0]) return rows[0];
+  // 渠道前缀模型（如 "newapi/deepseek-v4-flash"）：回退到最后一段匹配官方定价
+  const tail = model.includes("/") ? model.split("/").pop() : undefined;
+  if (tail && tail !== model) {
+    const fallback = await db
+      .select()
+      .from(modelPricing)
+      .where(eq(modelPricing.model, tail))
+      .limit(1);
+    if (fallback[0]) return fallback[0];
+  }
+  return null;
 }
 
 /**

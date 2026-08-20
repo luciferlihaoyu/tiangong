@@ -103,8 +103,27 @@ export async function alistList(cfg: AlistEnvConfig, path: string): Promise<Alis
   }));
 }
 
+/** 目录是否存在 */
+async function alistDirExists(cfg: AlistEnvConfig, path: string): Promise<boolean> {
+  try {
+    const token = await login(cfg);
+    const res = await fetch(`${cfg.baseUrl}/api/fs/get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: token },
+      body: JSON.stringify({ path }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const payload = (await res.json()) as { code?: number; data?: { is_dir?: boolean } };
+    return payload.code === 200 && payload.data?.is_dir === true;
+  } catch {
+    return false;
+  }
+}
+
 /** 建目录；目录已存在视为成功 */
 export async function alistMkdir(cfg: AlistEnvConfig, path: string): Promise<void> {
+  if (await alistDirExists(cfg, path)) return;
   const token = await login(cfg);
   const res = await fetch(`${cfg.baseUrl}/api/fs/mkdir`, {
     method: "POST",
@@ -118,18 +137,13 @@ export async function alistMkdir(cfg: AlistEnvConfig, path: string): Promise<voi
   throw new Error(`AList 建目录失败 (${path}): HTTP ${res.status}${payload?.message ? ` ${payload.message}` : ""}`);
 }
 
-/** 逐级确保目录存在（部分存储驱动不会在上传时自动创建父目录） */
+/** 逐级确保目录存在（部分存储驱动不会在上传时自动创建父目录）；权限错误直接抛出便于诊断 */
 export async function alistEnsureDir(cfg: AlistEnvConfig, path: string): Promise<void> {
   const segs = path.split("/").filter(Boolean);
   let cur = "";
   for (const seg of segs) {
     cur += `/${seg}`;
-    try {
-      await alistMkdir(cfg, cur);
-    } catch (e) {
-      // 已存在等错误忽略；真正的权限/写失败会在上传时暴露
-      console.warn(`[alist] mkdir ${cur}: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    await alistMkdir(cfg, cur);
   }
 }
 
@@ -186,17 +200,47 @@ export async function alistMe(cfg: AlistEnvConfig): Promise<{ username: string; 
   }
 }
 
-/** 连接测试：登录 + 列根目录 + 报告账号基本路径（上传实际落点） */
-export async function alistTestConnection(cfg: AlistEnvConfig): Promise<{ success: boolean; message: string }> {
+/** 删除文件/目录（尽力而为，供写探测清理） */
+export async function alistRemove(cfg: AlistEnvConfig, dir: string, names: string[]): Promise<void> {
   try {
-    const root = await alistList(cfg, "/");
-    const me = await alistMe(cfg);
-    const accountRoot = me?.basePath && me.basePath !== "/" ? me.basePath : null;
-    const where = cfg.basePath === "/"
-      ? (accountRoot ? `账号根目录（${accountRoot}）` : "账号根目录")
-      : cfg.basePath;
-    return { success: true, message: `连接成功，根目录 ${root.length} 个条目，上传落点：${where}` };
-  } catch (e) {
-    return { success: false, message: e instanceof Error ? e.message : "连接失败" };
+    const token = await login(cfg);
+    await fetch(`${cfg.baseUrl}/api/fs/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: token },
+      body: JSON.stringify({ dir, names }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    /* 清理失败不影响探测结论 */
   }
+}
+
+/** 连接测试：登录 + 列目录 + 真实写探测（建目录 → 写文件 → 删除），逐步报告失败点 */
+export async function alistTestConnection(cfg: AlistEnvConfig): Promise<{ success: boolean; message: string }> {
+  const me = await alistMe(cfg);
+  const accountRoot = me?.basePath && me.basePath !== "/" ? me.basePath : null;
+  const where = cfg.basePath === "/"
+    ? (accountRoot ? `账号根目录（${accountRoot}）` : "账号根目录")
+    : cfg.basePath;
+  try {
+    await alistList(cfg, "/");
+  } catch (e) {
+    return { success: false, message: `列目录失败: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  // 写探测
+  const probeDir = cfg.basePath === "/" ? "/.tiangong-probe" : cfg.basePath;
+  const probeFile = `${probeDir}/.write-probe.txt`;
+  try {
+    await alistEnsureDir(cfg, probeDir);
+  } catch (e) {
+    return { success: false, message: `读取正常，但建目录被拒（${probeDir}）: ${e instanceof Error ? e.message : String(e)}——请检查 AList 账号的「写入」权限` };
+  }
+  try {
+    await alistUpload(cfg, probeFile, Buffer.from("probe", "utf-8"));
+  } catch (e) {
+    return { success: false, message: `读取正常、目录可用，但写文件被拒（${probeFile}）: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  await alistRemove(cfg, probeDir, [".write-probe.txt"]);
+  if (cfg.basePath === "/") await alistRemove(cfg, "/", [".tiangong-probe"]);
+  return { success: true, message: `连接成功（读/写均正常），上传落点：${where}` };
 }

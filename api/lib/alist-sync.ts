@@ -11,7 +11,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { taskArtifacts } from "@db/schema";
-import { getAlistConfig, alistUpload } from "../connectors/alist";
+import { resolveAlistConfig, alistUpload } from "../connectors/alist";
 import { getDb } from "../queries/connection";
 
 export type Db = ReturnType<typeof getDb>;
@@ -47,7 +47,7 @@ function describeError(e: unknown): string {
 
 export async function syncTaskArtifactsToAlist(db: Db, task: CompletedTaskForAlist): Promise<AlistSyncResult> {
   try {
-    const cfg = getAlistConfig();
+    const cfg = await resolveAlistConfig();
     if (!cfg) return { synced: false, reason: "not_configured" };
     if (!cfg.autoUpload) return { synced: false, reason: "disabled" };
 

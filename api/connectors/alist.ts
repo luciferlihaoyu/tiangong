@@ -1,15 +1,15 @@
 /**
  * 天宫 → AList 网盘客户端
  *
- * 环境变量配置（Zeabur）：
- *   ALIST_BASE_URL    AList 站点地址，如 https://alist.example.com
- *   ALIST_USERNAME    AList 账号（建议在 AList 为天宫单独建号，并把账号「基本路径」设为天宫专用目录，如 /115/天宫）
- *   ALIST_PASSWORD    AList 密码
- *   ALIST_BASE_PATH   可选：上传子目录。默认 "/" —— 跟随账号在 AList 中的根目录
- *                     （若 AList 后台为该账号配置了「基本路径」，"/" 自动映射到该目录）
- *   ALIST_AUTO_UPLOAD 任务完成后自动上传产物，默认 true（设 0/false 关闭）
+ * 配置来源（优先级从高到低）：
+ *   1. 界面配置：网盘页「连接配置」表单，存 system_settings（key: alist_config）
+ *   2. 环境变量（Zeabur，兜底）：
+ *      ALIST_BASE_URL / ALIST_USERNAME / ALIST_PASSWORD / ALIST_BASE_PATH / ALIST_AUTO_UPLOAD
  *
- * 凭据仅存在于环境变量，不写入数据库、日志或错误消息。
+ * 上传目录默认 "/" —— 即账号在 AList 中的根目录（若 AList 后台为该账号配置了
+ * 「基本路径」，"/" 自动映射到该目录）；也可在界面里直接填子目录如 /115/天宫。
+ *
+ * 密码只写不回读：status/列表接口永不返回密码。
  */
 
 const TIMEOUT_MS = 60_000;
@@ -22,30 +22,98 @@ export interface AlistEnvConfig {
   autoUpload: boolean;
 }
 
-export function getAlistConfig(): AlistEnvConfig | null {
-  const baseUrl = (process.env.ALIST_BASE_URL || "").trim().replace(/\/+$/, "");
+function normalizeBasePath(raw: string | undefined): string {
+  const trimmed = (raw || "/").trim() || "/";
+  if (trimmed === "/") return "/";
+  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function normalizeBaseUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, "");
+}
+
+function fromEnv(): AlistEnvConfig | null {
+  const baseUrl = normalizeBaseUrl(process.env.ALIST_BASE_URL || "");
   const username = (process.env.ALIST_USERNAME || "").trim();
   const password = process.env.ALIST_PASSWORD || "";
   if (!baseUrl || !username || !password) return null;
   if (!/^https?:\/\//i.test(baseUrl)) return null;
-  const basePathRaw = (process.env.ALIST_BASE_PATH || "/").trim() || "/";
-  const basePath = basePathRaw === "/" ? "/" : `/${basePathRaw.replace(/^\/+|\/+$/g, "")}`;
   const autoRaw = (process.env.ALIST_AUTO_UPLOAD || "").trim().toLowerCase();
   return {
     baseUrl,
     username,
     password,
-    basePath,
+    basePath: normalizeBasePath(process.env.ALIST_BASE_PATH),
     autoUpload: autoRaw !== "0" && autoRaw !== "false",
   };
 }
 
-export function alistConfigured(): boolean {
-  return getAlistConfig() !== null;
+const ALIST_CONFIG_KEY = "alist_config";
+
+export interface AlistStoredConfig {
+  baseUrl: string;
+  username: string;
+  password: string;
+  basePath?: string;
+  autoUpload?: boolean;
 }
 
-export function alistBaseUrlHost(): string {
-  const cfg = getAlistConfig();
+/** 读取界面保存的配置（无效/不完整返回 null） */
+export async function getAlistDbConfig(): Promise<AlistEnvConfig | null> {
+  try {
+    const { getSetting } = await import("../lib/settings");
+    const raw = await getSetting(ALIST_CONFIG_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AlistStoredConfig>;
+    const baseUrl = normalizeBaseUrl(parsed.baseUrl || "");
+    const username = (parsed.username || "").trim();
+    const password = parsed.password || "";
+    if (!baseUrl || !username || !password) return null;
+    if (!/^https?:\/\//i.test(baseUrl)) return null;
+    return {
+      baseUrl,
+      username,
+      password,
+      basePath: normalizeBasePath(parsed.basePath),
+      autoUpload: parsed.autoUpload !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 保存界面配置 */
+export async function saveAlistDbConfig(cfg: AlistStoredConfig): Promise<void> {
+  const { setSetting } = await import("../lib/settings");
+  const normalized: AlistStoredConfig = {
+    baseUrl: normalizeBaseUrl(cfg.baseUrl),
+    username: cfg.username.trim(),
+    password: cfg.password,
+    basePath: normalizeBasePath(cfg.basePath),
+    autoUpload: cfg.autoUpload !== false,
+  };
+  await setSetting(ALIST_CONFIG_KEY, JSON.stringify(normalized), "alist");
+}
+
+/** 清除界面配置（回退到环境变量） */
+export async function clearAlistDbConfig(): Promise<void> {
+  const { setSetting } = await import("../lib/settings");
+  await setSetting(ALIST_CONFIG_KEY, "", "alist");
+}
+
+/** 解析生效配置：界面配置优先，环境变量兜底 */
+export async function resolveAlistConfig(): Promise<AlistEnvConfig | null> {
+  const dbCfg = await getAlistDbConfig();
+  return dbCfg ?? fromEnv();
+}
+
+/** 配置来源（用于界面展示） */
+export async function alistConfigSource(): Promise<"ui" | "env" | null> {
+  if (await getAlistDbConfig()) return "ui";
+  return fromEnv() ? "env" : null;
+}
+
+export function alistBaseUrlHostOf(cfg: AlistEnvConfig | null): string {
   if (!cfg) return "";
   try {
     return new URL(cfg.baseUrl).host;
@@ -54,12 +122,14 @@ export function alistBaseUrlHost(): string {
   }
 }
 
-// token 缓存（AList token 有效期 48h，提前续期）
-let cachedToken: { token: string; obtainedAt: number } | null = null;
+// token 缓存（AList token 有效期 48h，提前续期；按 地址::账号 分键，配置切换后互不影响）
+const tokenCache = new Map<string, { token: string; obtainedAt: number }>();
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 async function login(cfg: AlistEnvConfig): Promise<string> {
-  if (cachedToken && Date.now() - cachedToken.obtainedAt < TOKEN_TTL_MS) return cachedToken.token;
+  const key = `${cfg.baseUrl}::${cfg.username}`;
+  const cached = tokenCache.get(key);
+  if (cached && Date.now() - cached.obtainedAt < TOKEN_TTL_MS) return cached.token;
   const res = await fetch(`${cfg.baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,10 +137,10 @@ async function login(cfg: AlistEnvConfig): Promise<string> {
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`AList 登录失败: HTTP ${res.status}`);
-  const payload = (await res.json()) as { code?: number; data?: { token?: string } };
+  const payload = (await res.json()) as { code?: number; message?: string; data?: { token?: string } };
   const token = payload.data?.token;
-  if (!token) throw new Error("AList 登录失败：未返回 token");
-  cachedToken = { token, obtainedAt: Date.now() };
+  if (!token) throw new Error(`AList 登录失败${payload?.message ? `: ${payload.message}` : "：未返回 token"}`);
+  tokenCache.set(key, { token, obtainedAt: Date.now() });
   return token;
 }
 
@@ -91,7 +161,11 @@ export async function alistList(cfg: AlistEnvConfig, path: string): Promise<Alis
     body: JSON.stringify({ path: dir, page: 1, per_page: 1000, refresh: false }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  const payload = (await res.json().catch(() => null)) as { code?: number; message?: string; data?: { content?: Array<{ name?: string; size?: number; is_dir?: boolean; modified?: string }> | null } | null;
+  const payload = (await res.json().catch(() => null)) as {
+    code?: number;
+    message?: string;
+    data?: { content?: Array<{ name?: string; size?: number; is_dir?: boolean; modified?: string }> | null };
+  } | null;
   if (!res.ok || !payload || payload.code !== 200) {
     throw new Error(`AList 列目录失败 (${dir}): HTTP ${res.status}${payload?.message ? ` ${payload.message}` : ""}`);
   }

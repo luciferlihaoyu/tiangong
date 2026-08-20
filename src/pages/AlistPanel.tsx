@@ -1,12 +1,13 @@
 /**
  * AList 网盘页面
- * - 连接状态（环境变量配置）
+ * - 连接配置（界面可改，优先于环境变量；密码永不回显）
+ * - 连接状态（含真实读写探测）
  * - 文件浏览器（目录导航 + 下载链接）
  * - 任务产物自动上传状态说明
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/providers/trpc";
-import { HardDrive, RefreshCw, FolderOpen, File, ArrowLeft, ExternalLink } from "lucide-react";
+import { HardDrive, RefreshCw, FolderOpen, File, ArrowLeft, ExternalLink, Save, Trash2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 function fmtSize(size: number): string {
@@ -16,6 +17,12 @@ function fmtSize(size: number): string {
   if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
+
+const inputStyle: React.CSSProperties = {
+  background: "rgba(10, 16, 34, 0.6)",
+  border: "1px solid var(--border-default)",
+  color: "var(--text-primary)",
+};
 
 export default function AlistPanel() {
   const [path, setPath] = useState("/");
@@ -27,6 +34,66 @@ export default function AlistPanel() {
   const files = browseQuery.data?.files ?? [];
   const browseError = browseQuery.data && !browseQuery.data.ok ? browseQuery.data.error : undefined;
   const parentPath = path === "/" ? null : (path.slice(0, path.lastIndexOf("/")) || "/");
+
+  // ─── 连接配置表单 ───
+  const [formTouched, setFormTouched] = useState(false);
+  const [baseUrl, setBaseUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [basePath, setBasePath] = useState("/");
+  const [autoUpload, setAutoUpload] = useState(true);
+
+  // 状态加载后回填表单（只在用户未手动编辑过时）
+  useEffect(() => {
+    if (status && !formTouched) {
+      setBaseUrl(status.baseUrl ?? "");
+      setUsername(status.username ?? "");
+      setBasePath(status.basePath ?? "/");
+      setAutoUpload(status.autoUpload ?? true);
+    }
+  }, [status, formTouched]);
+
+  const saveMutation = trpc.alist.saveConfig.useMutation({
+    onSuccess: (res) => {
+      if (!res.success) {
+        toast.error(res.error ?? "保存失败");
+        return;
+      }
+      if (res.connected) {
+        toast.success(`已保存并验证通过：${res.message}`);
+      } else {
+        toast.warning(`已保存，但连接探测未通过：${res.message}`);
+      }
+      setPassword("");
+      statusQuery.refetch();
+      browseQuery.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const clearMutation = trpc.alist.clearConfig.useMutation({
+    onSuccess: () => {
+      toast.success("已清除界面配置，回退到环境变量");
+      setFormTouched(false);
+      setPassword("");
+      statusQuery.refetch();
+      browseQuery.refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleSave = () => {
+    if (!baseUrl.trim()) return toast.error("请填写 AList 地址");
+    if (!username.trim()) return toast.error("请填写账号");
+    if (!password.trim() && !status?.configured) return toast.error("首次配置请填写密码");
+    saveMutation.mutate({
+      baseUrl: baseUrl.trim(),
+      username: username.trim(),
+      password: password.trim() ? password : undefined, // 留空 = 保留原密码
+      basePath: basePath.trim() || "/",
+      autoUpload,
+    });
+  };
 
   const handleDownload = async (filePath: string, name: string) => {
     try {
@@ -86,20 +153,104 @@ export default function AlistPanel() {
                   {status.autoUpload ? "开启" : "关闭"}
                 </div>
               </div>
+              <div>
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>配置来源</div>
+                <div className="text-sm font-mono" style={{ color: status.source === "ui" ? "var(--accent-cyan)" : "var(--accent-gold)" }}>
+                  {status.source === "ui" ? "界面配置" : "环境变量"}
+                </div>
+              </div>
             </>
           )}
         </div>
 
-        {!status?.configured && (
-          <div className="glass-panel p-6 sci-border mb-6 text-xs font-mono" style={{ color: "var(--text-muted)" }}>
-            <div className="font-bold mb-2" style={{ color: "var(--accent-gold)" }}>配置方法（Zeabur 环境变量）</div>
-            <pre className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{`ALIST_BASE_URL=https://你的alist地址
-ALIST_USERNAME=天宫专用账号
-ALIST_PASSWORD=账号密码
-ALIST_BASE_PATH=/子目录           （可选，默认为账号在 AList 的根目录）
-ALIST_AUTO_UPLOAD=true            （可选，默认开启）`}</pre>
+        {/* 连接配置表单 */}
+        <div className="glass-panel p-4 sci-border mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Settings2 size={14} style={{ color: "var(--accent-cyan)" }} />
+            <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>连接配置</span>
+            <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+              界面配置优先于环境变量 · 密码加密存储、永不回显
+            </span>
           </div>
-        )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <label className="block">
+              <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>AList 地址</div>
+              <input
+                value={baseUrl}
+                onChange={(e) => { setFormTouched(true); setBaseUrl(e.target.value); }}
+                placeholder="https://你的alist地址"
+                className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                style={inputStyle}
+              />
+            </label>
+            <label className="block">
+              <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>账号</div>
+              <input
+                value={username}
+                onChange={(e) => { setFormTouched(true); setUsername(e.target.value); }}
+                placeholder="tiangong"
+                className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                style={inputStyle}
+              />
+            </label>
+            <label className="block">
+              <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                密码{status?.configured ? "（留空则保留原密码）" : ""}
+              </div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => { setFormTouched(true); setPassword(e.target.value); }}
+                placeholder={status?.configured ? "不修改请留空" : "账号密码"}
+                className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                style={inputStyle}
+              />
+            </label>
+            <label className="block">
+              <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                上传目录（该账号在 AList 中的路径）
+              </div>
+              <input
+                value={basePath}
+                onChange={(e) => { setFormTouched(true); setBasePath(e.target.value); }}
+                placeholder="/115/天宫"
+                className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                style={inputStyle}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs font-mono cursor-pointer" style={{ color: "var(--text-secondary)" }}>
+              <input
+                type="checkbox"
+                checked={autoUpload}
+                onChange={(e) => { setFormTouched(true); setAutoUpload(e.target.checked); }}
+              />
+              任务产物自动上传
+            </label>
+            <button
+              onClick={handleSave}
+              disabled={saveMutation.isPending}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+              style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
+            >
+              <Save size={13} /> {saveMutation.isPending ? "保存并探测中..." : "保存并测试连接"}
+            </button>
+            {status?.source === "ui" && (
+              <button
+                onClick={() => clearMutation.mutate()}
+                disabled={clearMutation.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                style={{ color: "var(--accent-red)", border: "1px solid var(--accent-red)" }}
+              >
+                <Trash2 size={13} /> 清除界面配置
+              </button>
+            )}
+          </div>
+          <div className="text-[10px] font-mono mt-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+            也可以用 Zeabur 环境变量配置（ALIST_BASE_URL / ALIST_USERNAME / ALIST_PASSWORD / ALIST_BASE_PATH / ALIST_AUTO_UPLOAD）；两者同时存在时以界面配置为准。
+          </div>
+        </div>
 
         {/* 文件浏览器 */}
         <div className="glass-panel p-4 sci-border">

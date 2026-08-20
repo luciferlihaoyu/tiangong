@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { createRouter, publicQuery, authedQuery } from "./middleware";
+import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tokenUsage, agents } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
-import { getModelPricing, calculateCost, buildTokenUsageValues } from "./lib/model-pricing";
+import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./lib/model-pricing";
+import { recalcAllUsageCosts } from "./lib/usage-recalc";
 
 export const usageRouter = createRouter({
   /**
@@ -35,8 +36,8 @@ export const usageRouter = createRouter({
       const db = getDb();
       const total = input.totalTokens ?? (input.promptTokens + input.completionTokens);
 
-      // P13: compute real cost from pricing table
-      const pricing = await getModelPricing(input.model);
+      // P13: compute real cost from pricing table（分层定价按实际上下文长度选档）
+      const pricing = await resolveModelPricing(input.model, input.promptTokens ?? 0);
       const costResult = calculateCost(
         pricing,
         input.cachedPromptTokens ?? 0,
@@ -45,9 +46,9 @@ export const usageRouter = createRouter({
       );
 
       // Allow legacy override if explicitly provided
-      const finalCostCents = input.costCents !== undefined && input.costCents > 0
-        ? input.costCents
-        : costResult.costCents;
+      const hasLegacyOverride = input.costCents !== undefined && input.costCents > 0;
+      const finalCostCents = hasLegacyOverride ? (input.costCents as number) : costResult.costCents;
+      const finalCostMicros = hasLegacyOverride ? (input.costCents as number) * 1_000_000 : costResult.costMicros;
 
       const values = buildTokenUsageValues(
         {
@@ -66,13 +67,13 @@ export const usageRouter = createRouter({
           traceId: input.traceId,
           startedAt: input.startedAt,
         },
-        { ...costResult, costCents: finalCostCents }
+        { ...costResult, costCents: finalCostCents, costMicros: finalCostMicros }
       );
 
       const result = await db.insert(tokenUsage).values(values as any);
       const insertId = (result as any).insertId;
 
-      return { id: insertId, totalTokens: total, costCents: finalCostCents };
+      return { id: insertId, totalTokens: total, costCents: finalCostCents, costMicros: finalCostMicros };
     }),
 
   /**
@@ -157,6 +158,7 @@ export const usageRouter = createRouter({
           uncachedPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.uncachedPromptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(whereClause)
@@ -198,6 +200,7 @@ export const usageRouter = createRouter({
           uncachedPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.uncachedPromptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(whereClause)
@@ -237,6 +240,7 @@ export const usageRouter = createRouter({
           uncachedPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.uncachedPromptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(whereClause)
@@ -278,6 +282,7 @@ export const usageRouter = createRouter({
           uncachedPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.uncachedPromptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .leftJoin(agents, eq(tokenUsage.agentId, agents.id))
@@ -324,6 +329,7 @@ export const usageRouter = createRouter({
           uncachedPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.uncachedPromptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .leftJoin(agents, eq(tokenUsage.agentId, agents.id))
@@ -364,6 +370,7 @@ export const usageRouter = createRouter({
           totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(whereClause);
@@ -377,6 +384,7 @@ export const usageRouter = createRouter({
           totalPromptTokens: sql<number>`COALESCE(SUM(${tokenUsage.promptTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(whereClause)
@@ -399,7 +407,7 @@ export const usageRouter = createRouter({
         .groupBy(tokenUsage.agentId, agents.name)
         .orderBy(desc(sql`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`));
 
-      const o = overall[0] ?? { totalPromptTokens: 0, cachedPromptTokens: 0, uncachedPromptTokens: 0, totalTokens: 0, callCount: 0, costCents: 0 };
+      const o = overall[0] ?? { totalPromptTokens: 0, cachedPromptTokens: 0, uncachedPromptTokens: 0, totalTokens: 0, callCount: 0, costCents: 0, costMicros: 0 };
       const cacheHitRate = o.totalPromptTokens > 0
         ? (o.cachedPromptTokens / o.totalPromptTokens) * 100
         : 0;
@@ -427,13 +435,14 @@ export const usageRouter = createRouter({
       const rows = await db
         .select({
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
           totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
         })
         .from(tokenUsage)
         .where(and(gte(tokenUsage.createdAt, start), lte(tokenUsage.createdAt, end)));
 
-      return rows[0] ?? { costCents: 0, totalTokens: 0, callCount: 0 };
+      return rows[0] ?? { costCents: 0, costMicros: 0, totalTokens: 0, callCount: 0 };
     }),
 
   /**
@@ -449,16 +458,20 @@ export const usageRouter = createRouter({
       const rows = await db
         .select({
           costCents: sql<number>`COALESCE(SUM(${tokenUsage.costCents}), 0)`,
+          costMicros: sql<number>`COALESCE(SUM(${tokenUsage.costMicros}), 0)`,
         })
         .from(tokenUsage)
         .where(and(gte(tokenUsage.createdAt, start), lte(tokenUsage.createdAt, end)));
 
-      const costCents = rows[0]?.costCents ?? 0;
-      const threshold = 1000;
+      const costMicros = Number(rows[0]?.costMicros ?? 0);
+      const threshold = 1000; // 单位：美分（$10）
 
-      if (costCents > threshold) {
-        return { alert: true, costCents, threshold };
+      if (costMicros > threshold * 1_000_000) {
+        return { alert: true, costCents: Math.round(costMicros / 10_000), costMicros, threshold };
       }
       return { alert: false };
     }),
+
+  /** 按当前定价表重算全部历史用量成本（官方定价同步后会自动调用，也可手动触发） */
+  recalcCosts: adminQuery.mutation(async () => recalcAllUsageCosts()),
 });

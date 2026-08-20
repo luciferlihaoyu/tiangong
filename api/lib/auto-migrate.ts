@@ -613,6 +613,7 @@ async function migrateP13Columns(conn: mysql.Connection, logs: string[]) {
     { name: "currency", def: "VARCHAR(3) DEFAULT 'USD'" },
     { name: "exchange_rate", def: "DECIMAL(10,6) DEFAULT 1.0" },
     { name: "cost_display", def: "DECIMAL(12,4) DEFAULT 0" },
+    { name: "cost_micros", def: "BIGINT NOT NULL DEFAULT 0" },
   ];
 
   for (const col of p13Columns) {
@@ -628,6 +629,16 @@ async function migrateP13Columns(conn: mysql.Connection, logs: string[]) {
         logs.push(`token_usage.${col.name}: ${e.message?.slice(0, 80)}`);
       }
     }
+  }
+
+  // 历史行回填：cost_micros = cost_cents × 1e6（仅处理尚未回填的行）
+  try {
+    await conn.execute(
+      `UPDATE token_usage SET cost_micros = cost_cents * 1000000 WHERE cost_micros = 0 AND cost_cents > 0`
+    );
+    logs.push("token_usage.cost_micros: backfill done");
+  } catch (e: any) {
+    logs.push(`token_usage.cost_micros backfill: ${e.message?.slice(0, 80)}`);
   }
 }
 

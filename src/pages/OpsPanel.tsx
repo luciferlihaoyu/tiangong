@@ -70,6 +70,7 @@ interface RecentModelCall {
   provider: string;
   totalTokens: number;
   costCents: number;
+  costMicros?: number;
   highCostModel: string | null;
   source: string | null;
   sessionKey: string | null;
@@ -83,12 +84,14 @@ interface HeatmapDay {
   totalTokens: number;
   callCount: number;
   costCents: number;
+  costMicros?: number;
   models: Record<string, { tokens: number; cost: number }>;
 }
 
 interface CostHeatmap {
   days: HeatmapDay[];
   totalCostCents: number;
+  totalCostMicros?: number;
   totalTokens: number;
   totalCalls: number;
 }
@@ -99,6 +102,7 @@ interface TodayOverview {
   usage: {
     totalTokens: number;
     costCents: number;
+    costMicros?: number;
     callCount: number;
     highCostCount: number;
   };
@@ -117,6 +121,18 @@ function fmtTokens(n: number): string {
 function fmtCost(cents: number): string {
   if (cents >= 100) return `$${(cents / 100).toFixed(2)}`;
   return `${cents}¢`;
+}
+
+/** 用量成本（微美元）格式化；聚合值可能是字符串，统一 Number 转换 */
+function fmtMicros(micros: number | string | null | undefined): string {
+  const usd = Number(micros ?? 0) / 1_000_000;
+  return usd >= 1 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(6)}`;
+}
+
+function microsOf(row: { costMicros?: number | string | null; costCents?: number | string | null }): number {
+  const m = Number(row.costMicros ?? 0);
+  if (m > 0) return m;
+  return Number(row.costCents ?? 0) * 1_000_000;
 }
 
 function fmtDateTime(iso: string) {
@@ -359,8 +375,8 @@ function ModelCallFlow({ calls, loading }: { calls: RecentModelCall[]; loading: 
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span style={{ color: "var(--accent-cyan)" }}>{fmtTokens(c.totalTokens)} tok</span>
-            {c.costCents > 0 && (
-              <span style={{ color: "var(--accent-gold)" }}>{fmtCost(c.costCents)}</span>
+            {microsOf(c) > 0 && (
+              <span style={{ color: "var(--accent-gold)" }}>{fmtMicros(microsOf(c))}</span>
             )}
             {c.traceId && (
               <span style={{ color: "var(--text-muted)" }}>#{c.traceId.slice(0, 8)}</span>
@@ -386,7 +402,7 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
     );
   }
 
-  const maxCost = Math.max(...heatmap.days.map((d) => d.costCents), 1);
+  const maxCost = Math.max(...heatmap.days.map((d) => microsOf(d)), 1);
   const chartHeight = 100;
 
   return (
@@ -395,7 +411,7 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="p-2 rounded text-center" style={{ background: "rgba(255,255,255,0.02)" }}>
           <div className="text-sm font-bold font-mono" style={{ color: "var(--accent-gold)" }}>
-            {fmtCost(heatmap.totalCostCents)}
+            {fmtMicros(heatmap.totalCostMicros ?? heatmap.totalCostCents * 1_000_000)}
           </div>
           <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>总成本</div>
         </div>
@@ -416,14 +432,14 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
       {/* 柱状图 */}
       <div className="flex items-end gap-1" style={{ height: `${chartHeight}px` }}>
         {heatmap.days.map((d, i) => {
-          const h = Math.max(2, (d.costCents / maxCost) * chartHeight);
+          const h = Math.max(2, (microsOf(d) / maxCost) * chartHeight);
           return (
             <div key={i} className="flex-1 flex flex-col items-center group relative" style={{ minWidth: "16px" }}>
               <div
                 className="absolute -top-4 text-[8px] opacity-0 group-hover:opacity-100 transition-opacity font-mono whitespace-nowrap"
                 style={{ color: "var(--accent-gold)" }}
               >
-                {fmtCost(d.costCents)}
+                {fmtMicros(microsOf(d))}
               </div>
               <div
                 className="w-full rounded-t transition-all cursor-pointer"
@@ -432,7 +448,7 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
                   background: "linear-gradient(180deg, var(--accent-gold), rgba(255,200,50,0.1))",
                   opacity: 0.7,
                 }}
-                title={`${d.date}: ${fmtCost(d.costCents)}, ${fmtTokens(d.totalTokens)} tok, ${d.callCount} 次`}
+                title={`${d.date}: ${fmtMicros(microsOf(d))}, ${fmtTokens(d.totalTokens)} tok, ${d.callCount} 次`}
               />
               <div className="text-[7px] mt-1 font-mono truncate w-full text-center" style={{ color: "var(--text-muted)" }}>
                 {d.date.slice(5)}
@@ -599,7 +615,7 @@ export default function OpsPanel() {
             />
             <StatCard
               label="今日成本"
-              value={fmtCost(overview.usage.costCents)}
+              value={fmtMicros(microsOf(overview.usage))}
               sub={`${overview.usage.highCostCount} 次高价调用`}
               color={overview.usage.highCostCount > 0 ? "var(--danger)" : "var(--accent-gold)"}
               icon={<TrendingUp size={16} />}

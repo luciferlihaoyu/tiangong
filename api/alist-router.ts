@@ -13,6 +13,7 @@ import {
   clearAlistDbConfig,
   alistConfigSource,
   alistBaseUrlHostOf,
+  getAlistEnvConfig,
   alistList,
   alistDownloadUrl,
   alistTestConnection,
@@ -53,7 +54,8 @@ export const alistRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const prev = await getAlistDbConfig();
-      const password = input.password?.trim() ? input.password : (prev?.password ?? "");
+      // 密码留空时的回退链：界面已存密码 > 环境变量密码
+      const password = input.password?.trim() ? input.password : (prev?.password ?? getAlistEnvConfig()?.password ?? "");
       if (!password) return { success: false as const, error: "首次保存必须填写密码" };
       if (!/^https?:\/\//i.test(input.baseUrl.trim())) return { success: false as const, error: "地址必须以 http:// 或 https:// 开头" };
       await saveAlistDbConfig({

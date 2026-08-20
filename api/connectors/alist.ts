@@ -32,7 +32,8 @@ function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
 }
 
-function fromEnv(): AlistEnvConfig | null {
+/** 环境变量兜底配置（界面配置优先级更高；密码不回读，仅供内部解析使用） */
+export function getAlistEnvConfig(): AlistEnvConfig | null {
   const baseUrl = normalizeBaseUrl(process.env.ALIST_BASE_URL || "");
   const username = (process.env.ALIST_USERNAME || "").trim();
   const password = process.env.ALIST_PASSWORD || "";
@@ -104,13 +105,13 @@ export async function clearAlistDbConfig(): Promise<void> {
 /** 解析生效配置：界面配置优先，环境变量兜底 */
 export async function resolveAlistConfig(): Promise<AlistEnvConfig | null> {
   const dbCfg = await getAlistDbConfig();
-  return dbCfg ?? fromEnv();
+  return dbCfg ?? getAlistEnvConfig();
 }
 
 /** 配置来源（用于界面展示） */
 export async function alistConfigSource(): Promise<"ui" | "env" | null> {
   if (await getAlistDbConfig()) return "ui";
-  return fromEnv() ? "env" : null;
+  return getAlistEnvConfig() ? "env" : null;
 }
 
 export function alistBaseUrlHostOf(cfg: AlistEnvConfig | null): string {

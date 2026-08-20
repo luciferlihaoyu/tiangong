@@ -91,9 +91,10 @@ export async function alistList(cfg: AlistEnvConfig, path: string): Promise<Alis
     body: JSON.stringify({ path: dir, page: 1, per_page: 1000, refresh: false }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`AList 列目录失败: HTTP ${res.status}`);
-  const payload = (await res.json()) as { code?: number; data?: { content?: Array<{ name?: string; size?: number; is_dir?: boolean; modified?: string }> | null } };
-  if (payload.code !== 200) throw new Error("AList 列目录失败");
+  const payload = (await res.json().catch(() => null)) as { code?: number; message?: string; data?: { content?: Array<{ name?: string; size?: number; is_dir?: boolean; modified?: string }> | null } | null;
+  if (!res.ok || !payload || payload.code !== 200) {
+    throw new Error(`AList 列目录失败 (${dir}): HTTP ${res.status}${payload?.message ? ` ${payload.message}` : ""}`);
+  }
   return (payload.data?.content ?? []).map((item) => ({
     name: item.name ?? "",
     path: `${dir === "/" ? "" : dir}/${item.name ?? ""}`,

@@ -12,6 +12,11 @@
 - **公司架构管理** — 组织/部门/汇报线，Agent 归属组织参与任务
 - **成本控制** — Agent 预算分配与消耗追踪
 - **心跳监控** — Agent 心跳上报，实时在线状态
+- **中枢自动流转** — 任务创建后自动派发、自动执行，高风险操作经审批闸门拦截
+- **外部执行体接入** — DeepSeek Harness (dsh) 等外部 Agent 运行时经 MCP Key 认领任务
+- **模型定价同步** — 从 BaseLLM（New API 比率配置）同步官方定价，支持分层计费与缓存价
+- **AList 网盘集成** — 界面可配连接，任务产物自动上传，在线浏览/下载
+- **璇玑知识联动** — 任务完成记忆自动写入璇玑知识库，执行前可检索知识上下文
 
 ---
 
@@ -230,9 +235,68 @@ ADMIN_PASSWORD=your-strong-password
 TIANSHU_API_KEY=sk-xxx
 # TIANSHU_BASE_URL=https://woppis1.zeabur.app   （默认值，可省略）
 # TIANSHU_MODEL=deepseek-v4-flash               （可选：固定执行模型）
+
+# 中枢自动流转（默认值即可工作，一般无需设置）
+# TIANGONG_AUTO_DISPATCH=true                   新任务自动派发（默认 true）
+# TIANGONG_AUTO_DISPATCH_BATCH=10               每轮最多自动派发数（默认 10）
+# TIANGONG_EXTERNAL_CLAIM_SOURCES=dsh-runner    外部认领型 agent 来源，Runner 不抢其任务
+
+# AList 网盘（也可在「AList 网盘」页界面配置，界面配置优先于环境变量）
+# ALIST_BASE_URL=https://your-alist
+# ALIST_USERNAME=tiangong
+# ALIST_PASSWORD=xxx
+# ALIST_BASE_PATH=/115/天宫                      （可选，默认 "/" = 账号根目录）
+# ALIST_AUTO_UPLOAD=true                         （可选，默认开启任务产物自动上传）
+
+# 璇玑知识库联动（任务完成记忆自动写入璇玑）
+# XUANJI_BASE_URL=https://xuanjj29.zeabur.app
+# XUANJI_API_KEY_REF=<secret-vault 引用>
+
+# 官方定价同步源（默认 BaseLLM，可在模型中心一键同步）
+# PRICING_SYNC_URL=https://basellm.github.io/llm-metadata/api/newapi/ratio_config-v1-base.json
 ```
 
 > ⚠️ 切勿将真实凭据提交到 git 仓库（包括文档和 `.env.example`）。如曾泄露，请立即轮换。
+
+---
+
+## 系统集成与自动化
+
+### 天枢模型网关（统一模型来源与计费）
+
+所有任务执行的模型调用都经过天枢（New API 兼容网关）：用量自动记账（`token_usage.cost_micros` 微美元精度），支持渠道前缀模型回退定价（如 `newapi/deepseek-v4-flash` 按 `deepseek-v4-flash` 计价）。
+
+- **模型中心**：查看可用模型、切换默认模型、查看每个模型的定价
+- **官方定价同步**：一键从 BaseLLM 比率配置同步（含 27 个按上下文长度分层计费的模型、缓存命中价），同步后自动重算历史用量成本；也可在用量页手动触发重算
+
+### AList 网盘（产物备份与资料读取）
+
+任务产出的文档/图片/视频等自动上传到 AList（默认目录 `<basePath>/tasks/<taskId>/`），网盘页可在线浏览目录、打开/下载文件。
+
+- **界面配置优先**：网盘页「连接配置」表单可改地址/账号/密码/上传目录/自动上传开关，保存后立即做读写探测；密码只写不读（留空保留原密码）；界面配置存数据库，优先于环境变量
+- 账号权限提示：账号需要对上传目录有写入权限（在 AList 后台「用户」中配置基本路径/权限位）
+
+### 璇玑知识库联动
+
+- 任务完成（通过执行闸门）后，结果摘要自动写入璇玑（`memory.xuanjiWriteTaskMemory`），含 traceId 可溯源
+- 执行侧可经 `memory.xuanjiSearchContext`（keyword/vector/hybrid）检索璇玑知识，作为任务上下文
+- 凭据经 secret-vault 引用，不落明文
+
+### 中枢自动流转与外部执行体
+
+任务从创建到完成全自动流转：`create → (审批闸门) → queued → 执行 → done`——无需人工派发。
+
+- **自动派发**：task-runner 每轮把新建任务（pending+created）过执行审批闸门后转 queued；高风险任务（github 写操作、zeabur 部署、外部发送等）自动停放待人工审批
+- **外部执行体**：`source` 为 `dsh-runner` 等外部认领型来源的 Agent，其任务由外部运行时自行认领（`agent.claimTask` / `agent.updateHeartbeat`，MCP Key 鉴权），服务端 Runner 不会抢
+- **dsh 接入**：`scripts/dsh-poller.mjs` 是零依赖轮询器，在 dsh 所在机器运行即可让 DeepSeek Harness 自动认领并执行天宫任务：
+
+```bash
+TIANGONG_BASE_URL=https://tiangg.zeabur.app \
+TIANGONG_MCP_KEY=<dsh助手的MCP Key> \
+TIANGONG_AGENT_ID=17 \
+DSH_CMD='dsh -p "$(cat {file})"' \
+node scripts/dsh-poller.mjs
+```
 
 ---
 

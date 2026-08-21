@@ -15,6 +15,13 @@
  *   TIANGONG_TASK_RUNNER_TIMEOUT_MS       默认 300000
  *   TIANGONG_TASK_RUNNER_RESULT_MAX_CHARS 默认 12000
  *
+ * 中枢化（自动流转）：
+ *   TIANGONG_AUTO_DISPATCH               默认 true：新建任务（pending+created）每轮自动经审批闸门转 queued
+ *   TIANGONG_AUTO_DISPATCH_BATCH         默认 10：每轮最多自动派发的任务数
+ *   TIANGONG_EXTERNAL_CLAIM_SOURCES      默认 "dsh-runner"：外部认领型 agent 来源（逗号分隔），
+ *                                        这些 agent 的任务 Runner 不执行，留给外部执行体经
+ *                                        agent.claimTask / agent.updateHeartbeat（MCP Key 鉴权）认领
+ *
  * P7 Gateway 模式（远程 OpenClaw Gateway HTTP，不要求生产容器安装 openclaw CLI）：
  *   TIANGONG_OPENCLAW_GATEWAY_URL          OpenClaw Gateway URL，如 https://gw.example.com
  *   TIANGONG_OPENCLAW_GATEWAY_TOKEN        Gateway bearer token/password（status/log 不泄露）
@@ -25,7 +32,7 @@
 
 import { getDb } from "../queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, tokenUsage, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, inArray } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
@@ -102,6 +109,16 @@ const CONFIG = {
   tianshuApiKey: tianshuApiKeyEnv,
   tianshuModel: envStr("TIANSHU_MODEL", ""),
   tianshuTimeoutMs: envInt("TIANSHU_TIMEOUT_MS", 120000, 1000),
+  // 中枢化：自动派发新建的 pending 任务（经审批闸门过滤）→ queued
+  autoDispatch: envBool("TIANGONG_AUTO_DISPATCH", true),
+  autoDispatchBatch: envInt("TIANGONG_AUTO_DISPATCH_BATCH", 10, 1, 50),
+  // 外部认领型 agent 来源：这些 agent 的任务 Runner 不抢，留给外部执行体（如 dsh）经 claimTask/heartbeat 认领
+  externalClaimSources: new Set(
+    envStr("TIANGONG_EXTERNAL_CLAIM_SOURCES", "dsh-runner")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean)
+  ),
 };
 
 // ─── Helpers ───
@@ -189,6 +206,8 @@ class TaskRunner {
       tianshuConfigured: isTianshuConfigured(),
       tianshuBaseUrlHost: safeTianshuHost(),
       tianshuModelConfigured: CONFIG.tianshuModel.length > 0,
+      autoDispatch: CONFIG.autoDispatch,
+      externalClaimSources: [...CONFIG.externalClaimSources],
       consecutiveErrors: this.consecutiveErrors,
     };
   }
@@ -229,15 +248,69 @@ class TaskRunner {
     this.tickRunning = true;
     try {
       const db = getDb();
-      // 1. 扫描 queued 任务（按优先级降序，时间升序）
+
+      // 0. 自动派发：新建的 pending 任务（lifecycleStatus=created）经审批闸门过滤后转 queued，
+      //    让任务从创建到执行全自动流转（天宫作为中枢，无需人工点派发）。
+      if (CONFIG.autoDispatch) {
+        const fresh = await db
+          .select()
+          .from(tasks)
+          .where(and(eq(tasks.status, "pending"), eq(tasks.lifecycleStatus, "created")))
+          .orderBy(desc(tasks.priority), asc(tasks.createdAt))
+          .limit(CONFIG.autoDispatchBatch);
+        for (const task of fresh) {
+          const gate = checkExecutionGate(task);
+          if (gate.status === "blocked") {
+            await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+            console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
+            continue;
+          }
+          const now = new Date();
+          await db
+            .update(tasks)
+            .set({ status: "queued", lifecycleStatus: "dispatched", dispatchedAt: now, updatedAt: now })
+            .where(and(eq(tasks.id, task.id), eq(tasks.status, "pending")));
+          wsManager.broadcastToDashboard({
+            type: "task_update",
+            action: "dispatched",
+            id: task.id,
+            taskId: task.taskId,
+            name: task.name,
+            status: "queued",
+            agentId: task.agentId,
+            timestamp: now.toISOString(),
+          });
+        }
+      }
+
+      // 1. 扫描 queued 任务（按优先级降序，时间升序）。
+      //    多取一些再过滤：跳过外部认领型 agent 的任务时不至于本轮空转（防饥饿）。
       const queued = await db
         .select()
         .from(tasks)
         .where(eq(tasks.status, "queued"))
         .orderBy(desc(tasks.priority), asc(tasks.createdAt))
-        .limit(CONFIG.batchSize);
+        .limit(Math.max(CONFIG.batchSize * 5, 20));
 
+      // 2. 外部认领型 agent（如 dsh-runner）：Runner 不抢，留给外部执行体经 claimTask/heartbeat 认领
+      const candidateAgentIds = [...new Set(queued.map((t) => t.agentId).filter((v): v is number => v !== null))];
+      let externalAgentIds = new Set<number>();
+      if (candidateAgentIds.length > 0 && CONFIG.externalClaimSources.size > 0) {
+        const agentRows = await db
+          .select({ id: agents.id, source: agents.source })
+          .from(agents)
+          .where(inArray(agents.id, candidateAgentIds));
+        externalAgentIds = new Set(
+          agentRows.filter((a) => a.source && CONFIG.externalClaimSources.has(a.source)).map((a) => a.id)
+        );
+      }
+
+      let executed = 0;
       for (const task of queued) {
+        if (executed >= CONFIG.batchSize) break;
+        if (task.agentId !== null && externalAgentIds.has(task.agentId)) {
+          continue; // 留给外部执行体（dsh 等）认领
+        }
         // 执行审批闸门：高风险任务不得由 Runner 领取执行，停放待人工审批
         const gate = checkExecutionGate(task);
         if (gate.status === "blocked") {
@@ -246,6 +319,7 @@ class TaskRunner {
           continue;
         }
         await this.claimAndExecute(task);
+        executed++;
       }
       this.consecutiveErrors = 0;
     } catch (e: any) {

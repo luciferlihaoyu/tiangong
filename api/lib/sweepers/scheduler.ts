@@ -10,6 +10,7 @@ import { getDb } from "../../queries/connection";
 
 import { sweepAgentWatchdog } from "./agent-watchdog";
 import { sweepApprovalNag } from "./approval-nag";
+import { sweepAlistCompensation } from "./alist-compensation";
 import { sweeperConfig } from "./config";
 import { sweepMemoryCompensation } from "./memory-compensation";
 import { sweepNewApiPatrol } from "./newapi-patrol";
@@ -66,6 +67,7 @@ class SweeperScheduler {
         sweepAgentWatchdog,
         sweepApprovalNag,
         sweepMemoryCompensation,
+        sweepAlistCompensation,
         sweepNewApiPatrol,
       ];
 

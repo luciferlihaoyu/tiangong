@@ -12,6 +12,7 @@ const sweeperMocks = vi.hoisted(() => ({
   agentWatchdog: vi.fn(async () => {}),
   approvalNag: vi.fn(async () => {}),
   memoryCompensation: vi.fn(async () => {}),
+  alistCompensation: vi.fn(async () => {}),
   newApiPatrol: vi.fn(async () => {}),
 }));
 
@@ -23,6 +24,7 @@ vi.mock("../../api/lib/sweepers/config", () => ({
     heartbeatTimeoutMs: 180_000,
     approvalStaleMs: 86_400_000,
     memoryRetryLookbackMs: 21_600_000,
+    alistRetryLookbackMs: 21_600_000,
     newApiPatrolEveryTicks: 10,
   },
 }));
@@ -31,6 +33,7 @@ vi.mock("../../api/lib/sweepers/task-lifecycle", () => ({ sweepTaskTimeouts: swe
 vi.mock("../../api/lib/sweepers/agent-watchdog", () => ({ sweepAgentWatchdog: sweeperMocks.agentWatchdog }));
 vi.mock("../../api/lib/sweepers/approval-nag", () => ({ sweepApprovalNag: sweeperMocks.approvalNag }));
 vi.mock("../../api/lib/sweepers/memory-compensation", () => ({ sweepMemoryCompensation: sweeperMocks.memoryCompensation }));
+vi.mock("../../api/lib/sweepers/alist-compensation", () => ({ sweepAlistCompensation: sweeperMocks.alistCompensation }));
 vi.mock("../../api/lib/sweepers/newapi-patrol", () => ({ sweepNewApiPatrol: sweeperMocks.newApiPatrol }));
 
 import { sweeperScheduler } from "../../api/lib/sweepers/scheduler";
@@ -57,11 +60,12 @@ describe("SweeperScheduler", () => {
     // When
     await sweeperScheduler.tick();
 
-    // Then: all five sweepers were attempted and the rejection did not escape
+    // Then: all six sweepers were attempted and the rejection did not escape
     expect(sweeperMocks.taskTimeouts).toHaveBeenCalledTimes(1);
     expect(sweeperMocks.agentWatchdog).toHaveBeenCalledTimes(1);
     expect(sweeperMocks.approvalNag).toHaveBeenCalledTimes(1);
     expect(sweeperMocks.memoryCompensation).toHaveBeenCalledTimes(1);
+    expect(sweeperMocks.alistCompensation).toHaveBeenCalledTimes(1);
     expect(sweeperMocks.newApiPatrol).toHaveBeenCalledTimes(1);
     expect(sweeperScheduler.status.tickCount).toBe(tickBefore + 1);
   });

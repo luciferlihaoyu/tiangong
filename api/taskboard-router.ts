@@ -7,7 +7,7 @@ import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-valid
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
-import { syncTaskMemoryToXuanji } from "./lib/xuanji-sync";
+import { finalizeCompletedTask } from "./lib/task-finalize";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -466,8 +466,8 @@ export const taskboardRouter = createRouter({
       }
       await db.update(tasks).set(updateFields).where(eq(tasks.id, input.taskId));
       if (to === "done") {
-        // 尽力而为地把完成结果写入璇玑记忆（失败不影响完成）
-        await syncTaskMemoryToXuanji(db, {
+        // 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
+        await finalizeCompletedTask(db, {
           id: row.id,
           taskId: row.taskId,
           name: row.name,
@@ -585,8 +585,8 @@ export const taskboardRouter = createRouter({
           reviewResult: "approved",
         })
         .where(eq(tasks.id, input.taskId));
-      // 审批通过 → 尽力而为地把完成结果写入璇玑记忆（失败不影响完成）
-      await syncTaskMemoryToXuanji(db, {
+      // 审批通过 → 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
+      await finalizeCompletedTask(db, {
         id: row.id,
         taskId: row.taskId,
         name: row.name,

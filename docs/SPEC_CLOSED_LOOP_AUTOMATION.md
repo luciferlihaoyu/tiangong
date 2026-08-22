@@ -7,6 +7,22 @@
 
 ---
 
+## 实施状态（2026-08-22 更新）
+
+**P0 阶段一（五个任务）已全部实施并通过独立两阶段评审（规格符合度 + 代码质量），全量回归 45 文件 371 测试绿、tsc/esbuild/eslint 通过：**
+
+| 任务 | 状态 | 落点 |
+|---|---|---|
+| 1.1 钩子收敛 finalizeCompletedTask | ✅ 已实施 | `api/lib/task-finalize.ts` 新建；6 完成路径全部收敛，AList 断链随收敛修复 |
+| 1.2 AList 补偿 sweeper | ✅ 已实施 | `api/lib/sweepers/alist-compensation.ts` 新建 + config/scheduler 注册；顺带修复 fake-db 测试基础设施的 or/and 短路求值 bug |
+| 1.3 汇总接线 + 双归档 | ✅ 已实施 | `maybeSummarizeParent` 挂 finalize 尾部；`autoSummarizeCollab` 加幂等闸 + collab_summary artifact + 父任务 finalize（动态 import 解循环依赖，esbuild 实测内联可行） |
+| 1.4 外部用量记账 + 预算停放 | ✅ 已实施 | `api/lib/external-usage.ts` 新建（token_usage + spentCents 原子递增，两路径共用 microsToCents）；claimTask/updateHeartbeat 两入口预算熔断（轻量方案：跳过认领+reason，不锁死） |
+| 1.5 长输出通道 | ✅ 已实施 | updateProgress 增 artifacts 入参（≤5 条×50K，MCP Key 越权防护）；dsh-poller 长输出分段 + DSH_MODEL usage 透传 |
+
+**遗留跟进（非阻塞）**：recordTianshuUsage 递增缺直接单测；taskArtifacts.content 的 50K CJK 字符 vs MySQL TEXT 64KB 字节上限建议按字节加固；api/lib/artifacts/artifact-sealer.ts 为零调用死代码待清理。
+
+---
+
 ## 0. 闭环体检总览
 
 ```

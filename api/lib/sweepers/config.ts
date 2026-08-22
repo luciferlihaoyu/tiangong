@@ -7,6 +7,7 @@
  *   TIANGONG_HEARTBEAT_TIMEOUT_MS        default 180000
  *   TIANGONG_APPROVAL_STALE_MS           default 86400000 (1 day)
  *   TIANGONG_MEMORY_RETRY_LOOKBACK_MS    default 21600000 (6 hours)
+ *   TIANGONG_ALIST_RETRY_LOOKBACK_MS     default 21600000 (6 hours)
  *   TIANGONG_NEWAPI_PATROL_EVERY_TICKS   default 10
  */
 import { z } from "zod";
@@ -51,6 +52,7 @@ export const sweeperConfigSchema = z.object({
   heartbeatTimeoutMs: integerFromEnv(1_000, 86_400_000, 180_000),
   approvalStaleMs: integerFromEnv(60_000, 31_536_000_000, 86_400_000),
   memoryRetryLookbackMs: integerFromEnv(60_000, 31_536_000_000, 21_600_000),
+  alistRetryLookbackMs: integerFromEnv(60_000, 31_536_000_000, 21_600_000),
   newApiPatrolEveryTicks: integerFromEnv(1, 100_000, 10),
 });
 
@@ -65,6 +67,7 @@ export function loadSweeperConfig(env: SweeperEnv = process.env): SweeperConfig 
     heartbeatTimeoutMs: env.TIANGONG_HEARTBEAT_TIMEOUT_MS,
     approvalStaleMs: env.TIANGONG_APPROVAL_STALE_MS,
     memoryRetryLookbackMs: env.TIANGONG_MEMORY_RETRY_LOOKBACK_MS,
+    alistRetryLookbackMs: env.TIANGONG_ALIST_RETRY_LOOKBACK_MS,
     newApiPatrolEveryTicks: env.TIANGONG_NEWAPI_PATROL_EVERY_TICKS,
   });
 }

@@ -13,6 +13,7 @@ describe("Sweeper config", () => {
     expect(config.heartbeatTimeoutMs).toBe(180_000);
     expect(config.approvalStaleMs).toBe(86_400_000);
     expect(config.memoryRetryLookbackMs).toBe(21_600_000);
+    expect(config.alistRetryLookbackMs).toBe(21_600_000);
     expect(config.newApiPatrolEveryTicks).toBe(10);
   });
 
@@ -24,6 +25,7 @@ describe("Sweeper config", () => {
       TIANGONG_HEARTBEAT_TIMEOUT_MS: "60000",
       TIANGONG_APPROVAL_STALE_MS: "3600000",
       TIANGONG_MEMORY_RETRY_LOOKBACK_MS: "7200000",
+      TIANGONG_ALIST_RETRY_LOOKBACK_MS: "3600000",
       TIANGONG_NEWAPI_PATROL_EVERY_TICKS: "20",
     };
     // When
@@ -34,6 +36,7 @@ describe("Sweeper config", () => {
     expect(config.heartbeatTimeoutMs).toBe(60_000);
     expect(config.approvalStaleMs).toBe(3_600_000);
     expect(config.memoryRetryLookbackMs).toBe(7_200_000);
+    expect(config.alistRetryLookbackMs).toBe(3_600_000);
     expect(config.newApiPatrolEveryTicks).toBe(20);
   });
 

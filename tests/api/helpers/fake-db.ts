@@ -158,7 +158,10 @@ function evalTokens(tokens: Token[], row: FakeDbRow): boolean {
       const next = peekStr();
       if (next === "and") {
         idx++;
-        result = result && parseTerm();
+        // 先求值再组合：即使左侧已决定结果，也必须消费右侧 token，
+        // 否则解析位置错乱（短路求值会让后续条件被静默丢弃）。
+        const rhs = parseTerm();
+        result = result && rhs;
       } else {
         break;
       }
@@ -172,7 +175,8 @@ function evalTokens(tokens: Token[], row: FakeDbRow): boolean {
       const next = peekStr();
       if (next === "or") {
         idx++;
-        result = result || parseAnd();
+        const rhs = parseAnd();
+        result = result || rhs;
       } else {
         break;
       }

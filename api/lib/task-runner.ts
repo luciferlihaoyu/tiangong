@@ -32,18 +32,18 @@
 
 import { getDb } from "../queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, tokenUsage, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
-import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
-import { syncTaskMemoryToXuanji } from "./xuanji-sync";
-import { syncTaskArtifactsToAlist } from "./alist-sync";
+import { finalizeCompletedTask } from "./task-finalize";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel } from "../tianshu-router";
 import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
+import { microsToCents } from "./external-usage";
 
 // ─── Config ───
 
@@ -541,8 +541,8 @@ class TaskRunner {
           })
           .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
 
-        // 完成（通过执行闸门）→ 尽力而为地把结果写入璇玑记忆（失败不影响完成）
-        await syncTaskMemoryToXuanji(db, {
+        // 完成（通过执行闸门）→ 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
+        await finalizeCompletedTask(db, {
           id: task.id,
           taskId: task.taskId,
           name: task.name,
@@ -552,15 +552,6 @@ class TaskRunner {
           agentId: task.agentId,
           status: "done",
           lifecycleStatus: "completed",
-        });
-
-        // 完成 → 尽力而为地把任务产物上传到 AList（失败不影响完成）
-        await syncTaskArtifactsToAlist(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          output: outputText ?? task.output,
-          agentId: task.agentId,
         });
 
         await this.recordEvent(task.id, "system", "Task auto-reviewed and completed by runner", { previousStatus: "submitted", lifecycleStatus: "completed" }, task.agentId ?? undefined);
@@ -1111,6 +1102,17 @@ class TaskRunner {
           costResult
         )
       );
+
+      // 与外部路径（recordExternalUsage）记账口径对齐：内部调用同样原子递增 agents.spentCents，
+      // 否则内部执行的任务只进 token_usage 不进预算消耗，guard 熔断同样失效。
+      // 成本单位换算：costMicros 为微美元，spentCents 为美分（1 美分 = 10,000 微美元）。
+      const spentCentsDelta = microsToCents(costResult.costMicros);
+      if (task.agentId && spentCentsDelta > 0) {
+        await db
+          .update(agents)
+          .set({ spentCents: sql`COALESCE(${agents.spentCents}, 0) + ${spentCentsDelta}` })
+          .where(eq(agents.id, task.agentId));
+      }
     } catch (e) {
       console.warn(`[TaskRunner] tianshu usage record failed for task ${task.taskId}: ${e instanceof Error ? e.message : String(e)}`);
     }

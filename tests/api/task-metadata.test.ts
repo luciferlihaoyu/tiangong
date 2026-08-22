@@ -126,4 +126,48 @@ describe("Task metadata", () => {
     expect(taskType).toBe("coding_task");
     expect(() => assertTaskType(invalidTaskType)).toThrow();
   });
+
+  it("defaults importance to normal for legacy metadata and keeps an explicit important marker", () => {
+    // Given: 旧 envelope 无 importance 字段
+    const legacyMetadata = {
+      traceId: "trc_legacy_00000001",
+      taskType: "triage_task",
+      origin: { system: "system" },
+      routing: { candidateAgentIds: [], approvalRequired: false, riskTypes: [] },
+      policies: {},
+      knowledgeRefs: [],
+      artifactRefs: [],
+    };
+
+    // When
+    const parsed = TaskMetadataSchema.parse(legacyMetadata);
+    const created = createTaskMetadata({
+      traceId: "trc_imp_00000001",
+      taskType: "triage_task",
+      origin: { system: "system" },
+      importance: "important",
+    });
+
+    // Then: 旧数据缺省 normal；显式 important 原样保留
+    expect(parsed.importance).toBe("normal");
+    expect(created.importance).toBe("important");
+  });
+
+  it("preserves importance across metadata merges unless explicitly overridden", () => {
+    // Given: 创建即标记 important
+    const rawInput = mergeTaskMetadata(null, {
+      traceId: "trc_imp_00000001",
+      taskType: "triage_task",
+      origin: { system: "system" },
+      importance: "important",
+    });
+
+    // When: merge 其他字段 / 显式降级
+    const untouched = mergeTaskMetadata(rawInput, { taskType: "coding_task" });
+    const downgraded = mergeTaskMetadata(rawInput, { importance: "normal" });
+
+    // Then: 非相关 merge 不抹掉 important；显式覆盖生效
+    expect(parseTaskMetadata(untouched)?.importance).toBe("important");
+    expect(parseTaskMetadata(downgraded)?.importance).toBe("normal");
+  });
 });

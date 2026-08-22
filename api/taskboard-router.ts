@@ -8,6 +8,7 @@ import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
+import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -663,6 +664,28 @@ export const taskboardRouter = createRouter({
           reviewerId: input.agentId,
         })
         .where(eq(tasks.id, input.taskId));
+      // 失败教训写璇玑（任务 3.1 质量反哺）：人工驳回是终态失败（无重试语义，与
+      // requestChanges 的"退回重做"不同），落库后把驳回意见作为失败原因归档教训，
+      // 尽力而为，失败绝不影响驳回主流程（时序与 approve 分支的 finalize 一致：记忆是事后归档）。
+      try {
+        await syncTaskLessonToXuanji(db, {
+          id: row.id,
+          taskId: row.taskId,
+          name: row.name,
+          description: row.description,
+          input: row.input,
+          output: row.output,
+          agentId: row.agentId,
+          status: "failed",
+          lifecycleStatus: row.lifecycleStatus,
+          error: input.reason?.trim()
+            ? `人工驳回：${input.reason.trim()}`
+            : `人工驳回：未填写理由（agent ${input.agentId}）`,
+        });
+      } catch (error) {
+        // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
+        console.warn(`[taskboard] xuanji lesson sync failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,

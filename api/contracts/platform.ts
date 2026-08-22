@@ -68,10 +68,14 @@ export const APPROVAL_RISK_TYPES = [
   "webhook_call",
 ] as const;
 
+/** 任务重要度（任务 2.3）：important 的任务在 AList 完整归档之外，额外复制一份到 highlights/ 精华目录 */
+export const TASK_IMPORTANCE = ["normal", "important"] as const;
+
 export const TaskTypeSchema = z.enum(TASK_TYPES);
 export const AgentSourceSchema = z.enum(AGENT_SOURCES);
 export const AgentCapabilitySchema = z.enum(AGENT_CAPABILITIES);
 export const ApprovalRiskTypeSchema = z.enum(APPROVAL_RISK_TYPES);
+export const TaskImportanceSchema = z.enum(TASK_IMPORTANCE);
 
 export const TraceIdSchema = z.string().regex(/^trc_[0-9a-z]+_[0-9a-z]{8}$/);
 
@@ -140,6 +144,9 @@ export const TaskMetadataSchema = z.object({
   knowledgeRefs: z.array(KnowledgeRefSchema),
   artifactRefs: z.array(ArtifactRefSchema),
   approval: ApprovalRequestSchema.optional(),
+  // 重要度分级：旧 envelope 无此字段，zod 解析时缺省补 "normal"（与 approval 的可选语义不同——
+  // importance 恒有值，下游 alist-sync 直接判 === "important" 即可）
+  importance: TaskImportanceSchema.default("normal"),
 });
 
 export type TaskType = Readonly<z.infer<typeof TaskTypeSchema>>;
@@ -151,4 +158,5 @@ export type ArtifactRef = Readonly<z.infer<typeof ArtifactRefSchema>>;
 export type ModelPolicyRef = Readonly<z.infer<typeof ModelPolicyRefSchema>>;
 export type ApprovalRiskType = Readonly<z.infer<typeof ApprovalRiskTypeSchema>>;
 export type ApprovalRequest = Readonly<z.infer<typeof ApprovalRequestSchema>>;
+export type TaskImportance = Readonly<z.infer<typeof TaskImportanceSchema>>;
 export type TaskMetadata = Readonly<z.infer<typeof TaskMetadataSchema>>;

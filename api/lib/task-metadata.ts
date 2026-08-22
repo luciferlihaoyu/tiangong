@@ -7,6 +7,7 @@ import {
   KnowledgeRefSchema,
   PolicyRefsSchema,
   RoutingMetadataSchema,
+  TaskImportanceSchema,
   TaskMetadataSchema,
   TaskOriginSchema,
   TaskTypeSchema,
@@ -30,6 +31,7 @@ const TaskMetadataPatchSchema = z.object({
   knowledgeRefs: z.array(KnowledgeRefSchema).optional(),
   artifactRefs: z.array(ArtifactRefSchema).optional(),
   approval: ApprovalRequestSchema.optional(),
+  importance: TaskImportanceSchema.optional(),
 });
 
 const JsonRecordSchema = z.record(z.string(), z.unknown());
@@ -83,6 +85,7 @@ export function createTaskMetadata(input: TaskMetadataPatch = {}): TaskMetadata 
     knowledgeRefs: patch.knowledgeRefs ?? [],
     artifactRefs: patch.artifactRefs ?? [],
     ...(patch.approval !== undefined ? { approval: patch.approval } : {}),
+    importance: patch.importance ?? "normal",
   });
 }
 
@@ -142,6 +145,9 @@ function mergeMetadata(base: TaskMetadata, patch: TaskMetadataPatch): TaskMetada
       : base.approval !== undefined
         ? { approval: base.approval }
         : {}),
+    // 必须显式带出：schema 的 default 只在字段缺失时补 "normal"，
+    // 若不透传，无关字段的 merge 会把既有 important 抹回 normal
+    importance: patch.importance ?? base.importance,
   });
 }
 

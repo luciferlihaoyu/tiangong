@@ -21,6 +21,16 @@
 
 **遗留跟进（非阻塞）**：recordTianshuUsage 递增缺直接单测；taskArtifacts.content 的 50K CJK 字符 vs MySQL TEXT 64KB 字节上限建议按字节加固；api/lib/artifacts/artifact-sealer.ts 为零调用死代码待清理。
 
+**P1 + P2（四个任务）已全部实施并通过独立两阶段评审：**
+
+| 任务 | 状态 | 落点 |
+|---|---|---|
+| 2.1+2.2 MCP 执行面 + 知识面工具 | ✅ 已实施 | `api/mcp/server.ts` 追加 claim_task / report_progress / submit_artifact / read_alist / search_xuanji 五工具；认领与回写逻辑抽取为 `api/lib/task-claim.ts` / `api/lib/task-writeback.ts` 单一事实源（净删 239 行 router 代码，MCP 面与 tRPC 面零漂移——机械对照验证） |
+| 2.3 重要成果分级 | ✅ 已实施 | TaskMetadata 加 importance 契约（显式标记 + 关键词推断「报告/汇报/总结/周报/日报/重要/精华/复盘」）；alist-sync 上传 highlights/ 精华目录；手动重传入口已补传 input/description |
+| 3.1 失败教训写璇玑 | ✅ 已实施 | `syncTaskLessonToXuanji` + 独立 xuanji_lesson 幂等标记（与成功记录并存）；三挂点：外部回写失败 / taskboard 驳回 / task-runner 重试耗尽终态 |
+
+**P1/P2 遗留跟进（非阻塞，评审建议）**：actor -1 映射缺判别性测试；submit_artifact 与 task-writeback 的越权/插入逻辑两份实现待抽公共 helper；submit_artifact 未拒 beidou origin；report_progress 业务失败未统一 isError；三个范围外失败路径（a2a fail/timeout、task-runner catch 分支、task-lifecycle sweeper 超时终态）未挂教训钩子；mcp-execution-tools.test.ts 的 xuanji-sync mock 补 syncTaskLessonToXuanji 桩防未来 TypeError 兜底；task-runner 重试未耗尽的首败若无人重派则不留教训（设计取舍，注释已说明）。附注：3.1 落地时修正了本 SPEC 原方案（finalize 挂钩不可行——failed 任务不经过 finalize），三挂点为最终实现。
+
 ---
 
 ## 0. 闭环体检总览

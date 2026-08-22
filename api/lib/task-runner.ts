@@ -37,6 +37,7 @@ import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { finalizeCompletedTask } from "./task-finalize";
+import { syncTaskLessonToXuanji } from "./xuanji-sync";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
@@ -587,6 +588,30 @@ class TaskRunner {
             updatedAt: new Date(),
           })
           .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+
+        // 失败教训写璇玑（任务 3.1 质量反哺）：只有终态失败才写——retryCount >= maxRetries
+        // （或 maxRetries=0 无重试）时失败不能再经 failed→queued 重派（与 MCP retry 路径同一闸门）；
+        // 重试未耗尽的中间态失败不写教训，避免同一任务每次重试失败都重复归档
+        // （幂等标记 xuanji_lesson 亦兜底去重）。落库后尽力而为，失败不影响回写主流程。
+        if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
+          try {
+            await syncTaskLessonToXuanji(db, {
+              id: task.id,
+              taskId: task.taskId,
+              name: task.name,
+              description: task.description,
+              input: task.input,
+              output: outputText || null,
+              agentId: task.agentId,
+              status: "failed",
+              lifecycleStatus: "failed",
+              error: errorText ?? "Task execution failed",
+            });
+          } catch (error) {
+            // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
+            console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
 
         await this.recordEvent(task.id, "error", errorText || "Task execution failed", undefined, task.agentId ?? undefined);
 

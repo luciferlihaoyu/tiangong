@@ -118,6 +118,10 @@ export const alistRouter = createRouter({
         id: task.id,
         taskId: task.taskId,
         name: task.name,
+        // input/description 用于 importance 分级（显式 envelope 标记 + 关键词推断），
+        // 缺失会导致显式 important 的任务手动重传时不生成 highlights
+        input: task.input,
+        description: task.description,
         output: task.output,
         agentId: task.agentId,
       });

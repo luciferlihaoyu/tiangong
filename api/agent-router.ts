@@ -2,10 +2,10 @@ import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type Agent, type AgentCard } from "@db/schema";
-import { eq, like, and, or, isNotNull, isNull, sql, desc } from "drizzle-orm";
+import { eq, like, and, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
-import { getApprovalState, selectExecutableTask, type Db } from "./lib/execution-gate";
+import { claimNextTask } from "./lib/task-claim";
 
 type AgentNode = Agent & { children: AgentNode[] };
 type AgentCapability = AgentCard["capabilities"][number];
@@ -44,35 +44,9 @@ function isCapabilityLevel(value: unknown): value is AgentCapability["level"] {
 }
 
 /**
- * 查找该 Agent 可认领的 queued 任务（含通用任务 agentId=null）。
- * 执行审批闸门：高风险且未批准的任务被停放待审批（不会返回），
- * 已批准的高风险任务与低风险任务照常返回。
+ * 认领决策（findClaimableTask / isBudgetExhausted / claimNextTask）已抽到
+ * api/lib/task-claim.ts（单一事实源，MCP claim_task 工具与 tRPC 面共用）。
  */
-async function findClaimableTask(db: Db, agentId: number) {
-  const claimableTasks = await db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.status, "queued"), eq(tasks.agentId, agentId)))
-    .orderBy(desc(tasks.priority))
-    .limit(20);
-  const genericTasks = await db
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.status, "queued"), isNull(tasks.agentId)))
-    .orderBy(desc(tasks.priority))
-    .limit(20);
-  return selectExecutableTask(db, [...claimableTasks, ...genericTasks]);
-}
-
-/**
- * 预算熔断（任务 1.4）：预算已耗尽的 agent 是否应被暂停认领。
- * budgetCents <= 0 视为不限额。
- */
-function isBudgetExhausted(agent: { budgetCents: number | null; spentCents: number | null }): boolean {
-  const budgetCents = agent.budgetCents ?? 0;
-  const spentCents = agent.spentCents ?? 0;
-  return budgetCents > 0 && spentCents >= budgetCents;
-}
 
 export const agentRouter = createRouter({
   list: publicQuery.query(async () => {
@@ -277,61 +251,13 @@ export const agentRouter = createRouter({
 
       const db = getDb();
 
-      // 1. 查询 Agent 信息
-      const agentRows = await db
-        .select()
-        .from(agents)
-        .where(eq(agents.id, input.agentId));
-      const agent = agentRows[0];
-      if (!agent) {
+      // 认领序列（查 agent → 预算熔断 → 审批闸门选任务 → 置 running/claimed → busy）
+      // 走共享 lib api/lib/task-claim.ts（与 MCP claim_task 工具同一事实源）
+      const result = await claimNextTask(db, input.agentId);
+      if (result.reason === "agent_not_found") {
         throw new Error("Agent not found");
       }
-
-      // 任务级预算熔断（任务 1.4）：耗尽预算的 agent 不再认领新任务。
-      // 取舍说明：采用"轻量停放"——只跳过认领并返回原因，不把 queued 任务改成
-      // boardStatus=blocked。若停放为 blocked，预算恢复（管理员调高 budgetCents）后
-      // 还需一条人工/后台"解锁"路径任务才能重新可认领，容易引入新的死锁路径；
-      // 保持 queued 则预算一恢复即自动可认领，代价是任务面板上看不到"因预算停放"的标记。
-      if (isBudgetExhausted(agent)) {
-        return { task: null, reason: "budget_exhausted" };
-      }
-
-      // 2. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务）。
-      //    执行审批闸门在此拦截高风险任务（停放待审批），只有低风险或已批准的任务才会被认领。
-      const task = await findClaimableTask(db, input.agentId);
-
-      if (!task) {
-        return { task: null };
-      }
-
-      // 3. 认领任务：更新任务状态为 running，设置 agentId，A2A-lite lifecycle
-      await db
-        .update(tasks)
-        .set({
-          status: "running",
-          lifecycleStatus: "claimed",
-          agentId: input.agentId,
-          claimedAt: new Date(),
-        })
-        .where(eq(tasks.id, task.id));
-
-      // 4. 更新 Agent 状态为 busy
-      await db
-        .update(agents)
-        .set({ status: "busy" })
-        .where(eq(agents.id, input.agentId));
-
-      return {
-        task: {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          priority: task.priority,
-          approvalRequired: getApprovalState(task.input).required,
-        },
-      };
+      return result;
     }),
 
   updateHeartbeat: publicQuery
@@ -352,51 +278,19 @@ export const agentRouter = createRouter({
         .set({ lastHeartbeat: new Date(), status: "online" })
         .where(eq(agents.id, input.id));
 
-      // 2. 检查是否有 queued 任务可认领
-      const agentRows = await db
-        .select()
-        .from(agents)
-        .where(eq(agents.id, input.id));
-      const agent = agentRows[0];
+      // 2. 检查是否有 queued 任务可认领（认领序列走共享 lib api/lib/task-claim.ts，
+      //    与 claimTask / MCP claim_task 同一事实源；agent 不存在时安静返回无任务）
+      const result = await claimNextTask(db, input.id);
 
-      let claimedTask: { id: number; taskId: string; name: string; approvalRequired: boolean } | null = null;
-      let claimReason: "budget_exhausted" | null = null;
-
-      if (agent) {
-        // 任务级预算熔断（任务 1.4）：同 claimTask——轻量方案，只跳过认领并带原因，
-        // 不停放任务（不写 boardStatus），预算恢复后下一轮心跳即自动恢复认领。
-        if (isBudgetExhausted(agent)) {
-          claimReason = "budget_exhausted";
-        } else {
-          // 查找可认领的任务（执行审批闸门拦截高风险任务）
-          const bestTask = await findClaimableTask(db, input.id);
-
-          if (bestTask) {
-            // 自动认领，A2A-lite lifecycle
-            await db
-              .update(tasks)
-              .set({
-                status: "running",
-                lifecycleStatus: "claimed",
-                agentId: input.id,
-                claimedAt: new Date(),
-              })
-              .where(eq(tasks.id, bestTask.id));
-
-            await db
-              .update(agents)
-              .set({ status: "busy" })
-              .where(eq(agents.id, input.id));
-
-            claimedTask = {
-              id: bestTask.id,
-              taskId: bestTask.taskId,
-              name: bestTask.name,
-              approvalRequired: getApprovalState(bestTask.input).required,
-            };
+      const claimedTask: { id: number; taskId: string; name: string; approvalRequired: boolean } | null = result.task
+        ? {
+            id: result.task.id,
+            taskId: result.task.taskId,
+            name: result.task.name,
+            approvalRequired: result.task.approvalRequired,
           }
-        }
-      }
+        : null;
+      const claimReason: "budget_exhausted" | null = result.reason === "budget_exhausted" ? "budget_exhausted" : null;
 
       // claimReason 为新增的向后兼容字段（不耗尽预算时为 null；dsh-poller 只看 claimedTask）
       return { success: true, claimedTask, claimReason };

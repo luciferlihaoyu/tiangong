@@ -37,6 +37,17 @@
  *   - usage：见 DSH_MODEL 说明；天宫侧按 model-pricing 折算成本写 token_usage 并
  *     递增 agent 预算消耗（spentCents），预算耗尽后天宫将不再向本 agent 派发新任务。
  *   注意：由本脚本认领的任务完成时需通过天宫的完成闸门（高风险任务除外）。
+ *
+ * MCP 协作模式（任务 2.1/2.2，轮询的进阶替代）：
+ *   本脚本走的是"心跳顺带认领"的轮询模式；除此之外，也可以把天宫直接配置为
+ *   dsh 的 MCP server（同一把 TIANGONG_MCP_KEY），让 dsh 在执行循环内主动回调：
+ *     - claim_task        主动认领下一个可执行任务（不必等下一轮心跳）
+ *     - report_progress   回写进度/结果（usage 记账 + artifacts 长产物 + 完成归档）
+ *     - submit_artifact   执行中途先交中间产物（完成时随 AList 归档一并带走）
+ *     - read_alist        读天宫 AList 网盘（仅限配置 basePath 内，防路径穿越）
+ *     - search_xuanji     检索璇玑长期记忆（执行前反查同类任务经验/失败教训）
+ *   执行循环内即取即用（认领 → 检索经验 → 执行 → 回写），替代纯轮询的被动等待；
+ *   轮询模式仍保留兼容，两者可并用（本脚本不依赖 MCP 工具面）。
  */
 
 const BASE = (process.env.TIANGONG_BASE_URL || "").replace(/\/+$/, "");

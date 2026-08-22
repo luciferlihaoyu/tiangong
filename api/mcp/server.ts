@@ -10,10 +10,18 @@
  * - 受控写操作（cancel_task）：任何有效 MCP Key 可用（不扩大既有权限）
  * - 管理写操作（预算/guard 白名单/授权）：需要 Key 的 permissions 含 "admin"；
  *   白名单与授权禁止 MCP Key 为其绑定的 Agent 自我授权
+ *
+ * Phase 2 扩展（执行面 + 知识面，任务 2.1/2.2 —— dsh 执行循环内可回调天宫）：
+ * - 执行面：claim_task / report_progress / submit_artifact —— 业务核心走共享 lib
+ *   （api/lib/task-claim.ts、api/lib/task-writeback.ts），与 tRPC 面同一事实源，
+ *   防止 MCP 工具面与 tRPC 面漂移
+ * - 知识面：read_alist（路径约束在配置 basePath 内防穿越）/ search_xuanji ——
+ *   与只读 ops 工具同权限级别（任何有效 Key 可用）
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { getDb } from "../queries/connection";
 import {
   agents,
@@ -27,11 +35,20 @@ import {
   highCostModelAuth,
   auditEvents,
   taskMessages,
+  taskArtifacts,
   type InsertHighCostModelAuth,
   type InsertModelAllowlist,
 } from "@db/schema";
 import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
+import { claimNextTask } from "../lib/task-claim";
+import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
+import { createTraceId } from "../lib/task-metadata";
+import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
+import { createXuanjiClient } from "../connectors/xuanji/service";
+import { SearchContextRequestSchema } from "../connectors/xuanji/types";
+import { XuanjiConnectorError } from "../connectors/xuanji/client";
+import { TraceIdSchema } from "../contracts/platform";
 
 // ─── Caller context (Key 身份 + 权限，由 transport 注入) ───
 
@@ -88,10 +105,65 @@ function failResult(error: string) {
   return textResult({ success: false, error });
 }
 
+/**
+ * Phase 2 执行面/知识面的失败结果：显式置 isError=true，
+ * 让调用方（dsh 执行循环）能机器判别失败并走重试/上报分支，
+ * 而不是把 { success:false } 当成正常载荷继续执行。
+ */
+function errorResult(error: string) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ success: false, error }, null, 2) }],
+    isError: true as const,
+  };
+}
+
 function adminDeniedResult() {
   return failResult(
     "此 MCP Key 缺少 admin 权限。请管理员在 MCP 面板为该 Key 的 permissions 字段添加 \"admin\"（mcp.updateKey）。"
   );
+}
+
+// ─── AList 路径安全（read_alist，任务 2.2） ───
+
+/** 视为"文本文件"的扩展名（仅为这类文件附带下载链接，避免对大目录逐文件探测） */
+const ALIST_TEXTUAL_EXTENSIONS = new Set([
+  "md", "mdx", "txt", "json", "csv", "log", "html", "htm", "xml",
+  "yaml", "yml", "toml", "ini", "conf", "env", "ts", "tsx", "js",
+  "jsx", "py", "go", "rs", "java", "sh", "sql",
+]);
+
+/** 单次调用最多为多少个文本文件解析下载链接（防止大目录打爆 AList /api/fs/get） */
+const ALIST_MAX_DOWNLOAD_LOOKUPS = 20;
+
+function isTextualFileName(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return false;
+  return ALIST_TEXTUAL_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * 把调用方的相对路径重定基到配置的 basePath 下，并确保结果仍在 basePath 内。
+ *
+ * 规则（任务 2.2 路径安全）：
+ *   - 任何 ".." 段直接拒绝（"../x"、"a/../../b"、"../../etc" 均被拦下）；
+ *   - 入参不以 AList 绝对路径解释，而是统一拼接到 basePath 之后
+ *     （requestPath = basePath === "/" ? path : basePath + path）；
+ *   - 最终防线：拼接结果必须等于 basePath 或以 basePath + "/" 开头，否则拒绝
+ *     （防任何形式的越出 basePath 的绝对/相对逃逸）。
+ *
+ * 返回 null 表示路径非法。
+ */
+function resolveAlistRequestPath(basePath: string, rawPath: string): string | null {
+  const segments = rawPath.split("/").filter((s) => s.length > 0);
+  if (segments.some((s) => s === "..")) return null;
+  const base = basePath === "/" ? "" : basePath.replace(/\/+$/, "");
+  const suffix = segments.length === 0 ? "" : `/${segments.join("/")}`;
+  const requestPath = `${base}${suffix}` || "/";
+  if (base === "") {
+    return requestPath.startsWith("/") ? requestPath : null;
+  }
+  if (requestPath !== base && !requestPath.startsWith(`${base}/`)) return null;
+  return requestPath;
 }
 
 // ─── Helpers (same as orchestration-router) ───
@@ -1193,6 +1265,187 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         .where(eq(highCostModelAuth.id, params.id));
 
       return textResult({ success: true, revoked: true, id: params.id });
+    }
+  );
+
+  // ═══════════════════════════════════════════
+  // TOOLS — Phase 2 扩展：执行面（任务 2.1，dsh 执行循环内可回调天宫）
+  // 业务核心走共享 lib（task-claim / task-writeback），与 tRPC 面同一事实源
+  // ═══════════════════════════════════════════
+
+  // Tool 23: 主动认领任务（替代纯轮询顺带认领）
+  server.tool(
+    "claim_task",
+    "[天宫] 主动认领下一个可执行任务（执行审批闸门拦截高风险任务；预算耗尽返回 reason）。绑定的 MCP Key 只能认领自己的 Agent",
+    {
+      agentId: z.number().describe("Agent ID"),
+    },
+    async (params) => {
+      // 权限收窄（与 agent.claimTask 同一原则）：绑定 Agent 的 Key 只能认领自己；
+      // env/admin Key（ctx.agentId === null）放行任意
+      if (ctx.agentId !== null && ctx.agentId !== params.agentId) {
+        return errorResult("FORBIDDEN：此 MCP Key 绑定的 Agent 与目标 Agent 不匹配");
+      }
+
+      const result = await claimNextTask(getDb(), params.agentId);
+      return textResult({ success: true, ...result });
+    }
+  );
+
+  // Tool 24: 回写任务进度/结果（与 task.updateProgress 同一事实源）
+  server.tool(
+    "report_progress",
+    "[天宫] 回写任务进度/结果：支持 usage 用量记账、artifacts 长产物通道；完成时自动触发统一归档（璇玑记忆 + AList）。绑定 Key 只能回写自己认领的任务",
+    { ...UpdateProgressInputSchema.shape },
+    async (params) => {
+      // actor 映射对齐 tRPC 语义：env/admin Key = -1（管理位，越权规则放行），
+      // 绑定 Key = agentId（> 0，与任务认领人不符即 FORBIDDEN）
+      const apiKeyAgentId = ctx.agentId === null ? -1 : ctx.agentId;
+      try {
+        const result = await reportTaskProgress(getDb(), params, { apiKeyAgentId });
+        return textResult(result);
+      } catch (error) {
+        // TRPCError（越权 FORBIDDEN 等）转机器可判别的 errorResult（isError=true）；
+        // 携带 TRPCError code 前缀，方便调用方按 FORBIDDEN/... 分支处理
+        if (error instanceof TRPCError) return errorResult(`${error.code}: ${error.message}`);
+        throw error;
+      }
+    }
+  );
+
+  // Tool 25: 执行中途提交单个产物（dsh 长任务未完成时先交中间产物）
+  server.tool(
+    "submit_artifact",
+    "[天宫] 执行中途提交单个任务产物（type=external_output，完成时随 AList 归档一并带走）。绑定 Key 只能给自己认领的任务提交产物",
+    {
+      taskId: z.number().describe("任务 ID（数字）"),
+      name: z.string().min(1).max(100).describe("产物名（如 full-output.md）"),
+      content: z.string().min(1).max(50_000).describe("产物内容"),
+      mimeType: z.string().max(50).optional().describe("MIME 类型（如 text/markdown）"),
+    },
+    async (params) => {
+      const db = getDb();
+      const task = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, params.taskId))
+        .then((r) => r[0]);
+
+      if (!task) return errorResult("任务不存在");
+      if (task.status !== "running" && task.status !== "pending" && task.status !== "queued") {
+        return errorResult(`任务已处于终态 ${task.status}，不可再提交产物`);
+      }
+      // 越权防护（任务 1.4/1.5 同一原则）：绑定 Agent 的 Key 不得给他人任务灌产物；
+      // env/admin Key（ctx.agentId === null）放行
+      if (ctx.agentId !== null && ctx.agentId > 0 && ctx.agentId !== task.agentId) {
+        return errorResult("FORBIDDEN：此 MCP Key 绑定的 Agent 与任务认领人不匹配，禁止提交产物");
+      }
+
+      await db.insert(taskArtifacts).values({
+        taskId: task.id,
+        agentId: task.agentId ?? null,
+        type: "external_output",
+        name: params.name,
+        content: params.content,
+        mimeType: params.mimeType ?? null,
+      });
+
+      return textResult({ success: true, taskId: task.id, name: params.name, type: "external_output" });
+    }
+  );
+
+  // ═══════════════════════════════════════════
+  // TOOLS — Phase 2 扩展：知识面（任务 2.2，任何有效 Key 可用，与只读 ops 工具同权限级别）
+  // ═══════════════════════════════════════════
+
+  // Tool 26: 读 AList（仅限配置 basePath 内，防路径穿越）
+  server.tool(
+    "read_alist",
+    "[天宫] 列出 AList 网盘目录（仅限配置的 basePath 内；拒绝 \"..\" 等路径穿越），文本文件附下载链接",
+    {
+      path: z.string().max(1000).optional().default("/").describe("相对 basePath 的目录路径（默认根目录 \"/\"）"),
+    },
+    async (params) => {
+      const cfg = await resolveAlistConfig();
+      if (!cfg) return errorResult("AList 未配置");
+
+      const requestPath = resolveAlistRequestPath(cfg.basePath, params.path ?? "/");
+      if (requestPath === null) {
+        return errorResult(`非法路径：${params.path}（禁止 ".." 段或越出 basePath 的路径）`);
+      }
+
+      let files;
+      try {
+        files = await alistList(cfg, requestPath);
+      } catch (e) {
+        return errorResult(e instanceof Error ? e.message : "AList 列目录失败");
+      }
+
+      // 文本文件附下载链接（尽力而为，单次最多探测 ALIST_MAX_DOWNLOAD_LOOKUPS 个）
+      let lookups = 0;
+      const enriched = await Promise.all(
+        files.map(async (f) => {
+          if (f.isDir || !isTextualFileName(f.name) || lookups >= ALIST_MAX_DOWNLOAD_LOOKUPS) {
+            return { ...f, downloadUrl: null };
+          }
+          lookups += 1;
+          try {
+            return { ...f, downloadUrl: await alistDownloadUrl(cfg, f.path) };
+          } catch {
+            return { ...f, downloadUrl: null };
+          }
+        })
+      );
+
+      return textResult({ success: true, basePath: cfg.basePath, path: requestPath, files: enriched });
+    }
+  );
+
+  // Tool 27: 检索璇玑长期记忆（执行前反查同类任务经验/失败教训）
+  server.tool(
+    "search_xuanji",
+    "[天宫] 检索璇玑长期记忆（keyword/vector/hybrid 三模式），执行任务前反查同类任务经验与失败教训",
+    {
+      query: z.string().min(1).max(1000).describe("检索词"),
+      mode: z.enum(["keyword", "vector", "hybrid"]).optional().default("hybrid").describe("检索模式（默认 hybrid）"),
+      limit: z.number().int().min(1).max(50).optional().default(5).describe("返回条数（默认 5）"),
+      taskId: z.string().min(1).max(64).optional().describe("关联任务 ID（用于链路追踪，可选）"),
+      traceId: TraceIdSchema.optional().describe("复用已有 traceId（可选，缺省自动生成）"),
+      filters: z
+        .object({
+          project: z.string().min(1).max(200).optional().describe("按项目过滤"),
+          tags: z.array(z.string().min(1).max(100)).optional().describe("按标签过滤"),
+          types: z.array(z.string().min(1).max(100)).optional().describe("按文档类型过滤"),
+        })
+        .optional()
+        .describe("检索过滤条件（可选）"),
+    },
+    async (params) => {
+      const client = createXuanjiClient();
+      if (!client) return errorResult("璇玑未配置");
+
+      // 入参对齐 SearchContextRequestSchema；trace 由工具侧自动补齐
+      //（调用方只需给 query/mode/limit，不必手工编造 traceId）
+      const input = SearchContextRequestSchema.parse({
+        query: params.query,
+        mode: params.mode,
+        limit: params.limit,
+        ...(params.filters ? { filters: params.filters } : {}),
+        trace: {
+          traceId: params.traceId ?? createTraceId(),
+          taskId: params.taskId ?? "mcp-search",
+          agentId: ctx.agentId !== null ? String(ctx.agentId) : `mcp-key:${ctx.apiKeyId}`,
+          originSystem: "tiangong",
+        },
+      });
+
+      try {
+        const data = await client.searchContext(input);
+        return textResult({ success: true, ...data });
+      } catch (error) {
+        if (error instanceof XuanjiConnectorError) return errorResult(error.message);
+        throw error;
+      }
     }
   );
 

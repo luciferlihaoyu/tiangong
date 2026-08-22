@@ -1,16 +1,14 @@
 // allow: SIZE_OK — Legacy monolithic tRPC router; this slice only wires create metadata to avoid broad refactoring.
 import { z } from "zod";
-import { TRPCError } from "@trpc/server";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts } from "@db/schema";
 import { eq, desc, asc, and, or, like, sql, isNotNull } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
-import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { mergeTaskMetadata, parseTaskMetadata } from "./lib/task-metadata";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
-import { recordExternalUsage } from "./lib/external-usage";
+import { reportTaskProgress, UpdateProgressInputSchema } from "./lib/task-writeback";
 
 export const taskRouter = createRouter({
   list: publicQuery
@@ -204,144 +202,13 @@ export const taskRouter = createRouter({
     }),
 
   updateProgress: authedQuery
-    .input(
-      z.object({
-        id: z.number(),
-        progress: z.number().min(0).max(100),
-        status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
-        lifecycleStatus: z.enum([
-          "created", "queued", "claimed", "dispatched", "accepted", "working",
-          "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
-        ]).optional(),
-        output: z.string().optional(),
-        error: z.string().optional(),
-        // 任务 1.4：外部执行体上报的本次任务模型用量（完成时入账，尽力而为）
-        usage: z
-          .object({
-            model: z.string().min(1).max(100),
-            promptTokens: z.number().int().min(0).max(10_000_000),
-            completionTokens: z.number().int().min(0).max(10_000_000),
-            cachedPromptTokens: z.number().int().min(0).max(10_000_000).optional(),
-          })
-          .optional(),
-        // 任务 1.5：长产物通道——逐条写 task_artifacts 后由 alist-sync 的遍历逻辑
-        // 自动上传（它会上传所有 content 非空且 type 非 alist_sync/xuanji_memory 的行）
-        artifacts: z
-          .array(
-            z.object({
-              name: z.string().min(1).max(100),
-              content: z.string().min(1).max(50_000),
-              mimeType: z.string().max(50).optional(),
-            })
-          )
-          .max(5)
-          .optional(),
-      })
-    )
+    .input(UpdateProgressInputSchema)
     .mutation(async ({ input, ctx }) => {
-      const db = getDb();
-      const taskRow = await db
-        .select()
-        .from(tasks)
-        .where(eq(tasks.id, input.id))
-        .then((r) => r[0]);
-
-      if (taskRow?.originSystem === "beidou") {
-        return { success: false, error: "External tasks reject weak updateProgress mutations" };
-      }
-      if (taskRow && (taskRow.status === "done" || taskRow.status === "failed" || ["completed", "failed", "timeout", "cancelled"].includes(taskRow.lifecycleStatus ?? ""))) {
-        return { success: false, error: "Terminal task state is immutable" };
-      }
-
-      // 越权防护（任务 1.4/1.5）：MCP Key 绑定的 agent 与任务认领人不符时，
-      // 禁止借他人任务提交 usage/artifacts（防止 A 的 Key 给 B 的任务灌假账/产物）。
-      // 登录用户（apiKeyAgentId=null）与管理型 Key（-1，未绑定 agent，同 claimTask 权限模型）放行。
-      if (taskRow && (input.usage !== undefined || input.artifacts !== undefined)) {
-        if (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0 && ctx.apiKeyAgentId !== taskRow.agentId) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "MCP Key 绑定的 Agent 与任务认领人不匹配，禁止提交 usage/artifacts",
-          });
-        }
-      }
-
-      // 执行审批闸门：高风险任务不得通过 updateProgress 强制完成（connector 不得 self-approve）
-      if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
-        const gate = checkCompletionGate(taskRow);
-        if (gate.status === "blocked") {
-          await parkTaskForApproval(db, taskRow, { requiresApproval: true, riskTypes: gate.riskTypes });
-          return { success: false, error: gate.reason };
-        }
-      }
-
-      const update: Record<string, unknown> = { progress: input.progress };
-      if (input.status) update.status = input.status;
-      if (input.lifecycleStatus) update.lifecycleStatus = input.lifecycleStatus;
-      if (input.output !== undefined) update.output = input.output;
-      if (input.error !== undefined) update.error = input.error;
-      await db.update(tasks).set(update).where(eq(tasks.id, input.id));
-
-      // 长产物通道（任务 1.5）：逐条写 task_artifacts。必须在 finalizeCompletedTask 之前落库，
-      // 这样完成时的 alist-sync 遍历才会把它们一并上传网盘。
-      if (taskRow && input.artifacts?.length) {
-        for (const artifact of input.artifacts) {
-          await db.insert(taskArtifacts).values({
-            taskId: taskRow.id,
-            agentId: taskRow.agentId ?? null,
-            type: "external_output",
-            name: artifact.name,
-            content: artifact.content,
-            mimeType: artifact.mimeType ?? null,
-          });
-        }
-      }
-
-      // 完成任务（通过审批闸门后）→ 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
-      if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
-        // 外部用量记账（任务 1.4）：完成时把执行体上报的 token 用量折算入账
-        // （写 token_usage + 原子递增 agents.spentCents，尽力而为，失败不影响完成）
-        if (input.usage) {
-          await recordExternalUsage(db, {
-            taskId: taskRow.id,
-            agentId: taskRow.agentId,
-            model: input.usage.model,
-            promptTokens: input.usage.promptTokens,
-            completionTokens: input.usage.completionTokens,
-            cachedPromptTokens: input.usage.cachedPromptTokens,
-            source: "external",
-          });
-        }
-        await finalizeCompletedTask(db, {
-          id: taskRow.id,
-          taskId: taskRow.taskId,
-          name: taskRow.name,
-          description: taskRow.description,
-          input: taskRow.input,
-          output: input.output ?? taskRow.output,
-          agentId: taskRow.agentId,
-          status: "done",
-          lifecycleStatus: input.lifecycleStatus ?? "completed",
-        });
-      }
-      // 通知 Dashboard：任务状态变更
-      const t = await db.select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId }).from(tasks).where(eq(tasks.id, input.id)).then(r => r[0]);
-      wsManager.broadcastToDashboard({
-        type: "task_update",
-        action: "updated",
-        id: input.id,
-        taskId: t?.taskId,
-        name: t?.name,
-        status: input.status,
-        progress: input.progress,
-        agentId: t?.agentId,
-        timestamp: new Date().toISOString(),
-      });
-
-      if (input.status === "done" || input.status === "failed") {
-        await emitCollabSummaryForTask(input.id);
-      }
-
-      return { success: true };
+      // 业务核心（beidou 拒绝 / 终态不可变 / 越权 FORBIDDEN / 完成闸门 / artifacts /
+      // 用量记账 / 统一归档 / 广播）走共享 lib api/lib/task-writeback.ts
+      //（与 MCP report_progress 工具同一事实源）。TRPCError 从 lib 抛出会正常
+      // 穿透 tRPC 错误处理，行为与原先一致。
+      return reportTaskProgress(getDb(), input, { apiKeyAgentId: ctx.apiKeyAgentId });
     }),
 
   /**

@@ -43,7 +43,7 @@ import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
-import { assertTaskWriteAuthorized, isTaskArtifactInsertable } from "../lib/task-authz";
+import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
 import { createTraceId } from "../lib/task-metadata";
 import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
 import { createXuanjiClient } from "../connectors/xuanji/service";
@@ -1304,6 +1304,10 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       const apiKeyAgentId = ctx.agentId === null ? -1 : ctx.agentId;
       try {
         const result = await reportTaskProgress(getDb(), params, { apiKeyAgentId });
+        // 业务失败（beidou 拒绝 / 终态不可变 / 闸门停放 / 任务不存在）统一置 isError，
+        // 让 dsh 机器判别失败并走重试/上报分支，而不是把 { success:false } 当正常载荷继续执行
+        // （评审 minor ⑦）。TRPCError（越权 FORBIDDEN 等）由下方 catch 同样转 errorResult。
+        if (!result.success) return errorResult(result.error);
         return textResult(result);
       } catch (error) {
         // TRPCError（越权 FORBIDDEN 等）转机器可判别的 errorResult（isError=true）；
@@ -1333,10 +1337,15 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         .then((r) => r[0]);
 
       // 任务可插入性 / 越权 / beidou 拒绝：单一事实源（2.1+2.2 评审 minor 抽 helper）
-      const insertableError = isTaskArtifactInsertable(task);
+      const insertableError = getArtifactInsertabilityError(task);
       if (insertableError) return errorResult(insertableError);
-      const authz = assertTaskWriteAuthorized(ctx.agentId, task);
-      if (!authz.ok) return errorResult(authz.error);
+      // 越权封装（评审 minor ⑥）：拒绝时返回 isError 结果，放行返回 null
+      const authzDenied = assertTaskWriteAuthorizedOrMcp(checkTaskWriteAuthorized(ctx.agentId, task));
+      if (authzDenied) return authzDenied;
+      // 字节上限校验（评审 minor ③）：contract 只限字符数不限字节，MySQL TEXT 64KB 会被
+      // UTF-8 中文撑爆——insert 前按字节拒绝（不截断，让 dsh 机器看到失败而非静默丢失）
+      const tooLargeError = getArtifactContentTooLargeError(params.content);
+      if (tooLargeError) return errorResult(tooLargeError);
 
       await db.insert(taskArtifacts).values({
         taskId: task.id,

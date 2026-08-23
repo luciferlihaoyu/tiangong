@@ -295,6 +295,127 @@ describe("report_progress", () => {
     expect(payload.success).toBe(true);
     expect(db.rowsOfTable(schema.tasks).find((t) => t.id === 7)!.progress).toBe(50);
   });
+
+  it("env-only Key（ctx.agentId=null → actor=-1 管理位）可为他人 agent 的任务提交 usage/artifacts，不被 FORBIDDEN", async () => {
+    // 判别性：-1 映射真实生效——agent 17 的任务 + env-only Key（无 admin 权限、未绑定具体 agent）。
+    // 若 -1 被误当作"未授权"或越权规则漏放行，usage/artifacts 提交会被 FORBIDDEN；
+    // 正确语义是管理位放行：usage 归 agent 17、artifacts 落库、完成归档照常。
+    seedTask({ agentId: 17 });
+
+    const { isError, payload } = await callTool(
+      "report_progress",
+      {
+        id: 7,
+        progress: 100,
+        status: "done",
+        lifecycleStatus: "completed",
+        output: "ok",
+        usage: { model: "test-model", promptTokens: 500, completionTokens: 500 },
+        artifacts: [{ name: "full-output.md", content: "全量输出", mimeType: "text/markdown" }],
+      },
+      PLAIN_CTX // env-only Key：agentId=null → apiKeyAgentId=-1（管理位）
+    );
+    expect(isError).toBe(false);
+    expect(payload.success).toBe(true);
+
+    // usage 正确归 agent 17（不因 actor=-1 而丢弃）
+    const usageRows = db.rowsOfTable(schema.tokenUsage);
+    expect(usageRows).toHaveLength(1);
+    expect(usageRows[0]).toMatchObject({ taskId: 7, agentId: 17, provider: "external", source: "external" });
+
+    // artifacts 落库归 agent 17
+    const artifactRows = db.rowsOfTable(schema.taskArtifacts);
+    expect(artifactRows).toHaveLength(1);
+    expect(artifactRows[0]).toMatchObject({ taskId: 7, agentId: 17, type: "external_output" });
+
+    // 完成路径统一归档照常
+    expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(1);
+  });
+
+  it("report_progress artifacts 含超字节产物 → isError 拒绝且不落任何 artifacts/不推进终态", async () => {
+    // 与 submit_artifact 同源：长产物通道逐条写 task_artifacts 前同样按字节校验，
+    // 超限即拒绝（PAYLOAD_TOO_LARGE → MCP 面转 isError），不截断不静默丢失。
+    seedTask();
+    const content = "汉".repeat(50_000);
+
+    const { isError, payload } = await callTool(
+      "report_progress",
+      {
+        id: 7,
+        progress: 100,
+        status: "done",
+        lifecycleStatus: "completed",
+        artifacts: [{ name: "huge.md", content }],
+      },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("字节");
+    expect(db.rowsOfTable(schema.taskArtifacts)).toHaveLength(0);
+    // 校验前置：任务不被推进到终态
+    expect(db.rowsOfTable(schema.tasks).find((t) => t.id === 7)!.status).toBe("running");
+  });
+
+  it("beidou 外系统任务回写 → isError（业务失败机器可判别，不走 textResult 正常载荷）", async () => {
+    // 评审 minor ⑦：beidou origin 拒绝此前走 textResult（无 isError），dsh 机器把
+    // { success:false } 当正常载荷继续执行——业务失败也必须置 isError。
+    seedTask({ originSystem: "beidou" });
+
+    const { isError, payload } = await callTool(
+      "report_progress",
+      { id: 7, progress: 50, status: "running" },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("External tasks");
+    expect(db.rowsOfTable(schema.taskArtifacts)).toHaveLength(0);
+  });
+
+  it("完成闸门停放 → isError（任务推进 done 被拒）", async () => {
+    // 评审 minor ⑦：闸门停放此前走 textResult（无 isError）；置 isError 让 dsh 判别失败。
+    // 审批要求的任务（routing.approvalRequired=true 且未批准）不得经 report_progress 强制完成。
+    seedTask({
+      input: JSON.stringify({
+        payload: "高风险操作",
+        metadata: {
+          traceId: "trc_gate01_abcdefgh",
+          taskType: "triage_task",
+          origin: { system: "mcp" },
+          routing: { candidateAgentIds: [], approvalRequired: true, riskTypes: ["zeabur_deploy"] },
+          policies: {},
+          knowledgeRefs: [],
+          artifactRefs: [],
+        },
+      }),
+    });
+
+    const { isError, payload } = await callTool(
+      "report_progress",
+      { id: 7, progress: 100, status: "done", lifecycleStatus: "completed" },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.success).toBe(false);
+    // 闸门理由（含 "human approval" / blocked 语义）——评审说明写的 "budget/exhausted"
+    // 与实际 checkCompletionGate 文案不符，此处断言真实 gate 理由
+    expect(payload.error).toContain("human approval");
+    expect(db.rowsOfTable(schema.tasks).find((t) => t.id === 7)!.status).toBe("pending");
+  });
+
+  it("任务不存在 → isError（回写不存在任务也判别失败，不再静默 success）", async () => {
+    // 评审 minor ⑦：此前 report_progress 对不存在任务静默返回 success:true（no-op），
+    // dsh 机器误以为已生效；补"任务不存在"业务失败并置 isError。
+    const { isError, payload } = await callTool(
+      "report_progress",
+      { id: 999, progress: 50, status: "running" },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("任务不存在");
+  });
 });
 
 // ─── 任务 2.1：submit_artifact ───
@@ -370,6 +491,39 @@ describe("submit_artifact", () => {
     );
     expect(isError).toBe(true);
     expect(payload.error).toContain("External tasks");
+    expect(db.rowsOfTable(schema.taskArtifacts)).toHaveLength(0);
+  });
+
+  it("submit_artifact：1 万中文字符（约 30KB 字节）在 MySQL TEXT 64KB 字节限内可正常提交", async () => {
+    seedTask();
+    const content = "汉".repeat(10_000);
+
+    const { isError, payload } = await callTool(
+      "submit_artifact",
+      { taskId: 7, name: "big-cn.md", content, mimeType: "text/markdown" },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(false);
+    expect(payload.success).toBe(true);
+    const rows = db.rowsOfTable(schema.taskArtifacts);
+    expect(rows).toHaveLength(1);
+    expect((rows[0].content as string).length).toBe(10_000);
+  });
+
+  it("submit_artifact：5 万中文字符（约 150KB 字节）超过 TEXT 64KB 上限 → isError 拒绝且不落库", async () => {
+    // contract z.string().max(50_000) 限字符数但不限字节；UTF-8 中文 3 字节/字，
+    // 5 万字符 = 150KB 远超 MySQL TEXT 64KB 上限——必须在 insert 前按字节拒绝（不截断）。
+    seedTask();
+    const content = "汉".repeat(50_000);
+
+    const { isError, payload } = await callTool(
+      "submit_artifact",
+      { taskId: 7, name: "huge-cn.md", content },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("字节");
     expect(db.rowsOfTable(schema.taskArtifacts)).toHaveLength(0);
   });
 });

@@ -13,6 +13,7 @@ import { and, eq, gt, lte } from "drizzle-orm";
 import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
+import { syncTaskLessonToXuanji } from "../xuanji-sync";
 import type { Db } from "./db";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -55,6 +56,26 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         entityId: task.id,
         metadata: { taskId: task.taskId },
       });
+      // 失败教训写璇玑（3.1 质量反哺）：lifecycle sweeper 的超时是 orchestration 路径的终态
+      // （任务真的超时无响应、重试耗尽），非执行失败，但同样归档教训供同类任务检索规避。
+      // 错误文案带超时上下文；agentId 归任务行（无执行代理时归 0）；xuanji_lesson 幂等标记
+      // 兜底去重（sweeper 周期性运行，同一任务至多归档一次）。尽力而为，失败绝不影响 sweeper。
+      try {
+        await syncTaskLessonToXuanji(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          output: task.output,
+          agentId: task.agentId ?? 0,
+          status: "failed",
+          lifecycleStatus: "failed",
+          error: `任务超时未响应（timeout ${(task.timeoutMs ?? DEFAULT_TIMEOUT_MS)}ms）`,
+        });
+      } catch (error) {
+        console.warn(`[task-lifecycle] xuanji lesson sync failed for task ${task.taskId}: ${describeError(error)}`);
+      }
     }
   }
 
@@ -73,4 +94,8 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
       metadata: { count: recentFailed.length },
     });
   }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

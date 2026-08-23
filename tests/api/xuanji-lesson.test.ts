@@ -84,14 +84,15 @@ vi.mock("../../api/connectors/xuanji/service", () => ({
   createXuanjiClient: xuanjiMocks.createXuanjiClient,
 }));
 
-vi.mock("../../api/ws-manager", () => ({
-  wsManager: {
-    broadcastToDashboard: vi.fn(),
-    broadcast: vi.fn(),
-    sendToAgent: vi.fn(),
-    isOnline: vi.fn(() => false),
-  },
+// wsManager 以 hoisted 对象暴露：catch 兜底分支用例需要让领取后的广播"意外抛错"
+// 来驱动 task-runner 的 try/catch 兜底路径（执行过程意外抛错 → 落 failed + 写教训）。
+const wsMocks = vi.hoisted(() => ({
+  broadcastToDashboard: vi.fn(),
+  broadcast: vi.fn(),
+  sendToAgent: vi.fn(),
+  isOnline: vi.fn(() => false),
 }));
+vi.mock("../../api/ws-manager", () => ({ wsManager: wsMocks }));
 
 vi.mock("../../api/lib/collaboration-events", () => ({
   emitCollabSummaryForTask: vi.fn().mockResolvedValue(undefined),
@@ -488,6 +489,55 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     });
 
     // Then：任务照样落 failed 终态，但教训不写
+    expect(
+      dbMocks.updateSets.some((set) => set.status === "failed")
+    ).toBe(true);
+    expect(xuanjiMocks.createXuanjiClient).not.toHaveBeenCalled();
+    expect(xuanjiMocks.client.writeTaskMemory).not.toHaveBeenCalled();
+    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(false);
+  });
+
+  it("Given 执行过程意外抛错（catch 兜底路径）且重试已耗尽, When claimAndExecute, Then 写入含 Runner internal error 的失败教训", async () => {
+    // Given：领取确认回读 + 领取后的状态广播意外抛错（驱动 try/catch 兜底路径）
+    xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
+    xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
+    dbMocks.queueSelectResults([[claimedRow]]);
+    wsMocks.broadcastToDashboard.mockImplementationOnce(() => {
+      throw new Error("broadcast boom");
+    });
+
+    // When
+    await (taskRunner as unknown as { claimAndExecute(task: DbRow): Promise<void> }).claimAndExecute(runnerTask);
+
+    // Then：任务落 failed 终态，教训恰好一次，error 带 Runner internal error 语义
+    expect(
+      dbMocks.updateSets.some((set) => set.status === "failed" && String(set.error ?? "").includes("Runner internal error"))
+    ).toBe(true);
+    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
+    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
+    expect(writeCall?.memory.title).toBe("失败教训：爬取外部数据源");
+    expect(writeCall?.task.status).toBe("failed");
+    expect(String(writeCall?.memory.summary ?? "")).toContain("Runner internal error");
+    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+  });
+
+  it("Given 执行过程意外抛错但重试未耗尽, When claimAndExecute, Then 不写失败教训（等待重派）", async () => {
+    // Given
+    xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
+    xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
+    dbMocks.queueSelectResults([[claimedRow]]);
+    wsMocks.broadcastToDashboard.mockImplementationOnce(() => {
+      throw new Error("broadcast boom");
+    });
+
+    // When
+    await (taskRunner as unknown as { claimAndExecute(task: DbRow): Promise<void> }).claimAndExecute({
+      ...runnerTask,
+      retryCount: 0,
+      maxRetries: 3,
+    });
+
+    // Then：任务照样落 failed 终态（catch 兜底），但教训不写
     expect(
       dbMocks.updateSets.some((set) => set.status === "failed")
     ).toBe(true);

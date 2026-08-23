@@ -41,7 +41,17 @@
 - ⑤ `api/a2a-router.ts` fail/timeout 路径挂 `syncTaskLessonToXuanji` 教训钩子（与 task-runner / task-writeback / taskboard 模式对齐，agentId 归任务认领人）
 - ⑥ `mcp-execution-tools.test.ts` mock 补 `syncTaskLessonToXuanji` 桩防未来 failed 用例静默走 TypeError 兜底
 
-**当前剩余 minor（8 条）**：actor -1 映射缺判别性测试；submit_artifact 与 task-writeback 的产物插入 helper 已抽，越权 helper 也已抽，剩余是两个 return shape（errorResult vs TRPCError）的统一封装待抽；report_progress 业务失败未统一 isError；两个范围外失败路径（task-runner catch 分支、task-lifecycle sweeper 超时终态）未挂教训钩子；task-runner 重试未耗尽的首败若无人重派则不留教训（设计取舍）；50K CJK vs MySQL TEXT 64KB 字节加固；helper 命名口味微调（`assert...` vs 实际 return bool）。
+**评审 minor 8 项收尾（一次性合并完成）已实施**：
+- ① `api/lib/task-runner.ts` catch 兜底加教训钩子（retryCount>=maxRetries 才挂）
+- ② `api/lib/sweepers/task-lifecycle.ts` 超时终态加教训钩子（无循环依赖——xuanji-sync 不反向依赖 sweepers）
+- ③ `api/lib/task-authz.ts` `getArtifactContentTooLargeError`：60_000 字节上限（TEXT 64KB - 4KB 余量），超限**拒绝**不截断（dsh 机器立即看到失败、可拆分）
+- ④ `api/lib/task-runner.ts` `recordTianshuUsage` 私有改顶层 `recordTianshuUsageForTask`，SQL `COALESCE(spentCents,0)+?` 原子递增，6 直接单测
+- ⑤ env-only Key（actor=-1）给他人任务提交 usage/artifacts 不被 FORBIDDEN 的判别性测试
+- ⑥ `api/lib/task-authz.ts` 新增 `assertTaskWriteAuthorizedOrThrow` / `assertTaskWriteAuthorizedOrMcp` 两 helper，MCP/tRPC 单一事实源（防漂移）
+- ⑦ `api/mcp/server.ts` report_progress 业务失败（beidou/终态/闸门停放/任务不存在）统一 isError——补"任务不存在"是真 bug 修复（原代码静默 success:true）
+- ⑧ `assertTaskWriteAuthorized` → `checkTaskWriteAuthorized`、`isTaskArtifactInsertable` → `getArtifactInsertabilityError`，全调用点同步
+
+至此 SPEC 闭环 + 收尾全部完成，**遗留清单清零**。仓库状态：5 个 commit、51 文件 444 测试绿、tsc/eslint 0 error。
 
 ---
 

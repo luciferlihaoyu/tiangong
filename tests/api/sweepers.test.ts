@@ -73,11 +73,14 @@ vi.mock("../../api/lib/taskboard-notify", () => ({
 
 const xuanjiMocks = vi.hoisted(() => ({
   syncTaskMemoryToXuanji: vi.fn(async () => ({ synced: true, reason: "written" as const })),
+  syncTaskLessonToXuanji: vi.fn(async () => ({ synced: true, reason: "written" as const })),
 }));
 
 vi.mock("../../api/lib/xuanji-sync", () => ({
   XUANJI_MEMORY_ARTIFACT_TYPE: "xuanji_memory",
+  XUANJI_LESSON_ARTIFACT_TYPE: "xuanji_lesson",
   syncTaskMemoryToXuanji: xuanjiMocks.syncTaskMemoryToXuanji,
+  syncTaskLessonToXuanji: xuanjiMocks.syncTaskLessonToXuanji,
 }));
 
 const newApiMocks = vi.hoisted(() => ({
@@ -157,6 +160,42 @@ describe("sweepTaskTimeouts", () => {
     expect(timeouts[0]?.entityId).toBe(2);
     expect(timeouts[0]?.metadata).toMatchObject({ taskId: "T-EXH-1" });
     expect(auditEvents().filter((e) => e.event === "task:retry_storm")).toHaveLength(0);
+  });
+
+  it("超时重试耗尽落 failed 终态时，写入含超时上下文的失败教训（幂等标记兜底去重）", async () => {
+    // Given：running 超时且重试耗尽（orchestration 路径的终态失败）
+    const exhaustedTask: DbRow = {
+      id: 2,
+      taskId: "T-EXH-1",
+      name: "超时未响应的任务",
+      description: "上游迟迟无响应",
+      input: null,
+      output: null,
+      agentId: 16,
+      status: "running",
+      retryCount: 3,
+      maxRetries: 3,
+      timeoutMs: 300_000,
+      claimedAt: new Date(NOW.getTime() - 7_200_000),
+      updatedAt: new Date(NOW.getTime() - 7_200_000),
+    };
+    dbMocks.queueSelectResults([[exhaustedTask], []]);
+
+    // When
+    await sweepTaskTimeouts(mockDb, NOW);
+
+    // Then：落 failed 终态 + 教训恰好一次，error 带超时上下文，agentId 归任务行
+    expect(dbMocks.updateSets[0]?.status).toBe("failed");
+    expect(xuanjiMocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
+    const lessonTask = xuanjiMocks.syncTaskLessonToXuanji.mock.calls[0]?.[1] as DbRow | undefined;
+    expect(lessonTask).toMatchObject({
+      id: 2,
+      taskId: "T-EXH-1",
+      status: "failed",
+      lifecycleStatus: "failed",
+      agentId: 16,
+    });
+    expect(String(lessonTask?.error ?? "")).toContain("任务超时未响应");
   });
 
   it("skips running tasks still within their timeout", async () => {

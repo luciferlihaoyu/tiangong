@@ -638,16 +638,41 @@ class TaskRunner {
       console.error(`[TaskRunner] Fatal error executing task ${task.taskId}:`, e instanceof Error ? e.message : String(e));
       // 尝试回写失败状态
       try {
+        const internalError = `Runner internal error: ${e instanceof Error ? e.message : String(e)}`.slice(0, CONFIG.resultMaxChars);
         await db
           .update(tasks)
           .set({
             status: "failed",
             lifecycleStatus: "failed",
-            error: `Runner internal error: ${e instanceof Error ? e.message : String(e)}`.slice(0, CONFIG.resultMaxChars),
+            error: internalError,
             failedAt: new Date(),
             updatedAt: new Date(),
           })
           .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+
+        // 失败教训写璇玑（catch 兜底路径，与 result.success === false 路径同一闸门）：
+        // 执行过程"意外抛错"同样是终态失败，retryCount >= maxRetries 时才归档教训，
+        // 重试未耗尽的中间态失败不写，避免同一任务每次重试失败都重复归档（幂等标记亦兜底去重）。
+        // error 取本兜底写入的错误文案（Runner internal error，已按 resultMaxChars 截断）。
+        if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
+          try {
+            await syncTaskLessonToXuanji(db, {
+              id: task.id,
+              taskId: task.taskId,
+              name: task.name,
+              description: task.description,
+              input: task.input,
+              output: task.output,
+              agentId: task.agentId,
+              status: "failed",
+              lifecycleStatus: "failed",
+              error: internalError ?? "Task execution failed",
+            });
+          } catch (error) {
+            // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
+            console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
 
         await this.recordEvent(task.id, "error", `Runner internal error: ${e.message}`, undefined, task.agentId ?? undefined);
 
@@ -1068,7 +1093,7 @@ class TaskRunner {
       }
 
       // 尽力而为地记录 token 用量（定价/用量页面按任务与智能体归因成本；失败不影响任务结果）
-      await this.recordTianshuUsage(raw, model, task);
+      await recordTianshuUsageForTask(raw, model, task);
 
       return { output: text, error: null, success: true };
     } catch (e: unknown) {
@@ -1079,67 +1104,6 @@ class TaskRunner {
       return { output: "", error: `Tianshu request failed: ${e instanceof Error ? e.message : String(e)}`, success: false };
     } finally {
       clearTimeout(timer);
-    }
-  }
-
-  /**
-   * 解析天枢 chat completion 响应中的 usage 并写入 token_usage 表（尽力而为，绝不抛错）。
-   * 使定价/用量页面能按任务、按智能体归因天枢调用的成本。
-   */
-  private async recordTianshuUsage(
-    raw: string,
-    model: string,
-    task: typeof tasks.$inferSelect
-  ): Promise<void> {
-    try {
-      const parsed = JSON.parse(raw);
-      const usage = parsed?.usage;
-      if (!usage || typeof usage !== "object") return;
-
-      const promptTokens = Number(usage.prompt_tokens ?? 0) || 0;
-      const completionTokens = Number(usage.completion_tokens ?? 0) || 0;
-      if (promptTokens === 0 && completionTokens === 0) return;
-
-      // 缓存命中（DeepSeek/New API 风格字段，尽力解析）
-      const cachedPromptTokens =
-        Number(usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0) || 0;
-      const uncachedPromptTokens = Math.max(0, promptTokens - cachedPromptTokens);
-
-      // 分层定价模型按本次请求的实际上下文长度选档计价
-      const pricing = await resolveModelPricing(model, promptTokens);
-      const costResult = calculateCost(pricing, cachedPromptTokens, uncachedPromptTokens, completionTokens);
-
-      const db = getDb();
-      await db.insert(tokenUsage).values(
-        buildTokenUsageValues(
-          {
-            model,
-            provider: "tianshu",
-            promptTokens,
-            completionTokens,
-            cachedPromptTokens,
-            uncachedPromptTokens,
-            callCount: 1,
-            taskId: task.id,
-            agentId: task.agentId ?? undefined,
-            source: "runner",
-          },
-          costResult
-        )
-      );
-
-      // 与外部路径（recordExternalUsage）记账口径对齐：内部调用同样原子递增 agents.spentCents，
-      // 否则内部执行的任务只进 token_usage 不进预算消耗，guard 熔断同样失效。
-      // 成本单位换算：costMicros 为微美元，spentCents 为美分（1 美分 = 10,000 微美元）。
-      const spentCentsDelta = microsToCents(costResult.costMicros);
-      if (task.agentId && spentCentsDelta > 0) {
-        await db
-          .update(agents)
-          .set({ spentCents: sql`COALESCE(${agents.spentCents}, 0) + ${spentCentsDelta}` })
-          .where(eq(agents.id, task.agentId));
-      }
-    } catch (e) {
-      console.warn(`[TaskRunner] tianshu usage record failed for task ${task.taskId}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -1193,5 +1157,74 @@ class TaskRunner {
 }
 
 // ─── 单例 & 导出 ───
+
+/**
+ * 解析天枢 chat completion 响应中的 usage 并写入 token_usage 表 + 原子递增 agents.spentCents
+ * （尽力而为，绝不抛错，失败不影响任务结果）。
+ *
+ * 与外部路径（recordExternalUsage）记账口径对齐（1.4 P0）：内部 Runner 的天枢调用同样
+ * 原子递增 agents.spentCents，否则内部执行的任务只进 token_usage 不进预算消耗，guard 熔断失效。
+ *
+ * 抽出为模块顶层函数（而非 TaskRunner 私有方法）的原因：recordTianshuUsage 此前无直接单测
+ * （只能经 claimAndExecute 端到端触发，难以构造天枢响应），抽顶层后可传 fake db 直接断言
+ * token_usage 插入 1 行 + spentCents 原子递增（见 tests/api/record-tianshu-usage.test.ts）。
+ * db 参数缺省走 getDb()（生产路径不变）。
+ *
+ * 成本单位换算（见 external-usage.ts 头注释）：costMicros 为微美元，spentCents 为美分
+ * （1 美分 = 10,000 微美元）；SQL 为原子递增 `COALESCE(spentCents,0) + ?`，非 read-modify-write。
+ */
+export async function recordTianshuUsageForTask(
+  raw: string,
+  model: string,
+  task: Pick<typeof tasks.$inferSelect, "id" | "taskId" | "agentId">,
+  db: ReturnType<typeof getDb> = getDb()
+): Promise<void> {
+  try {
+    const parsed = JSON.parse(raw);
+    const usage = parsed?.usage;
+    if (!usage || typeof usage !== "object") return;
+
+    const promptTokens = Number(usage.prompt_tokens ?? 0) || 0;
+    const completionTokens = Number(usage.completion_tokens ?? 0) || 0;
+    if (promptTokens === 0 && completionTokens === 0) return;
+
+    // 缓存命中（DeepSeek/New API 风格字段，尽力解析）
+    const cachedPromptTokens =
+      Number(usage.prompt_cache_hit_tokens ?? usage.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0) || 0;
+    const uncachedPromptTokens = Math.max(0, promptTokens - cachedPromptTokens);
+
+    // 分层定价模型按本次请求的实际上下文长度选档计价
+    const pricing = await resolveModelPricing(model, promptTokens);
+    const costResult = calculateCost(pricing, cachedPromptTokens, uncachedPromptTokens, completionTokens);
+
+    await db.insert(tokenUsage).values(
+      buildTokenUsageValues(
+        {
+          model,
+          provider: "tianshu",
+          promptTokens,
+          completionTokens,
+          cachedPromptTokens,
+          uncachedPromptTokens,
+          callCount: 1,
+          taskId: task.id,
+          agentId: task.agentId ?? undefined,
+          source: "runner",
+        },
+        costResult
+      )
+    );
+
+    const spentCentsDelta = microsToCents(costResult.costMicros);
+    if (task.agentId && spentCentsDelta > 0) {
+      await db
+        .update(agents)
+        .set({ spentCents: sql`COALESCE(${agents.spentCents}, 0) + ${spentCentsDelta}` })
+        .where(eq(agents.id, task.agentId));
+    }
+  } catch (e) {
+    console.warn(`[TaskRunner] tianshu usage record failed for task ${task.taskId}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
 
 export const taskRunner = new TaskRunner();

@@ -25,7 +25,7 @@ import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-g
 import { finalizeCompletedTask } from "./task-finalize";
 import { recordExternalUsage } from "./external-usage";
 import { syncTaskLessonToXuanji } from "./xuanji-sync";
-import { assertTaskWriteAuthorized } from "./task-authz";
+import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
 
 /** updateProgress 入参（task-router 与 MCP report_progress 共用） */
 export const UpdateProgressInputSchema = z.object({
@@ -88,7 +88,13 @@ export async function reportTaskProgress(
     .where(eq(tasks.id, input.id))
     .then((r) => r[0]);
 
-  if (taskRow?.originSystem === "beidou") {
+  // 任务不存在（评审 minor ⑦）：此前回写不存在任务静默 success（no-op），调用方（dsh 机器）
+  // 误以为已生效；补"任务不存在"业务失败，MCP 面据此置 isError。
+  if (!taskRow) {
+    return { success: false, error: "任务不存在" };
+  }
+
+  if (taskRow.originSystem === "beidou") {
     return { success: false, error: "External tasks reject weak updateProgress mutations" };
   }
   if (taskRow && (taskRow.status === "done" || taskRow.status === "failed" || ["completed", "failed", "timeout", "cancelled"].includes(taskRow.lifecycleStatus ?? ""))) {
@@ -100,9 +106,19 @@ export async function reportTaskProgress(
   // 登录用户（apiKeyAgentId=null）与管理型 Key（-1，未绑定 agent，同 claimTask 权限模型）放行。
   // 逻辑已抽到 task-authz.ts（2.1+2.2 评审 minor 单一事实源），此处与 submit_artifact 共用。
   if (taskRow && (input.usage !== undefined || input.artifacts !== undefined)) {
-    const authz = assertTaskWriteAuthorized(actor.apiKeyAgentId, taskRow);
-    if (!authz.ok) {
-      throw new TRPCError({ code: "FORBIDDEN", message: authz.error });
+    // 越权封装（评审 minor ⑥）：拒绝时抛 FORBIDDEN TRPCError，放行无副作用
+    assertTaskWriteAuthorizedOrThrow(checkTaskWriteAuthorized(actor.apiKeyAgentId, taskRow));
+  }
+
+  // 字节上限校验（评审 minor ③）：长产物通道逐条写 task_artifacts 前先整体校验，
+  // 任何一条超限即整体拒绝（PAYLOAD_TOO_LARGE），避免任务状态已更新后才发现产物超限
+  // 造成半更新（不截断，让调用方看到失败而非静默数据丢失）。
+  if (taskRow && input.artifacts?.length) {
+    for (const artifact of input.artifacts) {
+      const tooLargeError = getArtifactContentTooLargeError(artifact.content);
+      if (tooLargeError) {
+        throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: tooLargeError });
+      }
     }
   }
 

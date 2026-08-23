@@ -31,13 +31,20 @@ vi.mock("../../api/lib/collaboration-events", () => ({
 }));
 
 // finalize 的两个归档接收端（真实 task-finalize 会调用它们——断言统一归档入口被走到）
+// 补 syncTaskLessonToXuanji 桩（3.1 评审 minor）：失败教训钩子挂点增多（task-writeback
+// 失败回写 / taskboard reject / a2a fail+timeout），未来若新增失败路径的测试用例
+// 不会因 import 报 undefined → TypeError 而静默走兜底分支。返回值 undefined
+// 表示调用方在调用前判空，行为与 xuanji-lesson.test.ts 的全 mock 隔离一致。
 const syncMocks = vi.hoisted(() => ({
   syncTaskMemoryToXuanji: vi.fn(),
+  syncTaskLessonToXuanji: vi.fn(),
   syncTaskArtifactsToAlist: vi.fn(),
 }));
 vi.mock("../../api/lib/xuanji-sync", () => ({
   syncTaskMemoryToXuanji: syncMocks.syncTaskMemoryToXuanji,
+  syncTaskLessonToXuanji: syncMocks.syncTaskLessonToXuanji,
   XUANJI_MEMORY_ARTIFACT_TYPE: "xuanji_memory",
+  XUANJI_LESSON_ARTIFACT_TYPE: "xuanji_lesson",
 }));
 vi.mock("../../api/lib/alist-sync", () => ({
   syncTaskArtifactsToAlist: syncMocks.syncTaskArtifactsToAlist,
@@ -147,6 +154,7 @@ beforeEach(() => {
   db = createFakeDb();
   connMocks.getDb.mockReturnValue(db);
   syncMocks.syncTaskMemoryToXuanji.mockResolvedValue(undefined);
+  syncMocks.syncTaskLessonToXuanji.mockResolvedValue(undefined);
   syncMocks.syncTaskArtifactsToAlist.mockResolvedValue(undefined);
 });
 
@@ -348,6 +356,21 @@ describe("submit_artifact", () => {
     );
     expect(isError).toBe(true);
     expect(payload.error).toContain("任务不存在");
+  });
+
+  it("beidou 外系统任务 → isError（应走 a2a 通道，禁止直接 submit_artifact）", async () => {
+    // 2.1+2.2 评审 minor 补漏：beidou origin 任务由 a2a 通道认领 / 回写产物，
+    // MCP submit_artifact 端点直接拒绝，防止绕过 beidou 自身鉴权与归档。
+    seedTask({ originSystem: "beidou" });
+
+    const { isError, payload } = await callTool(
+      "submit_artifact",
+      { taskId: 7, name: "x.md", content: "y" },
+      AGENT_BOUND_CTX
+    );
+    expect(isError).toBe(true);
+    expect(payload.error).toContain("External tasks");
+    expect(db.rowsOfTable(schema.taskArtifacts)).toHaveLength(0);
   });
 });
 

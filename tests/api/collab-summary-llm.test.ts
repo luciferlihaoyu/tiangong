@@ -359,4 +359,41 @@ describe("autoSummarizeCollab 集成 LLM 总结（开关开启）", () => {
     expect(externalUsageMocks.recordExternalUsage).toHaveBeenCalledTimes(1);
     expect(externalUsageMocks.recordExternalUsage.mock.calls[0]?.[1]?.agentId).toBe(0);
   });
+
+  // 3.2 评审 minor：子任务数 > 50 跳过 LLM 路径（成本 / token 上限防御）
+  it("Given 开关开 + 51 个子任务, When autoSummarizeCollab, Then 完全不走 LLM、不记账，沿用原机械模板", async () => {
+    // Given: 51 个已终态的子任务（模拟大批量协作场景）
+    const largeChildren = Array.from({ length: 51 }, (_, i) => ({
+      id: 200 + i,
+      taskId: `C2S-L${i.toString().padStart(2, "0")}`,
+      name: `子任务${i}`,
+      parentTaskId: 100,
+      agentId: 2,
+      status: "done" as const,
+      output: `结果${i}`,
+      error: null,
+    }));
+    dbMocks.queueSelectResults([
+      [], // 幂等闸
+      [parentRow], // 父任务
+      largeChildren, // 51 个子任务
+      agentRows,
+    ]);
+
+    // When
+    const result = await autoSummarizeCollab(100);
+
+    // Then: 汇总正常完成、但 LLM 零调用、记账零调用
+    expect(result).not.toBeNull();
+    expect(summarizerMocks.summarizeCollabWithTianshu).not.toHaveBeenCalled();
+    expect(externalUsageMocks.recordExternalUsage).not.toHaveBeenCalled();
+
+    // Then: 父任务 output 无 ## AI 总结 段（沿用原模板）
+    const parentOutput = String(dbMocks.updateSets[0]?.output ?? "");
+    expect(parentOutput).not.toContain("## AI 总结");
+    // Then: 51 个子任务的标题全部出现在汇总里（机械模板照常工作）
+    expect(parentOutput).toContain("51/51 完成");
+    expect(parentOutput).toContain("子任务0");
+    expect(parentOutput).toContain("子任务50");
+  });
 });

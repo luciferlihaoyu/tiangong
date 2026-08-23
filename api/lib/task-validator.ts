@@ -222,7 +222,17 @@ export async function autoSummarizeCollab(parentTaskId: number): Promise<CollabS
   // 任何失败（未配置 / 超时 / 解析失败 / 抛错）一律降级到上面的原机械模板，零失败风险。
   // 记账走 recordExternalUsage（任务 1.4 公共 helper），归因到父任务 agentId（汇总场景
   // 无固定 agent；父任务无 agent 时归属 0，与 memory-compensation sweeper 同口径）。
-  if (process.env.TIANGONG_SUMMARY_LLM_ENABLED === "true") {
+  //
+  // 子任务数 > 50 跳过 LLM 路径（3.2 评审 minor 防御）：经验阈值——
+  //   1) 子任务再多，LLM 一段总结的信息密度边际下降
+  //   2) prompt 体积随子任务数线性放大，超过一定量会撞天枢单 prompt token 上限
+  //   3) 单次 LLM 调用的成本与时延对大 N 场景不可接受
+  // 降级走与"未配置返回 null"同模式的 return，调用方按 null 走原机械模板，零破坏性。
+  if (process.env.TIANGONG_SUMMARY_LLM_ENABLED === "true" && childRows.length > 50) {
+    console.warn(
+      `[task-validator] 子任务数 ${childRows.length} > 50，跳过 LLM 总结，沿用原机械模板`
+    );
+  } else if (process.env.TIANGONG_SUMMARY_LLM_ENABLED === "true") {
     try {
       const childSummaries = childRows.map((c) => ({
         taskId: c.taskId,

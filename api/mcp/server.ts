@@ -43,6 +43,7 @@ import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
+import { assertTaskWriteAuthorized, isTaskArtifactInsertable } from "../lib/task-authz";
 import { createTraceId } from "../lib/task-metadata";
 import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
 import { createXuanjiClient } from "../connectors/xuanji/service";
@@ -1331,15 +1332,11 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         .where(eq(tasks.id, params.taskId))
         .then((r) => r[0]);
 
-      if (!task) return errorResult("任务不存在");
-      if (task.status !== "running" && task.status !== "pending" && task.status !== "queued") {
-        return errorResult(`任务已处于终态 ${task.status}，不可再提交产物`);
-      }
-      // 越权防护（任务 1.4/1.5 同一原则）：绑定 Agent 的 Key 不得给他人任务灌产物；
-      // env/admin Key（ctx.agentId === null）放行
-      if (ctx.agentId !== null && ctx.agentId > 0 && ctx.agentId !== task.agentId) {
-        return errorResult("FORBIDDEN：此 MCP Key 绑定的 Agent 与任务认领人不匹配，禁止提交产物");
-      }
+      // 任务可插入性 / 越权 / beidou 拒绝：单一事实源（2.1+2.2 评审 minor 抽 helper）
+      const insertableError = isTaskArtifactInsertable(task);
+      if (insertableError) return errorResult(insertableError);
+      const authz = assertTaskWriteAuthorized(ctx.agentId, task);
+      if (!authz.ok) return errorResult(authz.error);
 
       await db.insert(taskArtifacts).values({
         taskId: task.id,

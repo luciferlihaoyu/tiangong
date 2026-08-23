@@ -125,6 +125,8 @@ describe("summarizeCollabWithTianshu 单元", () => {
     const userContent = body.messages[1].content as string;
     expect(userContent).toContain("C1");
     expect(userContent).toContain("C2");
+    // Then: 防御性 max_tokens 上限（3.2 评审 minor）
+    expect(body.max_tokens).toBe(500);
     // Then: Bearer token
     expect(call?.[1]?.headers?.authorization).toBe("Bearer test-key");
   });

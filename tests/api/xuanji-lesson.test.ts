@@ -110,6 +110,7 @@ vi.mock("../../api/lib/executor-cancellation", () => ({
 
 import { taskRouter } from "../../api/task-router";
 import { taskboardRouter } from "../../api/taskboard-router";
+import { a2aRouter } from "../../api/a2a-router";
 import { createCallerFactory } from "../../api/middleware";
 import {
   syncTaskLessonToXuanji,
@@ -129,6 +130,7 @@ const { taskRunner } = await import("../../api/lib/task-runner");
 
 const createTaskCaller = createCallerFactory(taskRouter);
 const createTaskboardCaller = createCallerFactory(taskboardRouter);
+const createA2aCaller = createCallerFactory(a2aRouter);
 
 const mockDb = dbMocks.db as unknown as Parameters<typeof syncTaskLessonToXuanji>[0];
 
@@ -492,5 +494,76 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     expect(xuanjiMocks.createXuanjiClient).not.toHaveBeenCalled();
     expect(xuanjiMocks.client.writeTaskMemory).not.toHaveBeenCalled();
     expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(false);
+  });
+});
+
+// ─── 挂点 d：a2a-router fail / timeout（3.1 评审范围外缺口补漏）───
+
+describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
+  /** a2a fail/timeout mutation 所需的 working 任务行（含 agentId 与 lifecycleStatus） */
+  const workingTask: DbRow = {
+    id: 50,
+    taskId: "T-A2A01",
+    name: "a2a 任务一",
+    description: "a2a 通道测试",
+    input: null,
+    output: null,
+    agentId: 16,
+    status: "running",
+    lifecycleStatus: "working",
+    originSystem: null,
+    parentTaskId: null,
+  };
+
+  it("Given a2a 任务在 working 状态, When 调 a2a.fail, Then 写入含 error 的失败教训且不影响主流程", async () => {
+    // Given
+    xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
+    xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
+    dbMocks.queueSelectResults([
+      [workingTask], // a2a.fail 首查任务行
+      [], // 教训幂等检查
+    ]);
+
+    // When
+    const result = await createA2aCaller(mockCtx()).fail({
+      taskId: 50,
+      error: "模型网关 502",
+      agentId: 16,
+    });
+
+    // Then：a2a.fail 主流程成功；教训恰好一次
+    expect(result.success).toBe(true);
+    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
+    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
+    expect(writeCall?.memory.title).toBe("失败教训：a2a 任务一");
+    expect(writeCall?.task.status).toBe("failed");
+    expect(String(writeCall?.memory.summary ?? "")).toContain("模型网关 502");
+    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+  });
+
+  it("Given a2a 任务在 working 状态, When 调 a2a.timeout 附 note, Then 写入带 'a2a timeout' 标识的失败教训", async () => {
+    // Given
+    xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
+    xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
+    dbMocks.queueSelectResults([
+      [workingTask], // a2a.timeout 首查任务行
+      [], // 教训幂等检查
+    ]);
+
+    // When
+    const result = await createA2aCaller(mockCtx()).timeout({
+      taskId: 50,
+      note: "上游 30s 无响应",
+    });
+
+    // Then：a2a.timeout 主流程成功；教训含 a2a timeout 标识 + note
+    expect(result.success).toBe(true);
+    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
+    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
+    expect(writeCall?.memory.title).toBe("失败教训：a2a 任务一");
+    expect(writeCall?.task.status).toBe("failed");
+    expect(String(writeCall?.memory.summary ?? "")).toContain("a2a timeout");
+    expect(String(writeCall?.memory.summary ?? "")).toContain("上游 30s 无响应");
+    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
   });
 });

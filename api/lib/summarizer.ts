@@ -53,6 +53,13 @@ const CHILD_OUTPUT_MAX_CHARS = 1000;
 const SUMMARY_TIMEOUT_CAP_MS = 30_000;
 /** 主 Runner 默认超时，回退值 */
 const DEFAULT_TIANSHU_TIMEOUT_MS = 120_000;
+/**
+ * 响应 token 上限（3.2 评审 minor 防御）：
+ * 500 token 对两到三句话中文总结绰绰有余（约 750~1000 个中文字符），
+ * 既能挡住模型"自动续写长篇报告"的不可控行为，也能在 prompt 异常时
+ * 把单次调用成本压在天枢计费可控范围。汇总场景对长度零容忍，截断就截断。
+ */
+const SUMMARY_MAX_TOKENS = 500;
 
 // ─── 提示词模板（中文，针对协作汇总场景）───
 
@@ -137,6 +144,8 @@ export async function summarizeCollabWithTianshu(
           { role: "user", content: buildUserPrompt(childSummaries) },
         ],
         stream: false,
+        // 防御性 token 上限（见 SUMMARY_MAX_TOKENS 注释）
+        max_tokens: SUMMARY_MAX_TOKENS,
       }),
       signal: controller.signal,
     });

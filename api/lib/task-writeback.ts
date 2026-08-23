@@ -25,6 +25,7 @@ import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-g
 import { finalizeCompletedTask } from "./task-finalize";
 import { recordExternalUsage } from "./external-usage";
 import { syncTaskLessonToXuanji } from "./xuanji-sync";
+import { assertTaskWriteAuthorized } from "./task-authz";
 
 /** updateProgress 入参（task-router 与 MCP report_progress 共用） */
 export const UpdateProgressInputSchema = z.object({
@@ -97,12 +98,11 @@ export async function reportTaskProgress(
   // 越权防护（任务 1.4/1.5）：MCP Key 绑定的 agent 与任务认领人不符时，
   // 禁止借他人任务提交 usage/artifacts（防止 A 的 Key 给 B 的任务灌假账/产物）。
   // 登录用户（apiKeyAgentId=null）与管理型 Key（-1，未绑定 agent，同 claimTask 权限模型）放行。
+  // 逻辑已抽到 task-authz.ts（2.1+2.2 评审 minor 单一事实源），此处与 submit_artifact 共用。
   if (taskRow && (input.usage !== undefined || input.artifacts !== undefined)) {
-    if (actor.apiKeyAgentId !== null && actor.apiKeyAgentId > 0 && actor.apiKeyAgentId !== taskRow.agentId) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "MCP Key 绑定的 Agent 与任务认领人不匹配，禁止提交 usage/artifacts",
-      });
+    const authz = assertTaskWriteAuthorized(actor.apiKeyAgentId, taskRow);
+    if (!authz.ok) {
+      throw new TRPCError({ code: "FORBIDDEN", message: authz.error });
     }
   }
 

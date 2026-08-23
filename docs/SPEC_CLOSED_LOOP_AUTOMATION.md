@@ -33,6 +33,16 @@
 
 **P2 收尾（任务 3.2 汇总报告强化）已实施**：`api/lib/summarizer.ts` 新建（单次天枢调用 + 30s 超时 + 永不抛错），`autoSummarizeCollab` 在标题与状态计数之间插入可选 `## AI 总结` 段。**默认关闭**（env `TIANGONG_SUMMARY_LLM_ENABLED` 严格 `"true"` 才开启）——"可选"任务的合理默认，对现有部署零非预期行为；失败/超时/未配置 → 降级到原模板，零失败风险；记账走 1.4 的 `recordExternalUsage` 归 `parent.agentId ?? 0`。评审两条非阻塞 minor：summarizer 增加 `max_tokens: 500` 防御；子任务数 > 50 时跳过 LLM 路径。
 
+**评审 minor 清理（6 项）已实施**（commit 后续）：
+- ① `api/lib/summarizer.ts` 加 `max_tokens: 500` 防御模型发疯
+- ② `api/lib/task-validator.ts` N>50 跳过 LLM 路径（成本/边界）
+- ③ `api/mcp/server.ts` `submit_artifact` 拒 beidou origin
+- ④ 新建 `api/lib/task-authz.ts` 抽公共 helper：`assertTaskWriteAuthorized` + `isTaskArtifactInsertable`，submit_artifact 与 task-writeback 共用（**防漂移**）
+- ⑤ `api/a2a-router.ts` fail/timeout 路径挂 `syncTaskLessonToXuanji` 教训钩子（与 task-runner / task-writeback / taskboard 模式对齐，agentId 归任务认领人）
+- ⑥ `mcp-execution-tools.test.ts` mock 补 `syncTaskLessonToXuanji` 桩防未来 failed 用例静默走 TypeError 兜底
+
+**当前剩余 minor（8 条）**：actor -1 映射缺判别性测试；submit_artifact 与 task-writeback 的产物插入 helper 已抽，越权 helper 也已抽，剩余是两个 return shape（errorResult vs TRPCError）的统一封装待抽；report_progress 业务失败未统一 isError；两个范围外失败路径（task-runner catch 分支、task-lifecycle sweeper 超时终态）未挂教训钩子；task-runner 重试未耗尽的首败若无人重派则不留教训（设计取舍）；50K CJK vs MySQL TEXT 64KB 字节加固；helper 命名口味微调（`assert...` vs 实际 return bool）。
+
 ---
 
 ## 0. 闭环体检总览

@@ -6,6 +6,7 @@ import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
+import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
 // 核心语义：
@@ -507,6 +508,28 @@ export const a2aRouter = createRouter({
         metadata: { lifecycleStatus: nextStatus },
       });
 
+      // 失败教训写璇玑（3.1 范围外缺口补漏）：a2a fail 是终态失败之一，与
+      // taskboard reject 同口径——落库后调 syncTaskLessonToXuanji，把 a2a 通道
+      // 标记的失败归档为长期记忆，便于后续同类任务 search_xuanji 检索教训。
+      // 幂等标记 xuanji_lesson 保证同一任务至多一条；try/catch 兜底防御未来行为变化
+      // 破坏 a2a fail 主流程，行为与 task-writeback / taskboard 钩子一致。
+      try {
+        await syncTaskLessonToXuanji(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          output: task.output,
+          agentId: task.agentId,
+          status: "failed",
+          lifecycleStatus: nextStatus,
+          error: input.error ?? task.error,
+        });
+      } catch (error) {
+        console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
       wsManager.broadcastToDashboard({
         type: "a2a_fail",
         taskId: task.taskId,
@@ -543,6 +566,26 @@ export const a2aRouter = createRouter({
         content: input.note ?? "Task timed out",
         metadata: { lifecycleStatus: nextStatus },
       });
+
+      // 失败教训写璇玑（3.1 范围外缺口补漏）：a2a timeout 也是终态失败（status=failed），
+      // 与 fail 同款模式归档教训。语义保留：failure 标签用 "a2a timeout" 标识
+      // 通道来源，便于检索方按"通道+终态"维度过滤。
+      try {
+        await syncTaskLessonToXuanji(db, {
+          id: task.id,
+          taskId: task.taskId,
+          name: task.name,
+          description: task.description,
+          input: task.input,
+          output: task.output,
+          agentId: task.agentId,
+          status: "failed",
+          lifecycleStatus: nextStatus,
+          error: input.note ? `a2a timeout：${input.note}` : "a2a timeout",
+        });
+      } catch (error) {
+        console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
       return { success: true, lifecycleStatus: nextStatus };
     }),

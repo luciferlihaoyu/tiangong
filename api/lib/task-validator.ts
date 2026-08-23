@@ -9,6 +9,8 @@ import { getDb } from "../queries/connection";
 import { tasks, taskArtifacts, agents } from "@db/schema";
 import { eq, and, inArray, asc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
+import { summarizeCollabWithTianshu } from "./summarizer";
+import { recordExternalUsage } from "./external-usage";
 
 /* ═══════════════════════════════════════════
    输出格式校验
@@ -214,6 +216,52 @@ export async function autoSummarizeCollab(parentTaskId: number): Promise<CollabS
     `子任务: ${done}/${total} 完成, ${failed} 失败`,
     "",
   ];
+
+  // 任务 3.2：可选 LLM 总结增强（默认关闭）
+  // 开关严格等于 "true" 才走 LLM 路径——避免对现有部署产生非预期行为与额外成本。
+  // 任何失败（未配置 / 超时 / 解析失败 / 抛错）一律降级到上面的原机械模板，零失败风险。
+  // 记账走 recordExternalUsage（任务 1.4 公共 helper），归因到父任务 agentId（汇总场景
+  // 无固定 agent；父任务无 agent 时归属 0，与 memory-compensation sweeper 同口径）。
+  if (process.env.TIANGONG_SUMMARY_LLM_ENABLED === "true") {
+    try {
+      const childSummaries = childRows.map((c) => ({
+        taskId: c.taskId,
+        name: c.name,
+        status: (c.status === "done" || c.status === "failed" ? c.status : "done") as "done" | "failed",
+        output: c.output,
+        error: c.error,
+      }));
+      const llmResult = await summarizeCollabWithTianshu(childSummaries);
+      if (llmResult) {
+        // AI 总结段插在标题之后、状态计数之前，让读者先看核心结论再看细节
+        summaryLines.splice(1, 0, `## AI 总结\n\n${llmResult.text}\n`);
+        // 记账：与 recordExternalUsage 同款 source 字段标记为 "summary_llm"，便于用量页按来源归因
+        // 防御性处理 usage：summarizer 接口约定 LlmUsage，但 mock 或未来接口变化可能传 null/undefined
+        const usage = llmResult.usage ?? { promptTokens: 0, completionTokens: 0, cachedPromptTokens: 0 };
+        try {
+          await recordExternalUsage(db, {
+            taskId: parent.id,
+            agentId: parent.agentId ?? 0,
+            model: llmResult.model,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cachedPromptTokens: usage.cachedPromptTokens,
+            source: "summary_llm",
+          });
+        } catch (e) {
+          // 尽力而为：记账失败绝不影响汇总主流程
+          console.warn(
+            `[task-validator] summary LLM usage record failed for parent ${parent.taskId}: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+      }
+    } catch (e) {
+      // LLM 路径任何异常（抛错、解析失败等）一律降级到原模板
+      console.warn(
+        `[task-validator] summary LLM failed for parent ${parent.taskId}, falling back to template: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
 
   for (const child of childRows) {
     const agentName = child.agentId ? agentMap.get(child.agentId) || `#${child.agentId}` : "未分配";

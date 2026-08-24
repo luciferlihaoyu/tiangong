@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { trpc } from "@/providers/trpc";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 /**
  * 通知中心 Hook（NC-6 UI）
@@ -29,6 +31,26 @@ export function useNotifications() {
   const markAllReadMutation = trpc.agent.notifications.markAllRead.useMutation({
     onSuccess: () => utils.agent.notifications.list.invalidate(),
   });
+
+  const { addEventListener, removeEventListener } = useWebSocket();
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg && msg.type === "notification_created") {
+          // 收到后端 push 事件——立即 invalidate tRPC list，让 bell 角标/下拉近实时刷新
+          utils.agent.notifications.list.invalidate();
+        }
+      } catch {
+        // 解析失败静默忽略（与 WebSocket 重连策略一致）
+      }
+    };
+    addEventListener("notification_created", handler);
+    return () => {
+      removeEventListener("notification_created", handler);
+    };
+  }, [addEventListener, removeEventListener, utils]);
 
   const items = listQuery.data?.items ?? [];
   const unreadCount = items.filter((n) => !n.readAt).length;

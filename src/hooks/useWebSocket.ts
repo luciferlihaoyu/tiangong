@@ -55,6 +55,19 @@ export function useWebSocket(): UseWebSocketReturn {
         try {
           const data = JSON.parse(event.data) as WSMessage;
           setLastMessage(data);
+          // 通知中心实时推送 t2.5：按 data.type 派发到 listenersRef 注册的监听器
+          // （之前 onmessage 不派发，addEventListener("xxx") 永远不会被 fire，属静默降级）
+          const listeners = listenersRef.current.get(data.type);
+          if (listeners) {
+            // 复制一份避免迭代时 mutate
+            for (const listener of Array.from(listeners)) {
+              try {
+                listener(event);
+              } catch (e) {
+                console.warn(`[WS Dashboard] Listener for "${data.type}" threw:`, e);
+              }
+            }
+          }
         } catch {
           console.warn("[WS Dashboard] Failed to parse message:", event.data);
         }

@@ -14,6 +14,7 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { notifications } from "@db/schema";
 import type { getDb } from "../queries/connection";
+import { wsManager } from "../ws-manager";
 
 /** 默认防抖窗口：同 agentId+type+taskId 在 60s 内的重复调用去重 */
 export const NOTIFICATION_DEDUP_WINDOW_MS = 60_000;
@@ -98,6 +99,26 @@ export async function recordNotification(
       body: input.body,
       metadata: input.metadata ?? null,
     });
+    // 通知中心实时推送：db.insert 成功后推 dashboard 事件；broadcast 失败不影响主流程
+    try {
+      wsManager.broadcastToDashboard({
+        type: "notification_created",
+        notification: {
+          type: input.type,
+          agentId: input.agentId,
+          taskId: input.taskId ?? null,
+          title: input.title,
+          body: input.body,
+          metadata: input.metadata ?? null,
+          readAt: null,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    } catch (e) {
+      console.warn(
+        `[notification] broadcast failed: type=${input.type} agentId=${input.agentId} taskId=${input.taskId ?? "null"} error=${e instanceof Error ? e.message : String(e)}`
+      );
+    }
   } catch (e) {
     console.warn(
       `[notification] failed to record: type=${input.type} agentId=${input.agentId} taskId=${input.taskId ?? "null"} error=${e instanceof Error ? e.message : String(e)}`

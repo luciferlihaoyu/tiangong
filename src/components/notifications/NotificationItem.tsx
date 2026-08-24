@@ -25,7 +25,7 @@ export interface AppNotification {
   title: string;
   body: string;
   metadata?: unknown;
-  readAt: Date | null;
+  readAt: string | null;
   createdAt: Date | string;
 }
 

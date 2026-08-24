@@ -5,6 +5,7 @@ import { useVersion } from '@/hooks/useVersion';
 import { useAuth } from '@/hooks/useAuth';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
 import {
   LayoutDashboard,
   BarChart3,
@@ -178,6 +179,7 @@ function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
         {isAuthenticated && user ? (
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <span className="text-[10px] font-mono px-2 py-1 rounded hidden sm:inline-flex items-center gap-1" style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}>
               <User size={10} />
               {user.name || user.username || '管理员'}

@@ -24,6 +24,7 @@ import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
 import TaskBoard from './pages/TaskBoard'
 import TaskDetail from './pages/TaskDetail'
+import NotificationsPanel from './pages/NotificationsPanel'
 import AgentList from './pages/AgentList'
 import AgentDetail from './pages/AgentDetail'
 import SessionPanel from './pages/SessionPanel'
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/events" element={<EventStream />} />
           <Route path="/dag" element={<DagPanel />} />
           <Route path="/taskboard" element={<TaskBoard />} />
+          <Route path="/notifications" element={<NotificationsPanel />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />

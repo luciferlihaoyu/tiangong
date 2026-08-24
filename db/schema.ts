@@ -6,6 +6,7 @@ import {
   text,
   timestamp,
   int,
+  json,
   bigint,
   uniqueIndex,
   index,
@@ -1031,3 +1032,30 @@ export const externalAgents = mysqlTable("external_agents", {
 
 export type ExternalAgent = typeof externalAgents.$inferSelect;
 export type InsertExternalAgent = typeof externalAgents.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════
+// 通知中心（任务 NC-1 引入，后续任务 NC-2+ 接入 helper 与挂点）
+// 当前里程碑仅定义表结构，recordNotification / notifyLessonRecorded / tRPC procedure 在后续任务中实现。
+// ─── Notifications: 通知中心 ───
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  agentId: bigint("agent_id", { mode: "number", unsigned: true }).notNull().references(() => agents.id, { onDelete: "cascade" }),
+  type: mysqlEnum("type", [
+    "task_approved",        // 任务审批通过
+    "task_rejected",        // 任务审批驳回
+    "task_completed",       // 任务完成（NC-5 暂不挂，注释说明）
+    "task_failed",          // 任务失败（NC-5 接入）
+    "lesson_recorded",      // 失败教训已写璇玑（NC-3 接入）
+    "budget_exhausted",     // 任务级预算熔断（NC-5 接入）
+  ]).notNull(),
+  taskId: bigint("task_id", { mode: "number", unsigned: true }).references(() => tasks.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  metadata: json("metadata"),  // 可选：额外上下文（审批人/理由/错误摘要等）
+  readAt: timestamp("read_at"),  // null = 未读
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  // 索引：list API 高效分页 + 防抖查询
+  agentReadIdx: index("idx_notifications_agent_read").on(table.agentId, table.readAt),
+  createdAtIdx: index("idx_notifications_created_at").on(table.createdAt),
+}));

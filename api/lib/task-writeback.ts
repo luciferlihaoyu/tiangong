@@ -26,6 +26,7 @@ import { finalizeCompletedTask } from "./task-finalize";
 import { recordExternalUsage } from "./external-usage";
 import { syncTaskLessonToXuanji } from "./xuanji-sync";
 import { notifyLessonRecorded } from "./notification-hooks";
+import { recordNotification } from "./notification";
 import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
 
 /** updateProgress 入参（task-router 与 MCP report_progress 共用） */
@@ -220,6 +221,21 @@ export async function reportTaskProgress(
       );
     } catch (error) {
       // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
+      console.warn(`[task-writeback] notification failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // 任务失败通知（NC-5）：外部失败回写是终态失败，落库后记一条 task_failed
+    // （尽力而为，失败绝不影响回写主流程；60s 防抖防同一任务重复刷屏）。
+    try {
+      await recordNotification(db, {
+        agentId: taskRow.agentId,
+        type: "task_failed",
+        taskId: taskRow.id,
+        title: `任务失败：${taskRow.name}`,
+        body: (input.error ?? taskRow.error ?? "任务失败").slice(0, 200),
+        metadata: { action: "updateProgress", error: (input.error ?? taskRow.error ?? "").slice(0, 500) },
+      });
+    } catch (error) {
+      // recordNotification 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
       console.warn(`[task-writeback] notification failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

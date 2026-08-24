@@ -14,6 +14,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { agents, tasks } from "@db/schema";
 import { getApprovalState, selectExecutableTask, type Db } from "./execution-gate";
+import { notifyBudgetExhausted } from "./notification-hooks";
 
 /** 认领结果中的任务投影（形状对齐 agent.claimTask 既有返回） */
 export interface ClaimedTask {
@@ -88,6 +89,12 @@ export async function claimNextTask(
   //    还需一条人工/后台"解锁"路径任务才能重新可认领，容易引入新的死锁路径；
   //    保持 queued 则预算一恢复即自动可认领，代价是任务面板上看不到"因预算停放"的标记。
   if (isBudgetExhausted(agent)) {
+    // 预算熔断通知（NC-5）：24h 防抖记一条 budget_exhausted（尽力而为，失败绝不影响认领决策）。
+    try {
+      await notifyBudgetExhausted(db, agent);
+    } catch (error) {
+      console.warn(`[task-claim] budget notification failed for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return { task: null, reason: "budget_exhausted" };
   }
 

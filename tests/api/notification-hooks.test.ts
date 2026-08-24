@@ -239,8 +239,8 @@ describe("挂点：task-writeback 失败回写触发 lesson_recorded 通知", ()
     }, { apiKeyAgentId: -1 });
 
     expect(result.success).toBe(true);
-    expect(notifyMocks.recordNotification).toHaveBeenCalledTimes(1);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
+    // NC-5 在同一失败回写点额外记一条 task_failed → 这里只断言 lesson_recorded 那条
+    const input = notifyMocks.recordNotification.mock.calls.find((c) => c[1]?.type === "lesson_recorded")?.[1];
     expect(input).toMatchObject({
       agentId: 16,
       type: "lesson_recorded",
@@ -277,8 +277,8 @@ describe("挂点：taskboard.reject 触发 lesson_recorded 通知", () => {
     const result = await taskboardCaller(mockCtx()).reject({ taskId: 40, agentId: 7, reason: "数据口径错误" });
 
     expect(result.success).toBe(true);
-    expect(notifyMocks.recordNotification).toHaveBeenCalledTimes(1);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
+    // NC-5 在同一驳回点额外记一条 task_rejected → 这里只断言 lesson_recorded 那条
+    const input = notifyMocks.recordNotification.mock.calls.find((c) => c[1]?.type === "lesson_recorded")?.[1];
     expect(input).toMatchObject({
       agentId: 2,
       type: "lesson_recorded",

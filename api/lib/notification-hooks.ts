@@ -35,3 +35,34 @@ export async function notifyLessonRecorded(
     metadata: { taskKey: task.taskId, channel: errorChannel, error: (task.error ?? "").slice(0, 500) },
   });
 }
+
+/** 预算熔断通知的防抖窗口：24h（默认 60s 对预算通知太频繁——agent 每次认领轮询
+ *  都会命中预算熔断，60s 窗口会被持续刷新导致刷屏；24h 一天至多一条） */
+export const BUDGET_NOTIFY_DEDUP_WINDOW_MS = 86_400_000; // 24h
+
+/** notifyBudgetExhausted 的最小 agent 视图（agents 行兼容，多余字段忽略） */
+export interface BudgetExhaustedAgent {
+  id: number;
+  name?: string | null;
+  budgetCents?: number | null;
+  spentCents?: number | null;
+}
+
+/**
+ * 预算熔断通知（NC-5）：agent 预算耗尽时记一条 budget_exhausted 通知。
+ * 内部仍调 recordNotification，但用 24h 防抖窗口（windowMs 覆盖），
+ * 预算恢复前同 agent 一天至多一条。尽力而为：失败绝不影响认领决策。
+ */
+export async function notifyBudgetExhausted(db: Db, agent: BudgetExhaustedAgent): Promise<void> {
+  const budgetCents = agent.budgetCents ?? 0;
+  const spentCents = agent.spentCents ?? 0;
+  await recordNotification(db, {
+    agentId: agent.id,
+    type: "budget_exhausted",
+    taskId: null,
+    title: `预算已耗尽：Agent ${agent.name ?? agent.id} 暂停认领`,
+    body: `预算 $${(budgetCents / 100).toFixed(2)} 已用完（已用 $${(spentCents / 100).toFixed(2)}）。预算恢复后自动恢复认领，无需人工介入。`,
+    metadata: { budgetCents, spentCents },
+    windowMs: BUDGET_NOTIFY_DEDUP_WINDOW_MS,
+  });
+}

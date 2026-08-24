@@ -10,6 +10,7 @@ import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTa
 import { finalizeCompletedTask } from "./lib/task-finalize";
 import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 import { notifyLessonRecorded } from "./lib/notification-hooks";
+import { recordNotification } from "./lib/notification";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -570,6 +571,21 @@ export const taskboardRouter = createRouter({
           toStatus: "ready",
           changedBy: input.agentId,
         });
+        // 预执行审批放行通知（NC-5）：blocked→ready 重新排队后记一条 task_approved
+        // （尽力而为，失败绝不影响放行主流程）。
+        try {
+          await recordNotification(db, {
+            agentId: row.agentId,
+            type: "task_approved",
+            taskId: input.taskId,
+            title: `高风险任务已批准执行：${row.name}`,
+            body: input.comment ? `批准执行：${input.comment}` : `高风险任务已批准执行（agent ${input.agentId}）`,
+            metadata: { action: "approve_execution", reviewerAgentId: input.agentId, comment: input.comment ?? null },
+          });
+        } catch (error) {
+          // recordNotification 自身已全 catch；此处兜底防御未来行为变化破坏放行主流程
+          console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
         return { success: true, requeued: true };
       }
 
@@ -599,6 +615,20 @@ export const taskboardRouter = createRouter({
         status: "done",
         lifecycleStatus: row.lifecycleStatus ?? "completed",
       });
+      // 审批通过通知（NC-5）：落库后记一条 task_approved（尽力而为，失败绝不影响审批主流程）
+      try {
+        await recordNotification(db, {
+          agentId: row.agentId,
+          type: "task_approved",
+          taskId: input.taskId,
+          title: `任务已审批通过：${row.name}`,
+          body: input.comment ? `审批通过：${input.comment}` : `任务已审批通过（agent ${input.agentId}）`,
+          metadata: { action: "approve", reviewerAgentId: input.agentId, comment: input.comment ?? null },
+        });
+      } catch (error) {
+        // recordNotification 自身已全 catch；此处兜底防御未来行为变化破坏审批主流程
+        console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,
@@ -705,6 +735,20 @@ export const taskboardRouter = createRouter({
         );
       } catch (error) {
         // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
+        console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // 驳回通知（NC-5）：落库后记一条 task_rejected（尽力而为，失败绝不影响驳回主流程）
+      try {
+        await recordNotification(db, {
+          agentId: row.agentId,
+          type: "task_rejected",
+          taskId: input.taskId,
+          title: `任务已被驳回：${row.name}`,
+          body: input.reason ? `驳回理由：${input.reason}` : `任务已被驳回（agent ${input.agentId}）`,
+          metadata: { action: "reject", reviewerAgentId: input.agentId, reason: input.reason ?? null },
+        });
+      } catch (error) {
+        // recordNotification 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
         console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
       await db.insert(taskMessages).values({

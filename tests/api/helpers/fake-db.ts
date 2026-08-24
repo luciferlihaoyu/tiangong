@@ -119,6 +119,14 @@ function evalTokens(tokens: Token[], row: FakeDbRow): boolean {
     idx++;
     const op = peekStr();
     if (!op) throw new Error("fake-db: expected operator token");
+    const opLower = op.toLowerCase();
+    // isNull / isNotNull 无值 token，须在读取 value 之前判断（大小写不敏感：
+    // drizzle isNull() 产小写，raw sql`... IS NULL` 产大写，都能识别）。
+    if (opLower === "is null" || opLower === "is not null") {
+      idx++;
+      const actual = row[col.name];
+      return opLower === "is null" ? actual === null : actual !== null;
+    }
     idx++;
     const val = tokens[idx];
     // drizzle passes `like` patterns as a raw string chunk (not a Param).
@@ -126,11 +134,6 @@ function evalTokens(tokens: Token[], row: FakeDbRow): boolean {
     if (value === undefined) throw new Error("fake-db: expected value token");
     idx++;
     const actual = row[col.name];
-    // isNull / isNotNull produce " is null" / " is not null" with no value.
-    // 大小写不敏感：drizzle isNull() 产小写，raw sql`... IS NULL` 产大写，都能识别。
-    const opLower = op.toLowerCase();
-    if (opLower === "is null") return actual === null;
-    if (opLower === "is not null") return actual !== null;
     switch (op) {
       case "=":
       case "==":

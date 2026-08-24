@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, type Agent, type AgentCard } from "@db/schema";
-import { eq, like, and, or, sql } from "drizzle-orm";
+import { agents, tasks, modelAllowlist, taskMessages, tokenUsage, notifications, type Agent, type AgentCard } from "@db/schema";
+import { eq, like, and, or, sql, desc, isNull, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 import { claimNextTask } from "./lib/task-claim";
@@ -13,6 +13,13 @@ type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
 
 function getInsertId(result: InsertResult): number {
   return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+}
+
+/** update 返回的受影响行数（兼容 mysql2 数组形状与测试 mock 的普通对象形状） */
+function getAffectedRows(result: unknown): number {
+  const value = Array.isArray(result) ? result[0] : result;
+  if (value === null || typeof value !== "object") return 0;
+  return Number((value as { affectedRows?: number }).affectedRows ?? 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -698,4 +705,73 @@ export const agentRouter = createRouter({
         },
       };
     }),
+
+  // ═══ 通知中心（NC-4）═══
+  // 归属过滤语义（与 ctx.apiKeyAgentId 现有约定对齐）：
+  //   -1（管理型 Key）/ null（登录用户）→ 跨 agent 全量
+  //   > 0（Key 绑定 agent）→ 只看自己
+  // list 游标分页：按 createdAt DESC, id DESC，cursor 取上一页末条 id（id 单调递增）。
+  notifications: createRouter({
+    list: authedQuery
+      .input(
+        z.object({
+          limit: z.number().int().min(1).max(100).default(20),
+          unreadOnly: z.boolean().default(false),
+          cursor: z.number().int().optional(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const db = getDb();
+        const isManagement = ctx.apiKeyAgentId === -1 || ctx.apiKeyAgentId === null;
+        const conds = [];
+        if (!isManagement) conds.push(eq(notifications.agentId, ctx.apiKeyAgentId as number));
+        if (input.unreadOnly) conds.push(isNull(notifications.readAt));
+        if (input.cursor !== undefined) conds.push(lt(notifications.id, input.cursor));
+
+        const rows = await db
+          .select()
+          .from(notifications)
+          .where(conds.length > 0 ? and(...conds) : undefined)
+          .orderBy(desc(notifications.createdAt), desc(notifications.id))
+          .limit(input.limit);
+
+        return {
+          items: rows,
+          nextCursor: rows.length === input.limit ? rows[rows.length - 1]?.id : undefined,
+        };
+      }),
+
+    markRead: authedQuery
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const db = getDb();
+        // 越权防护：绑定 agent 的 Key 只能标自己（where 附加 agentId 条件，异主 → affectedRows 0）
+        const isManagement = ctx.apiKeyAgentId === -1 || ctx.apiKeyAgentId === null;
+        const conds = [eq(notifications.id, input.id)];
+        if (!isManagement) conds.push(eq(notifications.agentId, ctx.apiKeyAgentId as number));
+
+        const result = await db
+          .update(notifications)
+          .set({ readAt: new Date() })
+          .where(and(...conds));
+        return { marked: getAffectedRows(result) > 0 };
+      }),
+
+    markAllRead: authedQuery
+      .input(z.object({}))
+      .mutation(async ({ ctx }) => {
+        const db = getDb();
+        // 管理位标所有未读；绑定 agent 的 Key 只标自己的未读
+        const isManagement = ctx.apiKeyAgentId === -1 || ctx.apiKeyAgentId === null;
+        const conds = [];
+        if (!isManagement) conds.push(eq(notifications.agentId, ctx.apiKeyAgentId as number));
+        conds.push(isNull(notifications.readAt));
+
+        const result = await db
+          .update(notifications)
+          .set({ readAt: new Date() })
+          .where(and(...conds));
+        return { marked: getAffectedRows(result) };
+      }),
+  }),
 });

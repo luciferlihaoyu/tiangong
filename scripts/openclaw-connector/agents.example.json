@@ -45,6 +45,16 @@
       "execCommand": "node ./scripts/openclaw-connector/examples/echo-runner.mjs",
       "execTimeoutMs": 300000,
       "resultMaxChars": 12000
+    },
+    {
+      "name": "example-p3-runner",
+      "agentId": 999,
+      "token": "tg-REPLACE_WITH_REAL_KEY",
+      "label": "P3 OpenClaw Runner 示例",
+      "execMode": "command",
+      "execCommand": "node ./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs --agent codemaster --timeout 600",
+      "execTimeoutMs": 660000,
+      "resultMaxChars": 12000
     }
   ]
 }

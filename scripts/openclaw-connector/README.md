@@ -388,6 +388,16 @@ printf '=== Tiangong Task ===\nTask ID: P3-TEST\nName: test\n' | \
   node scripts/openclaw-connector/examples/openclaw-agent-runner.mjs \
     --agent codemaster --timeout 600
 
+# 完整参数
+printf '=== Tiangong Task ===\nTask ID: P3-TEST\nName: test\n' | \
+  node scripts/openclaw-connector/examples/openclaw-agent-runner.mjs \
+    --agent codemaster \
+    --session-key my-session \
+    --model gpt-4 \
+    --thinking high \
+    --timeout 600 \
+    --openclaw-bin /custom/openclaw
+
 # 通过 connector 的 execCommand 使用（推荐）
 TIANGONG_EXEC_MODE=command \
 TIANGONG_EXEC_COMMAND="node ./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs --agent codemaster --timeout 600" \
@@ -405,6 +415,25 @@ node scripts/openclaw-connector/connector.mjs --config agents.json -n codemaster
 | `--timeout` | `OPENCLAW_RUNNER_TIMEOUT_SECONDS` | `300` | 传给 openclaw agent 的超时秒数 |
 | `--local` | `OPENCLAW_RUNNER_LOCAL=1` | `false` | 透传 --local 给 openclaw agent |
 | `--openclaw-bin` | `OPENCLAW_BIN` | `openclaw` | openclaw 二进制路径 |
+
+### 在 agents.example.json 中启用
+
+在 `agents.example.json` 末尾新增一个 P3 runner agent（`example-p3-runner`），通过 `execMode=command` + `execCommand` 指向 runner 脚本：
+
+```json
+{
+  "name": "example-p3-runner",
+  "agentId": 999,
+  "token": "tg-REPLACE_WITH_REAL_KEY",
+  "label": "P3 OpenClaw Runner 示例",
+  "execMode": "command",
+  "execCommand": "node ./scripts/openclaw-connector/examples/openclaw-agent-runner.mjs --agent codemaster --timeout 600",
+  "execTimeoutMs": 660000,
+  "resultMaxChars": 12000
+}
+```
+
+更推荐使用 argv 模式（`execFile` + `execArgs`，`shell:false`），如上文 `codemaster` 配置。
 
 ### 安全设计
 
@@ -533,6 +562,17 @@ kill $STUB_PID 2>/dev/null
 ```
 
 > **注意**: 真实模型调用仅作为人工验收，避免在自动测试中消耗模型配额。
+
+### 验收 / 测试
+
+```bash
+node --test tests/scripts/openclaw-agent-runner.test.mjs
+# 应：tests 19 / pass 19 / fail 0
+```
+
+### 范围声明
+
+P3 是**本地 runner / 执行桥**，**不是**生产 daemon 部署；不改天宫线上鉴权、不做多租户、不做 DAG 调度。
 
 ## 文件结构
 

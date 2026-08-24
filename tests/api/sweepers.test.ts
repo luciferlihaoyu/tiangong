@@ -148,7 +148,7 @@ describe("sweepTaskTimeouts", () => {
       claimedAt: new Date(NOW.getTime() - 7_200_000),
       updatedAt: new Date(NOW.getTime() - 7_200_000),
     };
-    dbMocks.queueSelectResults([[exhaustedTask], []]);
+    dbMocks.queueSelectResults([[exhaustedTask], [], []]); // running + 通知防抖查询 + storm-check
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);
@@ -179,7 +179,7 @@ describe("sweepTaskTimeouts", () => {
       claimedAt: new Date(NOW.getTime() - 7_200_000),
       updatedAt: new Date(NOW.getTime() - 7_200_000),
     };
-    dbMocks.queueSelectResults([[exhaustedTask], []]);
+    dbMocks.queueSelectResults([[exhaustedTask], [], []]); // running + 通知防抖查询 + storm-check
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);
@@ -238,7 +238,7 @@ describe("sweepTaskTimeouts", () => {
       status: "failed",
       updatedAt: new Date(NOW.getTime() - 600_000),
     }));
-    dbMocks.queueSelectResults([[staleTask], failedRows]);
+    dbMocks.queueSelectResults([[staleTask], [], failedRows]); // running + 通知防抖查询 + storm-check rows
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);

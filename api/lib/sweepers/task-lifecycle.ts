@@ -14,6 +14,7 @@ import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
 import { syncTaskLessonToXuanji } from "../xuanji-sync";
+import { notifyLessonRecorded } from "../notification-hooks";
 import type { Db } from "./db";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -75,6 +76,23 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         });
       } catch (error) {
         console.warn(`[task-lifecycle] xuanji lesson sync failed for task ${task.taskId}: ${describeError(error)}`);
+      }
+      // 失败教训通知（NC-3）：lifecycle sweeper 的超时终态是失败教训挂点之一，
+      // 落库后记一条 lesson_recorded 通知（尽力而为，失败绝不影响 sweeper）。
+      try {
+        await notifyLessonRecorded(
+          db,
+          {
+            id: task.id,
+            taskId: task.taskId,
+            name: task.name,
+            agentId: task.agentId ?? 0,
+            error: `任务超时未响应（timeout ${(task.timeoutMs ?? DEFAULT_TIMEOUT_MS)}ms）`,
+          },
+          "lifecycle.sweeper"
+        );
+      } catch (error) {
+        console.warn(`[task-lifecycle] notification failed for task ${task.taskId}: ${describeError(error)}`);
       }
     }
   }

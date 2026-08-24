@@ -25,6 +25,7 @@ import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-g
 import { finalizeCompletedTask } from "./task-finalize";
 import { recordExternalUsage } from "./external-usage";
 import { syncTaskLessonToXuanji } from "./xuanji-sync";
+import { notifyLessonRecorded } from "./notification-hooks";
 import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
 
 /** updateProgress 入参（task-router 与 MCP report_progress 共用） */
@@ -202,6 +203,24 @@ export async function reportTaskProgress(
     } catch (error) {
       // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
       console.warn(`[task-writeback] xuanji lesson sync failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // 失败教训通知（NC-3）：外部失败回写是终态失败，落库后记一条 lesson_recorded 通知
+    // （尽力而为，失败绝不影响回写主流程；60s 防抖防同一任务的 lesson/task-failed 路径重复）。
+    try {
+      await notifyLessonRecorded(
+        db,
+        {
+          id: taskRow.id,
+          taskId: taskRow.taskId,
+          name: taskRow.name,
+          agentId: taskRow.agentId,
+          error: input.error ?? taskRow.error ?? null,
+        },
+        "task-writeback"
+      );
+    } catch (error) {
+      // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
+      console.warn(`[task-writeback] notification failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

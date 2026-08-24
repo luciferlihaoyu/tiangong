@@ -7,6 +7,7 @@ import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
 import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
+import { notifyLessonRecorded } from "./lib/notification-hooks";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
 // 核心语义：
@@ -529,6 +530,22 @@ export const a2aRouter = createRouter({
       } catch (error) {
         console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      // 失败教训通知（NC-3）：a2a fail 是终态失败，落库后记一条 lesson_recorded 通知。
+      try {
+        await notifyLessonRecorded(
+          db,
+          {
+            id: task.id,
+            taskId: task.taskId,
+            name: task.name,
+            agentId: task.agentId,
+            error: input.error ?? task.error ?? null,
+          },
+          "a2a.fail"
+        );
+      } catch (error) {
+        console.warn(`[a2a] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
       wsManager.broadcastToDashboard({
         type: "a2a_fail",
@@ -585,6 +602,22 @@ export const a2aRouter = createRouter({
         });
       } catch (error) {
         console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // 失败教训通知（NC-3）：a2a timeout 是终态失败（status=failed），同 fail 模式记通知。
+      try {
+        await notifyLessonRecorded(
+          db,
+          {
+            id: task.id,
+            taskId: task.taskId,
+            name: task.name,
+            agentId: task.agentId,
+            error: input.note ? `a2a timeout：${input.note}` : "a2a timeout",
+          },
+          "a2a.timeout"
+        );
+      } catch (error) {
+        console.warn(`[a2a] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       return { success: true, lifecycleStatus: nextStatus };

@@ -9,6 +9,7 @@ import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTa
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
 import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
+import { notifyLessonRecorded } from "./lib/notification-hooks";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -685,6 +686,26 @@ export const taskboardRouter = createRouter({
       } catch (error) {
         // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
         console.warn(`[taskboard] xuanji lesson sync failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // 失败教训通知（NC-3）：人工驳回是终态失败，落库后记一条 lesson_recorded 通知
+      // （尽力而为，失败绝不影响驳回主流程）。
+      try {
+        await notifyLessonRecorded(
+          db,
+          {
+            id: row.id,
+            taskId: row.taskId,
+            name: row.name,
+            agentId: row.agentId,
+            error: input.reason?.trim()
+              ? `人工驳回：${input.reason.trim()}`
+              : `人工驳回：未填写理由（agent ${input.agentId}）`,
+          },
+          "taskboard.reject"
+        );
+      } catch (error) {
+        // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
+        console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
       await db.insert(taskMessages).values({
         taskId: input.taskId,

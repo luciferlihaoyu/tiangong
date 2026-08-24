@@ -127,8 +127,10 @@ function evalTokens(tokens: Token[], row: FakeDbRow): boolean {
     idx++;
     const actual = row[col.name];
     // isNull / isNotNull produce " is null" / " is not null" with no value.
-    if (op === "is null") return actual === null;
-    if (op === "is not null") return actual !== null;
+    // 大小写不敏感：drizzle isNull() 产小写，raw sql`... IS NULL` 产大写，都能识别。
+    const opLower = op.toLowerCase();
+    if (opLower === "is null") return actual === null;
+    if (opLower === "is not null") return actual !== null;
     switch (op) {
       case "=":
       case "==":
@@ -281,28 +283,14 @@ export class FakeDb {
             resolve: (rows: FakeDbRow[]) => unknown,
             reject?: (err: unknown) => unknown,
           ) =>
-            Promise.resolve(filtered.map(applyProjection)).then(
+            Promise.resolve(
+              (limit === null ? filtered : filtered.slice(0, limit)).map(applyProjection),
+            ).then(
               (mapped) => resolve(mapped.map((r) => this.fromDbRow(table, r))),
               reject,
             ),
           values: undefined,
         };
-        if (limit !== null) {
-          const apply = () => filtered.slice(0, limit ?? filtered.length).map(applyProjection);
-          return {
-            ...chain,
-            where: (cond: unknown) => {
-              filtered = rows.filter((r) => evaluate(cond, r));
-              return {
-                ...chain,
-                then: (res: (r: unknown) => unknown) =>
-                  Promise.resolve(apply()).then((m) => res(m.map((r) => this.fromDbRow(table, r)))),
-              };
-            },
-            then: (res: (r: unknown) => unknown) =>
-              Promise.resolve(apply()).then((m) => res(m.map((r) => this.fromDbRow(table, r)))),
-          };
-        }
         return chain;
       },
     };
@@ -323,6 +311,12 @@ export class FakeDb {
         const inserted: FakeDbRow[] = [];
         for (const r of rows) {
           const copy: FakeDbRow = { ...this.toDbRow(table, r) };
+          // 模拟 defaultNow()：表含 created_at 列且未显式传值时补当前时间
+          // （通知中心防抖窗口按 createdAt 查询需要；对既有测试无影响——缺列时跳过）。
+          const createdAtDbName = this.columnMaps.get(name)?.propToDb.get("createdAt");
+          if (createdAtDbName && copy[createdAtDbName] === undefined) {
+            copy[createdAtDbName] = new Date();
+          }
           const duplicate = name === "tasks" && store.find((stored) =>
             stored.origin_system !== null && stored.origin_system !== undefined &&
             stored.origin_system === copy.origin_system &&

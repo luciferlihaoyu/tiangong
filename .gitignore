@@ -22,3 +22,6 @@ openclaw_security_alerts.json
 node-compile-cache/
 tiangong-git-backup/
 backups/
+
+# Local planning docs (never commit)
+PLAN*.md

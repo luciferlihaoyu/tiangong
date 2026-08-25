@@ -175,23 +175,67 @@ export function useDataSource() {
   }, [hasBackend, taskQuery]);
 
   // ── System mutations ──
-  const updateSystemStatus = (id: number, status: string) => {
+  // admin-only 后端端点（普通用户会 403，Batch 2 加角色门控）；失败不再静默。
+  const updateSystemStatus = useCallback(async (id: number, status: string) => {
+    if (hasBackend) {
+      try {
+        await trpcFetch("system.updateStatus", { id, status });
+        await systemQuery.refetch();
+      } catch (err) {
+        console.error("[useDataSource] system.updateStatus failed:", err);
+      }
+      return;
+    }
     setLocalSystems(prev => prev.map(s => s.id === id ? { ...s, status } : s));
-  };
-  const updateSystemConfig = (id: number, config: string) => {
-    setLocalSystems(prev => prev.map(s => s.id === id ? { ...s, config } : s));
-  };
+  }, [hasBackend, systemQuery]);
+  // updateSystemConfig 已移除：后端无 system.updateConfig 端点，且全仓库无消费点，
+  // 之前的实现只改内存 state 造成「假持久化」。
 
   // ── Org mutations ──
-  const addOrg = (data: Record<string, string>) => {
+  const addOrg = useCallback(async (data: Record<string, string>) => {
+    if (hasBackend) {
+      try {
+        await trpcFetch("org.orgCreate", { name: data.name, description: data.description || undefined });
+        await orgListQuery.refetch();
+      } catch (err) {
+        console.error("[useDataSource] org.orgCreate failed:", err);
+      }
+      return;
+    }
     const id = ++nextId;
     const now = new Date().toISOString();
     setLocalOrgs(prev => [...prev, { id, name: data.name, description: data.description || null, createdAt: now, updatedAt: now }]);
-  };
-  const updateOrg = (id: number, data: Partial<MockOrg>) => {
+  }, [hasBackend, orgListQuery]);
+  const updateOrg = useCallback(async (id: number, data: Partial<MockOrg>) => {
+    if (hasBackend) {
+      // 后端 zod 只接受字符串字段非 null，过滤掉未提供/空字段
+      const payload: Record<string, unknown> = { id };
+      if (data.name !== undefined) payload.name = data.name;
+      if (data.description != null) payload.description = data.description;
+      if (data.goals != null) payload.goals = data.goals;
+      if (data.budget !== undefined) payload.budget = Number(data.budget);
+      try {
+        await trpcFetch("org.orgUpdate", payload);
+        await orgListQuery.refetch();
+      } catch (err) {
+        console.error("[useDataSource] org.orgUpdate failed:", err);
+      }
+      return;
+    }
     setLocalOrgs(prev => prev.map(o => o.id === id ? { ...o, ...data, updatedAt: new Date().toISOString() } : o));
-  };
-  const deleteOrg = (id: number) => { setLocalOrgs(prev => prev.filter(o => o.id !== id)); };
+  }, [hasBackend, orgListQuery]);
+  const deleteOrg = useCallback(async (id: number) => {
+    if (hasBackend) {
+      try {
+        await trpcFetch("org.orgDelete", { id });
+        await orgListQuery.refetch();
+      } catch (err) {
+        console.error("[useDataSource] org.orgDelete failed:", err);
+      }
+      return;
+    }
+    setLocalOrgs(prev => prev.filter(o => o.id !== id));
+  }, [hasBackend, orgListQuery]);
 
   return {
     agents, tasks, systems, orgs, msgStats,
@@ -199,7 +243,6 @@ export function useDataSource() {
     hasBackend,
     addAgent, updateAgent, deleteAgent,
     addTask, deleteTask,
-    updateSystemConfig,
     addOrg, updateOrg, deleteOrg,
     updateAgentStatus, updateSystemStatus, updateTaskProgress,
   };

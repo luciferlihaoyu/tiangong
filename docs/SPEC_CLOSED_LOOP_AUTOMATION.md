@@ -53,29 +53,33 @@
 
 至此 SPEC 闭环 + 收尾全部完成，**遗留清单清零**。仓库状态：5 个 commit、51 文件 444 测试绿、tsc/eslint 0 error。
 
+> **⚠️ 当前状态（2026-08-24 更新）**：本文档第 0 节及"断点清单/环节 N"正文的 ❌/⚠️ 判定是 **2026-08-22 诊断时的快照**（基于 `main @ 4de3f7c`），仅作历史记录保留。上表的 P0/P1/P2 + 收尾已把所有断点修完——环节 4 用量记账、环节 5 汇总接线（走统一 finalize 入口，不再绕过归档钩子）、环节 6a AList 六路径收敛均已落地并有测试覆盖。阅读下文时请以上表实施状态为准；后续新增能力（通知中心 / WebSocket 实时推送 / P3 OpenClaw Runner / P6 smoke）见 git log #26 起。
+
 ---
 
 ## 0. 闭环体检总览
 
 ```
 [1 自动发布] ──→ [2 外部认领] ──→ [3 执行] ──→ [4 完成回写] ──→ [5 自动汇总] ──→ [6a AList 归档]
-   ✅ 已通          ✅ 已通          ✅ 已通        ⚠️ 半通          ❌ 死代码         ❌ 外部路径断链
+   ✅ 已通          ✅ 已通          ✅ 已通        ⚠️ 半通 →✅      ❌ 死代码 →✅     ❌ 断链 →✅
                                                                                   │
                                                                        [6b 璇玑记忆]
                                                                          ✅ 已通 + 有补偿
 ```
+
+> 下表为 2026-08-22 诊断快照。**环节 4/5/6a 的 ❌/⚠️ 均已修复**（见顶部"实施状态"与 2026-08-24 更新框），保留原文供追溯。
 
 | 环节 | 判定 | 一句话结论 |
 |---|---|---|
 | 1 自动发布 | ✅ | `TIANGONG_AUTO_DISPATCH` 默认开，pending(created) 经审批闸门自动转 queued |
 | 2 外部认领 | ✅ | 心跳顺带认领（`agent.updateHeartbeat` 返回 `claimedTask`），MCP Key 与 agent 匹配校验已有 |
 | 3 执行 | ✅ | dsh-poller spawn dsh CLI，超时兜底；但输出硬截断 12KB |
-| 4 完成回写 | ⚠️ | 回写与完成闸门正常；**但该路径不记用量 → 预算熔断对外部执行体失效** |
-| 5 自动汇总 | ❌ | `autoSummarizeCollab` 已完整实现但**零调用者**；且即使接线，它直接 `db.update` 父任务，绕过全部归档钩子 |
-| 6a AList | ❌ | `syncTaskArtifactsToAlist` 只挂在内部 Runner 路径；**外部（dsh）完成的任务不上传 AList**，dsh-poller 注释声称会上传——与实现不符 |
-| 6b 璇玑 | ✅ | 外部路径有同步 + memory-compensation sweeper 兜底；缺口是失败教训不写入 |
+| 4 完成回写 | ⚠️ → ✅ 已修 | 回写与完成闸门正常；~~该路径不记用量~~ → `recordExternalUsage` 已挂 task-writeback（任务 1.4），预算熔断对外部执行体生效 |
+| 5 自动汇总 | ❌ → ✅ 已修 | ~~零调用者 + 裸 db.update 绕过钩子~~ → `maybeSummarizeParent` 挂 finalize 尾部；汇总走统一 finalize 入口双归档（任务 1.3） |
+| 6a AList | ❌ → ✅ 已修 | ~~六路径五条漏挂~~ → 钩子收敛到 `finalizeCompletedTask` 单一事实源（任务 1.1）+ alist-compensation sweeper 兜底（任务 1.2） |
+| 6b 璇玑 | ✅ | 外部路径有同步 + memory-compensation sweeper 兜底；~~缺口是失败教训不写入~~ → 任务 3.1 三挂点 + 收尾补齐共 6 失败教训挂点 |
 
-**核心结论：闭环的前四环已通，后两环（汇总 + AList）在外部执行路径上是断的。用户感知会是——dsh 任务跑完了、璇玑有记忆，但网盘里永远空着，父任务也永远没人汇总。**
+**核心结论（已过时，仅存档）：闭环的前四环已通，后两环（汇总 + AList）在外部执行路径上是断的。** 当前实际：六环全通，外部路径用量记账 / 自动汇总 / AList 归档均已接线并有测试覆盖。
 
 ---
 
@@ -100,7 +104,7 @@
 - dsh-poller 把任务 input/description 拼成提示词写临时文件 → `DSH_CMD` 模板执行 → 超时 SIGKILL（默认 600s）
 - **硬伤**：回写 `output.slice(0, 12000)`——超过 12KB 的长成果直接丢尾。且外部系统没有任何通道提交大产物（`api/artifact-router.ts:72` 的 `create` 是 `userQuery`，仅登录用户可用，MCP Key 不行）。
 
-### 环节 4：完成自动回写 ⚠️（两处断点）
+### 环节 4：完成自动回写 ⚠️ → ✅ 已修复（任务 1.4 外部用量记账）
 
 回写链路本身正常：dsh-poller → `task.updateProgress`（`api/task-router.ts:214`）→ 完成闸门拦截高风险 self-approve → `done/completed`。
 
@@ -108,13 +112,13 @@
 
 **附带**：认领侧也没有任务级预算检查（超预算 agent 照样能认领新任务）。
 
-### 环节 5：自动汇总 ❌（死代码 + 幽灵绕行）
+### 环节 5：自动汇总 ❌ → ✅ 已修复（任务 1.3）
 
 - `autoSummarizeCollab`（`api/lib/task-validator.ts:153-235`）功能完整：等全部子任务终态 → 生成汇总文本（含每个子任务状态/输出/错误）→ 写父任务 `output` 并置 `status=done/failed` → 广播 `collab_summary` 事件
 - 但**全仓库零调用者**（`collab.summary` tRPC 路由只是手动查询）——父任务永远不会被自动汇总
 - 更深的坑：它写父任务用的是裸 `db.update`，**不经过任何完成钩子**——就算今天把调用接上，汇总结果也不会上传 AList、不会写璇玑（见环节 6a 的根因分析）
 
-### 环节 6a：重要成果上传 AList ❌（外部路径断链 + 文档误导）
+### 环节 6a：重要成果上传 AList ❌ → ✅ 已修复（任务 1.1 收敛 + 1.2 补偿）
 
 `syncTaskArtifactsToAlist`（`api/lib/alist-sync.ts`，含幂等标记 `task_artifacts.type='alist_sync'`、ensureDir、50MB 上限、非致命保证）质量没问题，问题在**调用点覆盖面**：
 

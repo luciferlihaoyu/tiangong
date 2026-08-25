@@ -570,6 +570,24 @@ node --test tests/scripts/openclaw-agent-runner.test.mjs
 # 应：tests 19 / pass 19 / fail 0
 ```
 
+### P6 端到端 smoke
+
+`examples/p6-task-runner-smoke.mjs` 验证 P6 服务端 task-runner command 模式 + P3 runner 端到端集成：
+
+```bash
+node scripts/openclaw-connector/examples/p6-task-runner-smoke.mjs
+# 3 pass, 0 fail — 退出 0
+```
+
+覆盖 3 个测试：
+- 直连 `mock-openclaw.mjs` 验证 spawn argv 模式工作
+- 走 P3 runner 透传到 mock 验证完整链路
+- argv 注入防御（`--agent 'codemaster; touch /tmp/x'` 不执行 shell）
+
+**不导入 task-runner.ts**（TS 不能被 .mjs 直接 require），脚本内复刻其 command 模式 spawn argv 行为（注释引用 task-runner.ts 行号）——若两者行为漂离会暴露。
+
+**前置条件**：P3 实施完成（`openclaw-agent-runner.mjs` + `mock-openclaw.mjs` 已存在）。
+
 ### 范围声明
 
 P3 是**本地 runner / 执行桥**，**不是**生产 daemon 部署；不改天宫线上鉴权、不做多租户、不做 DAG 调度。

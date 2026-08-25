@@ -10,13 +10,16 @@
 - **Agent 协作通信** — Agent 之间可互发消息（command/response/broadcast/system）
 - **DAG 任务编排** — 任务依赖管理、状态机流转、自动触发下游、循环依赖检测
 - **公司架构管理** — 组织/部门/汇报线，Agent 归属组织参与任务
-- **成本控制** — Agent 预算分配与消耗追踪
+- **成本控制** — Agent 预算分配与消耗追踪，外部执行体用量记账 + 预算熔断
 - **心跳监控** — Agent 心跳上报，实时在线状态
-- **中枢自动流转** — 任务创建后自动派发、自动执行，高风险操作经审批闸门拦截
-- **外部执行体接入** — DeepSeek Harness (dsh) 等外部 Agent 运行时经 MCP Key 认领任务
+- **中枢自动流转** — 任务创建后自动派发、自动执行，高风险操作经审批闸门拦截；完成钩子收敛单一事实源（finalizeCompletedTask：璇玑记忆 + AList 上传 + 协作汇总 + 通知）
+- **外部执行体接入** — DeepSeek Harness (dsh) 等外部 Agent 运行时经 MCP Key 认领任务；MCP 工具面含 claim_task / report_progress / submit_artifact / read_alist / search_xuanji 五工具
 - **模型定价同步** — 从 BaseLLM（New API 比率配置）同步官方定价，支持分层计费与缓存价
-- **AList 网盘集成** — 界面可配连接，任务产物自动上传，在线浏览/下载
-- **璇玑知识联动** — 任务完成记忆自动写入璇玑知识库，执行前可检索知识上下文
+- **AList 网盘集成** — 界面可配连接，任务产物自动上传（含 highlights/ 精华分级目录 + alist-compensation 补偿 sweeper 兜底），在线浏览/下载
+- **璇玑知识联动** — 任务完成记忆自动写入璇玑知识库，执行前可检索知识上下文；失败教训 6 路径挂点写入（task-runner 主/catch、外部回写失败、taskboard 驳回、a2a fail/timeout、lifecycle sweeper 超时）
+- **通知中心** — 5 类业务事件通知（审批通过/驳回/任务失败/教训记录/预算熔断），60s 防抖 + 预算 24h 窗口；tRPC list/markRead/markAllRead API + 前端铃铛角标 + `/notifications` 全页
+- **WebSocket 实时推送** — Dashboard WS 广播（task_update/collab_summary/notification_created 等）；新通知近实时（<1s）刷新铃铛角标，30s 轮询兜底
+- **OpenClaw 执行桥（P2/P3/P6）** — connector 心跳认领回写 + OpenClaw Session Runner（stdin prompt → `openclaw agent --json` → 最终文本回写）+ 服务端 task-runner command 模式安全 argv 执行，端到端 smoke 可验证
 
 ---
 
@@ -44,6 +47,9 @@
 | `tasks` | 任务 | taskId, name, agentId, status, priority, input, output, retryCount, maxRetries, parentTaskId |
 | `task_dependencies` | 任务依赖 (DAG) | taskId, dependsOnTaskId |
 | `messages` | Agent 间消息 (P8.1 可靠总线) | fromAgent, toAgent, content, type, status, correlationId, idempotencyKey, taskId, parentMessageId, expiresAt, ackedAt, deliveredAt, retryCount, priority |
+| `task_artifacts` | 任务产物 (长输出通道 + 归档标记) | taskId, type (collab_summary/alist_sync/xuanji_memory/xuanji_lesson), name, content, mimeType |
+| `notifications` | 通知中心 | agentId, taskId, type (6 值枚举), title, body, metadata, readAt, createdAt |
+| `token_usage` | 模型用量记账 | agentId, model, promptTokens, completionTokens, cachedPromptTokens, source |
 | `organizations` | 组织 | name, goals, budget |
 | `departments` | 部门 | name, orgId, leadAgentId |
 | `systems` | 外部系统 | name, slug, status |

@@ -573,6 +573,76 @@ const CREATE_TABLES_SQL = [
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // ─── 2026-08-25 部署验收补齐：以下 5 表在 db/schema.ts 有定义、运行时有引用，
+  // 但此前无任何迁移路径 → 线上缺表（notifications 由 NC-1 引入，通知接口线上
+  // 必报 ER_NO_SUCH_TABLE；其余 4 张为 workspace / secret-vault 模块）。守卫测试：
+  // tests/api/schema-migration-parity.test.ts
+
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    agent_id BIGINT UNSIGNED NOT NULL,
+    type ENUM('task_approved','task_rejected','task_completed','task_failed','lesson_recorded','budget_exhausted') NOT NULL,
+    task_id BIGINT UNSIGNED,
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    metadata JSON,
+    read_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    INDEX idx_notifications_agent_read (agent_id, read_at),
+    INDEX idx_notifications_created_at (created_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS workspaces (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    owner_id BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS projects (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    description TEXT,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_projects_workspace_slug (workspace_id, slug)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS workspace_memberships (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    role ENUM('owner','admin','member','viewer') DEFAULT 'member' NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_workspace_memberships (workspace_id, user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS secret_vault_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    workspace_id BIGINT UNSIGNED NOT NULL,
+    project_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    algorithm VARCHAR(20) NOT NULL,
+    key_id VARCHAR(100) NOT NULL,
+    envelope_version VARCHAR(10) NOT NULL,
+    nonce TEXT NOT NULL,
+    auth_tag TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    updated_by BIGINT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_secret_vault_items_project_name (workspace_id, project_id, name)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
 async function migrateMailboxColumns(conn: mysql.Connection, logs: string[]) {

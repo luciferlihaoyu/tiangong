@@ -598,6 +598,7 @@ function MessagePanel({
   const [sendContent, setSendContent] = useState("");
   const [conversationMsgs, setConversationMsgs] = useState<DisplayMessage[]>([]);
   const [loadingConv, setLoadingConv] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const agentMap = useMemo(() => {
@@ -675,10 +676,16 @@ function MessagePanel({
     const myId = agents[0]?.id;
     if (!myId) return;
 
+    // message.send 是 authedQuery：必须带登录 JWT（与 trpc.tsx httpLink 同一来源），
+    // 否则后端 401 UNAUTHORIZED——此前裸 fetch 没带头，发送永远静默失败。
+    const token = localStorage.getItem("tiangong_token");
     try {
       const res = await fetch("/api/trpc/message.send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           fromAgent: myId,
           toAgent: selectedAgentId,
@@ -700,9 +707,15 @@ function MessagePanel({
         };
         setConversationMsgs((prev) => [...prev, newMsg]);
         setSendContent("");
+        setSendError(null);
+      } else {
+        // tRPC 错误响应：{error:{message,...}}；把失败显式呈现，不再无声吞掉
+        const reason = data?.error?.message || data?.message || `HTTP ${res.status}`;
+        setSendError(`发送失败：${reason}`);
       }
     } catch (err) {
       console.warn("Failed to send message:", err);
+      setSendError("发送失败：网络错误");
     }
   }, [sendContent, selectedAgentId, agents]);
 
@@ -896,6 +909,21 @@ function MessagePanel({
                   发送
                 </button>
               </div>
+              {sendError && (
+                <div
+                  className="px-3 py-2 rounded text-xs"
+                  style={{
+                    background: "rgba(220,38,38,0.12)",
+                    border: "1px solid rgba(220,38,38,0.35)",
+                    color: "#fca5a5",
+                  }}
+                  onClick={() => setSendError(null)}
+                >
+                  {sendError}
+                  {!localStorage.getItem("tiangong_token") &&
+                    "（未登录——请先在登录页登录，或到 MCP 面板配置 API Key）"}
+                </div>
+              )}
             </>
           )}
         </div>

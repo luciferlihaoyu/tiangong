@@ -469,7 +469,6 @@ export default function TaskDetail() {
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => approveMutation.mutate(
-                  // @ts-expect-error TODO t2: task.approve now takes {taskId, agentId, comment}.
                   { id: taskIdNum, comment: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
@@ -480,7 +479,6 @@ export default function TaskDetail() {
               </button>
               <button
                 onClick={() => rejectMutation.mutate(
-                  // @ts-expect-error TODO t2: task.reject now takes {taskId, agentId, reason}.
                   { id: taskIdNum, comment: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
@@ -491,7 +489,6 @@ export default function TaskDetail() {
               </button>
               <button
                 onClick={() => updateProgressMutation.mutate(
-                  // @ts-expect-error TODO t2: task.updateProgress now takes {taskId, agentId, progress, message}.
                   { id: taskIdNum, progress: task.progress, status: "failed", lifecycleStatus: "failed", error: reviewComment || undefined }
                 )}
                 disabled={isActionPending}

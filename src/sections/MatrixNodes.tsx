@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { trpc } from '@/providers/trpc';
 
 function canCreateWebGLContext() {
   try {
@@ -12,16 +13,16 @@ function canCreateWebGLContext() {
   }
 }
 
-function Scene() {
+function Scene({ nodeCount }: { nodeCount: number }) {
   const groupRef = useRef<THREE.Group>(null);
   const instancedMeshRef = useRef<THREE.InstancedMesh>(null);
-  const positionsRef = useRef<THREE.Vector3[]>([]);
+  const [positions, setPositions] = useState<THREE.Vector3[]>([]);
 
   useEffect(() => {
     if (!instancedMeshRef.current) return;
     const dummy = new THREE.Object3D();
     const sphere: THREE.Vector3[] = [];
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < nodeCount; i++) {
       const radius = 9 + Math.random() * 23;
       const angle = Math.random() * Math.PI * 2;
       const yPos = -6 + Math.random() * 12;
@@ -36,8 +37,8 @@ function Scene() {
       sphere.push(new THREE.Vector3(x, y, z));
     }
     instancedMeshRef.current.instanceMatrix.needsUpdate = true;
-    positionsRef.current = sphere;
-  }, []);
+    setPositions(sphere);
+  }, [nodeCount]);
 
   useFrame((state) => {
     if (!groupRef.current) return;
@@ -48,37 +49,32 @@ function Scene() {
 
   return (
     <group ref={groupRef}>
-      <instancedMesh ref={instancedMeshRef} args={[null as any, null as any, 140]}>
+      <instancedMesh ref={instancedMeshRef} args={[null as any, null as any, nodeCount]}>
         <sphereGeometry args={[1, 16, 16]} />
         <meshBasicMaterial color="#c9a84c" transparent opacity={0.12} />
       </instancedMesh>
-      <Connections positions={positionsRef.current} />
+      <Connections positions={positions} />
     </group>
   );
 }
 
 function Connections({ positions }: { positions: THREE.Vector3[] }) {
   const maxDistance = 4.5;
-  const linesRef = useRef<{ start: THREE.Vector3; end: THREE.Vector3 }[]>([]);
   const lineGeo = useRef<THREE.BufferGeometry>(new THREE.BufferGeometry());
 
   useEffect(() => {
     if (!positions || positions.length === 0) return;
-    const newLines: typeof linesRef.current = [];
+    const arr: number[] = [];
     for (let i = 0; i < positions.length; i++) {
       const p1 = positions[i];
       if (!p1) continue;
       for (let j = i + 1; j < positions.length; j++) {
         const p2 = positions[j];
         if (!p2) continue;
-        if (p1.distanceTo(p2) < maxDistance) newLines.push({ start: p1, end: p2 });
+        if (p1.distanceTo(p2) < maxDistance) {
+          arr.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+        }
       }
-    }
-    linesRef.current = newLines;
-    const arr: number[] = [];
-    for (const line of newLines) {
-      arr.push(line.start.x, line.start.y, line.start.z);
-      arr.push(line.end.x, line.end.y, line.end.z);
     }
     lineGeo.current.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
   }, [positions]);
@@ -93,6 +89,10 @@ function Connections({ positions }: { positions: THREE.Vector3[] }) {
 export default function MatrixNodes() {
   const [webglAvailable, setWebglAvailable] = useState(true);
 
+  // 球体数量绑定真实 Agent 数（装饰性拓扑，8~140 之间）
+  const agentsQuery = trpc.agent.list.useQuery(undefined, { staleTime: 30000 });
+  const nodeCount = Math.max(8, Math.min(140, agentsQuery.data?.length ?? 12));
+
   useEffect(() => {
     setWebglAvailable(canCreateWebGLContext());
   }, []);
@@ -103,7 +103,7 @@ export default function MatrixNodes() {
         <div className="glass-panel p-4 overflow-hidden sci-border">
           <div className="flex items-center justify-between mb-3">
             <div className="section-label">ARCHITECTURE VISUALIZATION · 架构可视化</div>
-            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{webglAvailable ? '140 nodes · 实时渲染' : 'static mode · WebGL 降级'}</span>
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{webglAvailable ? `网络拓扑 · ${nodeCount} 个 Agent 节点` : 'static mode · WebGL 降级'}</span>
           </div>
           <div className="w-full h-[280px] rounded overflow-hidden relative" style={{ background: 'rgba(0,0,0,0.3)' }}>
             {webglAvailable ? (
@@ -114,7 +114,7 @@ export default function MatrixNodes() {
                   gl.domElement.addEventListener('webglcontextlost', () => setWebglAvailable(false), { once: true });
                 }}
                 onError={() => setWebglAvailable(false)}>
-                <Scene />
+                <Scene nodeCount={nodeCount} />
               </Canvas>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center overflow-hidden">

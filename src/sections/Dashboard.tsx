@@ -70,9 +70,9 @@ function SystemMonitor() {
   }).length;
 
   const bars = [
-    { label: 'CPU', value: cpuValue, display: cpuDisplay, color: 'var(--accent-cyan)', sub: '任务吞吐' },
-    { label: 'RAM', value: ramValue, display: ramDisplay, color: 'var(--success)', sub: '在线 Agent' },
-    { label: 'NET', value: Math.min(100, last24hCount * 5), display: `${last24hCount} 个/24h`, color: wsConnected ? 'var(--accent-gold)' : 'var(--accent-red)', sub: '任务创建' },
+    { label: '任务吞吐', value: cpuValue, display: cpuDisplay, color: 'var(--accent-cyan)', sub: 'CPU' },
+    { label: '在线 Agent', value: ramValue, display: ramDisplay, color: 'var(--success)', sub: 'RAM' },
+    { label: '任务创建', value: Math.min(100, last24hCount * 5), display: `${last24hCount} 个/24h`, color: wsConnected ? 'var(--accent-gold)' : 'var(--accent-red)', sub: 'NET' },
   ];
   return (
     <div className="glass-panel p-4 sci-border">

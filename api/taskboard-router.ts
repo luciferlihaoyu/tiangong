@@ -1041,4 +1041,97 @@ export const taskboardRouter = createRouter({
 
       return { success: true };
     }),
+
+  // ===== t1: 迁移自 taskRouter.nextTaskId (L145-149) =====
+  // 任务中心 vs 任务板整合 t1：生成 taskId 避免冲突（与 taskRouter.nextTaskId 同义）。
+  // 鉴权沿用 task 版的 publicQuery（不需登录即可生成 taskId）。
+  nextTaskId: publicQuery.query(async () => {
+    const ts = Date.now().toString(36).slice(-5).toUpperCase();
+    const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+    return { taskId: `TG-${ts}${rand}` };
+  }),
+
+  // ===== t1: 迁移自 taskRouter.promote (L218-255) =====
+  // P9: 提升/降低任务优先级；delta 为正提升，为负降低（最低 0）。
+  // 入参 schema 暂保留 task 版的 `id` 形状（t2 阶段会与前端同步改为 taskId）。
+  promote: authedQuery
+    .input(
+      z.object({
+        id: z.number(),
+        delta: z.number().int().default(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db
+        .select({ id: tasks.id, priority: tasks.priority, taskId: tasks.taskId, name: tasks.name })
+        .from(tasks)
+        .where(eq(tasks.id, input.id))
+        .then((r) => r[0]);
+
+      if (!row) throw new Error("Task not found");
+
+      const oldPriority = row.priority ?? 0;
+      const newPriority = Math.max(0, oldPriority + (input.delta ?? 1));
+
+      await db
+        .update(tasks)
+        .set({ priority: newPriority })
+        .where(eq(tasks.id, input.id));
+
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "promoted",
+        id: input.id,
+        taskId: row.taskId,
+        name: row.name,
+        oldPriority,
+        newPriority,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, oldPriority, newPriority };
+    }),
+
+  // ===== t1: 迁移自 taskRouter.delete (L257-263) =====
+  // 入参 schema 暂保留 task 版的 `id` 形状。
+  delete: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.delete(tasks).where(eq(tasks.id, input.id));
+      return { success: true };
+    }),
+
+  // ===== t1: 迁移自 taskRouter.submitForReview (L268-290) =====
+  // P6: 提交审批 — 将 lifecycleStatus 改为 reviewing，status 保持不变。
+  // 行为完全照搬 task 版（含 update 后再 select 仅用于广播的两次往返），便于 t2 阶段
+  // 前端切换时 zero-diff 对账；t2 完成后会与 promote/delete 一起改为 taskId 入参。
+  submitForReview: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.update(tasks).set({
+        lifecycleStatus: "reviewing",
+        updatedAt: new Date(),
+      }).where(eq(tasks.id, input.id));
+
+      const t = await db
+        .select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId })
+        .from(tasks)
+        .where(eq(tasks.id, input.id))
+        .then((r) => r[0]);
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "reviewing",
+        id: input.id,
+        taskId: t?.taskId,
+        name: t?.name,
+        lifecycleStatus: "reviewing",
+        agentId: t?.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, lifecycleStatus: "reviewing" };
+    }),
 });

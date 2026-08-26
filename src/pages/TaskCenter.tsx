@@ -379,7 +379,7 @@ function TaskDetailDrawer({
   const sc = STATUS_CONFIG[task.status] || STATUS_CONFIG.pending;
 
   // 加载完整任务详情（含 threadMessages、artifacts、timeLine）
-  const detailQuery = trpc.task.getById.useQuery(
+  const detailQuery = trpc.taskboard.get.useQuery(
     { id: task.id },
     { enabled: open, retry: 1, staleTime: 10000 }
   );
@@ -432,13 +432,13 @@ function TaskDetailDrawer({
   // 状态更新 mutation
   const statusMutation = trpc.orch.updateStatus.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.orch.getOverview.invalidate();
     },
   });
-  const taskMutation = trpc.task.updateProgress.useMutation({
+  const taskMutation = trpc.taskboard.progress.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
     },
   });
 
@@ -972,7 +972,7 @@ function CollaborationPanel({ tasks, agents }: CollabPanelProps) {
     onSuccess: () => {
       setLastError(null);
       setDraft("");
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.collab.status.invalidate();
       utils.collab.summary.invalidate();
     },
@@ -981,7 +981,7 @@ function CollaborationPanel({ tasks, agents }: CollabPanelProps) {
 
   const unblockMutation = trpc.collab.unblockReady.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.collab.status.invalidate();
       utils.collab.summary.invalidate();
     },
@@ -1185,7 +1185,7 @@ function CreateTaskDialog({
   const utils = trpc.useUtils();
 
   // 获取自动生成的 taskId
-  const taskIdQuery = trpc.task.nextTaskId.useQuery(undefined, {
+  const taskIdQuery = trpc.taskboard.nextTaskId.useQuery(undefined, {
     enabled: open,
     refetchOnMount: true,
     staleTime: 0,
@@ -1201,7 +1201,7 @@ function CreateTaskDialog({
         setPriority(0);
         setInput("");
         setQueueNow(true);
-        utils.task.list.invalidate();
+        utils.taskboard.list.invalidate();
         utils.orch.getOverview.invalidate();
       }
     },
@@ -1474,8 +1474,16 @@ export default function TaskCenter() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
 
-  const taskQuery = trpc.task.list.useQuery(
-    { status: (filterStatus || undefined) as Task["status"] | undefined, agentId: filterAgentId, keyword: keyword || undefined },
+  // taskboard.list 的 boardStatus 是看板状态（triage/backlog/todo/ready/...），
+  // 而 UI 顶栏的 STATUS_CONFIG 是生命周期 status（pending/queued/running/...）。
+  // 两者在 running/done/failed 重叠，其余互斥。t2 阶段先按 strict 编译通过：
+  // 过滤用 boardStatus 的合法子集——这是 task.* → taskboard.* 的契约变化，
+  // 后续 t3 阶段会单独处理 UI 过滤器语义（不阻塞 t2 的 9 处迁移）。
+  const boardStatusFilter = (filterStatus === "running" || filterStatus === "done" || filterStatus === "failed")
+    ? filterStatus
+    : undefined;
+  const taskQuery = trpc.taskboard.list.useQuery(
+    { boardStatus: boardStatusFilter, agentId: filterAgentId, keyword: keyword || undefined },
     { retry: 1, staleTime: 5000 }
   );
   const tasks = (taskQuery.data || []) as Task[];
@@ -1487,9 +1495,9 @@ export default function TaskCenter() {
   const conversations = (convQuery.data || []) as Conversation[];
 
   const utils = trpc.useUtils();
-  const deleteMutation = trpc.task.delete.useMutation({
+  const deleteMutation = trpc.taskboard.delete.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
     },
   });
 
@@ -1498,37 +1506,37 @@ export default function TaskCenter() {
   useEffect(() => {
     if (!lastMessage) return;
     if (lastMessage.type === "task_update") {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.orch.getOverview.invalidate();
     }
     if (["collab_summary", "collab_unblocked", "collab_delegation_message"].includes(lastMessage.type)) {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.collab.status.invalidate();
       utils.collab.summary.invalidate();
     }
   }, [lastMessage, utils]);
 
   const refresh = useCallback(() => {
-    utils.task.list.invalidate();
+    utils.taskboard.list.invalidate();
   }, [utils]);
 
   const handleDelete = (task: Task) => {
     if (window.confirm(`确定要删除任务「${task.name}」(${task.taskId}) 吗？`)) {
-      deleteMutation.mutate({ id: task.id });
+      deleteMutation.mutate({ taskId: task.id });
     }
   };
 
   // P9: Priority promote/demote
-  const promoteMutation = trpc.task.promote.useMutation({
+  const promoteMutation = trpc.taskboard.promote.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
     },
   });
 
   // Dispatch mutation
-  const dispatchMutation = trpc.task.dispatch.useMutation({
+  const dispatchMutation = trpc.taskboard.dispatch.useMutation({
     onSuccess: () => {
-      utils.task.list.invalidate();
+      utils.taskboard.list.invalidate();
       utils.orch.getOverview.invalidate();
       toast.success("任务已派发，Connector 将自动认领");
     },
@@ -1538,12 +1546,12 @@ export default function TaskCenter() {
   });
 
   const handlePromote = (task: Task) => {
-    promoteMutation.mutate({ id: task.id, delta: 1 });
+    promoteMutation.mutate({ taskId: task.id, delta: 1 });
   };
 
   const handleDemote = (task: Task) => {
     if (task.priority > 0) {
-      promoteMutation.mutate({ id: task.id, delta: -1 });
+      promoteMutation.mutate({ taskId: task.id, delta: -1 });
     }
   };
 

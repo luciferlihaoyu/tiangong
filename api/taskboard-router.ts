@@ -1053,11 +1053,11 @@ export const taskboardRouter = createRouter({
 
   // ===== t1: 迁移自 taskRouter.promote (L218-255) =====
   // P9: 提升/降低任务优先级；delta 为正提升，为负降低（最低 0）。
-  // 入参 schema 暂保留 task 版的 `id` 形状（t2 阶段会与前端同步改为 taskId）。
+  // t2: 入参从 `id` 改为 `taskId`，与 taskboard 其它 mutation 统一。
   promote: authedQuery
     .input(
       z.object({
-        id: z.number(),
+        taskId: z.number(),
         delta: z.number().int().default(1),
       })
     )
@@ -1066,7 +1066,7 @@ export const taskboardRouter = createRouter({
       const row = await db
         .select({ id: tasks.id, priority: tasks.priority, taskId: tasks.taskId, name: tasks.name })
         .from(tasks)
-        .where(eq(tasks.id, input.id))
+        .where(eq(tasks.id, input.taskId))
         .then((r) => r[0]);
 
       if (!row) throw new Error("Task not found");
@@ -1077,12 +1077,12 @@ export const taskboardRouter = createRouter({
       await db
         .update(tasks)
         .set({ priority: newPriority })
-        .where(eq(tasks.id, input.id));
+        .where(eq(tasks.id, input.taskId));
 
       wsManager.broadcastToDashboard({
         type: "task_update",
         action: "promoted",
-        id: input.id,
+        id: input.taskId,
         taskId: row.taskId,
         name: row.name,
         oldPriority,
@@ -1094,37 +1094,36 @@ export const taskboardRouter = createRouter({
     }),
 
   // ===== t1: 迁移自 taskRouter.delete (L257-263) =====
-  // 入参 schema 暂保留 task 版的 `id` 形状。
+  // t2: 入参从 `id` 改为 `taskId`，与 taskboard 其它 mutation 统一。
   delete: authedQuery
-    .input(z.object({ id: z.number() }))
+    .input(z.object({ taskId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      await db.delete(tasks).where(eq(tasks.id, input.id));
+      await db.delete(tasks).where(eq(tasks.id, input.taskId));
       return { success: true };
     }),
 
   // ===== t1: 迁移自 taskRouter.submitForReview (L268-290) =====
   // P6: 提交审批 — 将 lifecycleStatus 改为 reviewing，status 保持不变。
-  // 行为完全照搬 task 版（含 update 后再 select 仅用于广播的两次往返），便于 t2 阶段
-  // 前端切换时 zero-diff 对账；t2 完成后会与 promote/delete 一起改为 taskId 入参。
+  // t2: 入参从 `id` 改为 `taskId`，与 taskboard 其它 mutation 统一。
   submitForReview: authedQuery
-    .input(z.object({ id: z.number() }))
+    .input(z.object({ taskId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
       await db.update(tasks).set({
         lifecycleStatus: "reviewing",
         updatedAt: new Date(),
-      }).where(eq(tasks.id, input.id));
+      }).where(eq(tasks.id, input.taskId));
 
       const t = await db
         .select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId })
         .from(tasks)
-        .where(eq(tasks.id, input.id))
+        .where(eq(tasks.id, input.taskId))
         .then((r) => r[0]);
       wsManager.broadcastToDashboard({
         type: "task_update",
         action: "reviewing",
-        id: input.id,
+        id: input.taskId,
         taskId: t?.taskId,
         name: t?.name,
         lifecycleStatus: "reviewing",

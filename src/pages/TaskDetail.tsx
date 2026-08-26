@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
 import {
   ArrowLeft,
   Target,
@@ -150,8 +151,11 @@ export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const taskIdNum = id ? Number(id) : NaN;
+  const { user } = useAuth();
+  // taskboard 审批/驳回/进度 mutation 都要求 agentId（操作者），用当前登录用户 id 填入。
+  const operatorAgentId = user?.id ?? 0;
 
-  const taskQuery = trpc.task.getById.useQuery(
+  const taskQuery = trpc.taskboard.get.useQuery(
     { id: taskIdNum },
     { enabled: !isNaN(taskIdNum) && taskIdNum > 0, retry: 1, staleTime: 5000 }
   );
@@ -185,10 +189,10 @@ export default function TaskDetail() {
   const utils = trpc.useUtils();
   const [reviewComment, setReviewComment] = useState("");
 
-  const approveMutation = trpc.task.approve.useMutation({
+  const approveMutation = trpc.taskboard.approve.useMutation({
     onSuccess: () => {
       toast.success("任务已审批通过");
-      utils.task.getById.invalidate({ id: taskIdNum });
+      utils.taskboard.get.invalidate({ id: taskIdNum });
       setReviewComment("");
     },
     onError: (err) => {
@@ -196,10 +200,10 @@ export default function TaskDetail() {
     },
   });
 
-  const rejectMutation = trpc.task.reject.useMutation({
+  const rejectMutation = trpc.taskboard.reject.useMutation({
     onSuccess: () => {
       toast.success("任务已退回修改");
-      utils.task.getById.invalidate({ id: taskIdNum });
+      utils.taskboard.get.invalidate({ id: taskIdNum });
       setReviewComment("");
     },
     onError: (err) => {
@@ -207,10 +211,10 @@ export default function TaskDetail() {
     },
   });
 
-  const updateProgressMutation = trpc.task.updateProgress.useMutation({
+  const updateProgressMutation = trpc.taskboard.progress.useMutation({
     onSuccess: () => {
       toast.success("任务已拒绝");
-      utils.task.getById.invalidate({ id: taskIdNum });
+      utils.taskboard.get.invalidate({ id: taskIdNum });
       setReviewComment("");
     },
     onError: (err) => {
@@ -469,7 +473,7 @@ export default function TaskDetail() {
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => approveMutation.mutate(
-                  { id: taskIdNum, comment: reviewComment || undefined }
+                  { taskId: taskIdNum, agentId: operatorAgentId, comment: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
@@ -479,7 +483,7 @@ export default function TaskDetail() {
               </button>
               <button
                 onClick={() => rejectMutation.mutate(
-                  { id: taskIdNum, comment: reviewComment || undefined }
+                  { taskId: taskIdNum, agentId: operatorAgentId, reason: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
@@ -489,7 +493,7 @@ export default function TaskDetail() {
               </button>
               <button
                 onClick={() => updateProgressMutation.mutate(
-                  { id: taskIdNum, progress: task.progress, status: "failed", lifecycleStatus: "failed", error: reviewComment || undefined }
+                  { taskId: taskIdNum, agentId: operatorAgentId, progress: 100, message: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"

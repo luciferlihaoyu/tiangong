@@ -979,6 +979,17 @@ export default function Dashboard() {
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [editAgent, setEditAgent] = useState<MockAgent | null>(null);
 
+  // 显式错误提示（组织创建失败）+ 底部链接 toast
+  const [orgError, setOrgError] = useState<string | null>(null);
+  const [footToast, setFootToast] = useState<string | null>(null);
+  const footToastTimerRef = useRef<number>(0);
+  const showFootToast = useCallback((msg: string) => {
+    setFootToast(msg);
+    window.clearTimeout(footToastTimerRef.current);
+    footToastTimerRef.current = window.setTimeout(() => setFootToast(null), 5000);
+  }, []);
+  useEffect(() => () => window.clearTimeout(footToastTimerRef.current), []);
+
   const filteredTasks = (() => {
     switch (filterTab) {
       case 'running': return data.tasks.filter(t => t.status === 'running');
@@ -1009,7 +1020,16 @@ export default function Dashboard() {
   const handleAddAgent = (v: Record<string, string>) => { data.addAgent(v); setShowAgentForm(false); };
   const handleEditAgent = (v: Record<string, string>) => { if (editAgent) { data.updateAgent(editAgent.id, { name: v.name, system: v.system, source: v.source, model: v.model, role: v.role, description: v.description, capabilities: v.capabilities }); setEditAgent(null); } };
   const handleAddTask = (v: Record<string, string>) => { data.addTask(v); setShowTaskForm(false); };
-  const handleAddOrg = (v: Record<string, string>) => { data.addOrg(v); setShowOrgForm(false); };
+  const handleAddOrg = async (v: Record<string, string>) => {
+    try {
+      await data.addOrg(v);
+      setOrgError(null);
+      setShowOrgForm(false);
+    } catch (err) {
+      setShowOrgForm(false);
+      setOrgError("创建组织失败：" + (err instanceof Error ? err.message : String(err)));
+    }
+  };
 
   return (
     <div className="relative z-10 min-h-screen pt-4 pb-6 px-4 md:px-6 bg-grid" style={{ backgroundColor: 'transparent' }}>
@@ -1034,6 +1054,21 @@ export default function Dashboard() {
             <SystemMonitor />
           </div>
         </div>
+
+        {/* ── 组织创建失败提示（点击关闭）── */}
+        {orgError && (
+          <div
+            className="px-3 py-2 rounded text-xs mb-4 cursor-pointer"
+            style={{
+              background: "rgba(220,38,38,0.12)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              color: "#fca5a5",
+            }}
+            onClick={() => setOrgError(null)}
+          >
+            {orgError}
+          </div>
+        )}
 
         {/* ── 主 Tab 导航 ── */}
         <div className="flex items-center gap-1 mb-4">
@@ -1151,7 +1186,11 @@ export default function Dashboard() {
           <div className="flex items-center justify-between py-2">
             <div className="flex items-center gap-4">
               {['GitHub', '文档', 'Discord'].map(l => (
-                <a key={l} href="#" className="text-xs transition-colors hover:text-[var(--accent-red)]" style={{ color: 'var(--text-muted)' }}>{l}</a>
+                <button key={l} type="button" onClick={() => showFootToast(`「${l}」即将上线`)}
+                  className="text-xs transition-colors hover:text-[var(--accent-red)] cursor-pointer"
+                  style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--text-muted)', fontFamily: 'inherit' }}>
+                  {l}
+                </button>
               ))}
             </div>
             <div className="flex items-center gap-3">
@@ -1170,6 +1209,22 @@ export default function Dashboard() {
             <AgentForm agent={editAgent} onSubmit={handleEditAgent} onCancel={() => setEditAgent(null)} />
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* ── 底部链接 toast（5s 自动消失，点击关闭）── */}
+      {footToast && (
+        <div
+          onClick={() => setFootToast(null)}
+          className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded text-xs font-mono cursor-pointer"
+          style={{
+            background: 'rgba(10, 10, 18, 0.95)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          {footToast}
+        </div>
       )}
     </div>
   );

@@ -199,6 +199,8 @@ export function useDataSource() {
         await orgListQuery.refetch();
       } catch (err) {
         console.error("[useDataSource] org.orgCreate failed:", err);
+        // rethrow：调用方（Dashboard handleAddOrg）需要显式展示错误，不能静默吞掉
+        throw err instanceof Error ? err : new Error(String(err));
       }
       return;
     }

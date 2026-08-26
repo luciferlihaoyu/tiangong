@@ -445,13 +445,18 @@ function TaskDetailDrawer({
   // 写入记事板
   const [selectedConv, setSelectedConv] = useState<number | null>(null);
   const [writingToBoard, setWritingToBoard] = useState(false);
+  const [boardError, setBoardError] = useState<string | null>(null);
   const convMutation = trpc.conversation.appendTaskOutput.useMutation({
     onSuccess: () => {
       setWritingToBoard(false);
+      setBoardError(null);
       utils.conversation.list.invalidate();
       utils.conversation.stats.invalidate();
     },
-    onError: () => setWritingToBoard(false),
+    onError: (err) => {
+      setWritingToBoard(false);
+      setBoardError("写入记事板失败：" + err.message);
+    },
   });
 
   const handleStatusChange = (newStatus: "queued" | "running" | "done" | "failed") => {
@@ -461,6 +466,7 @@ function TaskDetailDrawer({
   const handleWriteToBoard = () => {
     if (!selectedConv || !agent || !task.output) return;
     setWritingToBoard(true);
+    setBoardError(null);
     convMutation.mutate({
       conversationId: selectedConv,
       fromAgentId: agent.id,
@@ -767,10 +773,18 @@ function TaskDetailDrawer({
                       ✓ 已写入
                     </span>
                   )}
-                  {convMutation.isError && (
-                    <span className="text-[11px]" style={{ color: "var(--accent-red)" }}>
-                      写入失败: {convMutation.error?.message}
-                    </span>
+                  {boardError && (
+                    <div
+                      className="w-full px-3 py-2 rounded text-xs cursor-pointer"
+                      style={{
+                        background: "rgba(220,38,38,0.12)",
+                        border: "1px solid rgba(220,38,38,0.35)",
+                        color: "#fca5a5",
+                      }}
+                      onClick={() => setBoardError(null)}
+                    >
+                      {boardError}
+                    </div>
                   )}
                 </div>
               )}

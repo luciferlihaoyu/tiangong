@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import * as THREE from 'three';
 
 const LOG_MESSAGES = [
@@ -10,6 +11,22 @@ export default function FooterTerminal() {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
+  const navigate = useNavigate();
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number>(0);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
+
+  const handleStartNow = useCallback(() => {
+    if (localStorage.getItem("tiangong_token")) navigate("/missions");
+    else navigate("/login");
+  }, [navigate]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -169,11 +186,13 @@ export default function FooterTerminal() {
             </code>
           </div>
           <div className="flex items-center justify-center gap-3">
-            <button className="px-5 py-2 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110"
+            <button type="button" onClick={handleStartNow}
+              className="px-5 py-2 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110 cursor-pointer"
               style={{ background: 'var(--accent-red)', color: '#fff', boxShadow: '0 0 16px rgba(194, 58, 48, 0.25)' }}>
               立即开始
             </button>
-            <button className="px-5 py-2 rounded text-xs font-mono transition-all hover:bg-[rgba(180,200,255,0.04)]"
+            <button type="button" onClick={() => navigate('/console')}
+              className="px-5 py-2 rounded text-xs font-mono transition-all hover:bg-[rgba(180,200,255,0.04)] cursor-pointer"
               style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)' }}>
               阅读文档
             </button>
@@ -188,12 +207,30 @@ export default function FooterTerminal() {
             </div>
             <div className="flex items-center gap-4">
               {['GitHub', '文档', 'Discord', 'Twitter'].map((l) => (
-                <a key={l} href="#" className="hover:text-[var(--accent-red)] transition-colors">{l}</a>
+                <button key={l} type="button" onClick={() => showToast(`「${l}」即将上线`)}
+                  className="hover:text-[var(--accent-red)] transition-colors cursor-pointer"
+                  style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--text-muted)', fontFamily: 'inherit', fontSize: 'inherit' }}>
+                  {l}
+                </button>
               ))}
             </div>
           </div>
         </div>
       </div>
+      {toast && (
+        <div
+          onClick={() => setToast(null)}
+          className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded text-xs font-mono cursor-pointer"
+          style={{
+            background: 'rgba(10, 10, 18, 0.95)',
+            border: '1px solid var(--border-default)',
+            color: 'var(--text-primary)',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          {toast}
+        </div>
+      )}
     </section>
   );
 }

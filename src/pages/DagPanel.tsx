@@ -389,6 +389,7 @@ function PlanGenerator() {
   const [description, setDescription] = useState("");
   const [plan, setPlan] = useState<TaskPlan | null>(null);
   const [loading, setLoading] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const generatePlan = trpc.plan.generatePlan.useQuery(
     { title, description },
@@ -398,12 +399,23 @@ function PlanGenerator() {
   const handleGenerate = async () => {
     if (!title || !description) return;
     setLoading(true);
+    setGenError(null);
     try {
       const result = await generatePlan.refetch();
       if (result.data) {
         setPlan(result.data as TaskPlan);
+      } else if (result.error) {
+        // react-query 的 refetch 不 reject，失败走 result.error
+        setGenError(
+          "AI 编排生成失败：" +
+            (result.error instanceof Error ? result.error.message : String(result.error))
+        );
       }
-    } catch {}
+    } catch (err) {
+      setGenError(
+        "AI 编排生成失败：" + (err instanceof Error ? err.message : String(err))
+      );
+    }
     setLoading(false);
   };
 
@@ -445,6 +457,20 @@ function PlanGenerator() {
           <Lightbulb size={14} /> {loading ? "生成中..." : "生成计划"}
         </button>
       </div>
+
+      {genError && (
+        <div
+          className="px-3 py-2 rounded text-xs mb-4 cursor-pointer"
+          style={{
+            background: "rgba(220,38,38,0.12)",
+            border: "1px solid rgba(220,38,38,0.35)",
+            color: "#fca5a5",
+          }}
+          onClick={() => setGenError(null)}
+        >
+          {genError}
+        </div>
+      )}
 
       {plan && (
         <div className="space-y-3">

@@ -8,6 +8,7 @@
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
+import { AdminGate } from "@/components/AdminGate";
 import { Shield, ShieldOff, Plus, X, Clock, User, AlertTriangle } from "lucide-react";
 
 interface AllowlistEntry {
@@ -144,13 +145,15 @@ export default function GuardPanel() {
             <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               模型白名单 · MODEL ALLOWLIST
             </div>
-            <button
-              onClick={() => setShowAddAllowlist(true)}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded font-mono"
-              style={{ background: "rgba(74,158,255,0.1)", border: "1px solid rgba(74,158,255,0.3)", color: "var(--accent-cyan)" }}
-            >
-              <Plus size={12} /> 添加
-            </button>
+            <AdminGate>
+              <button
+                onClick={() => setShowAddAllowlist(true)}
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded font-mono"
+                style={{ background: "rgba(74,158,255,0.1)", border: "1px solid rgba(74,158,255,0.3)", color: "var(--accent-cyan)" }}
+              >
+                <Plus size={12} /> 添加
+              </button>
+            </AdminGate>
           </div>
 
           {showAddAllowlist && (
@@ -239,13 +242,15 @@ export default function GuardPanel() {
                     <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
                       {entry.createdBy} · {fmtDateTime(entry.createdAt)}
                     </span>
-                    <button
-                      onClick={() => removeAllowlist.mutate({ id: entry.id })}
-                      className="p-1 rounded hover:bg-[rgba(255,80,80,0.1)]"
-                      style={{ color: "var(--danger)" }}
-                    >
-                      <X size={12} />
-                    </button>
+                    <AdminGate>
+                      <button
+                        onClick={() => removeAllowlist.mutate({ id: entry.id })}
+                        className="p-1 rounded hover:bg-[rgba(255,80,80,0.1)]"
+                        style={{ color: "var(--danger)" }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </AdminGate>
                   </div>
                 </div>
               ))}
@@ -259,13 +264,15 @@ export default function GuardPanel() {
             <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               高价模型授权 · HIGH-COST MODEL AUTHORIZATIONS
             </div>
-            <button
-              onClick={() => setShowCreateAuth(true)}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded font-mono"
-              style={{ background: "rgba(255,200,50,0.1)", border: "1px solid rgba(255,200,50,0.3)", color: "var(--accent-gold)" }}
-            >
-              <Plus size={12} /> 新建授权
-            </button>
+            <AdminGate>
+              <button
+                onClick={() => setShowCreateAuth(true)}
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded font-mono"
+                style={{ background: "rgba(255,200,50,0.1)", border: "1px solid rgba(255,200,50,0.3)", color: "var(--accent-gold)" }}
+              >
+                <Plus size={12} /> 新建授权
+              </button>
+            </AdminGate>
           </div>
 
           {showCreateAuth && (
@@ -388,13 +395,15 @@ export default function GuardPanel() {
                         </span>
                       )}
                       {!expired && (
-                        <button
-                          onClick={() => revokeAuth.mutate({ id: auth.id })}
-                          className="p-1 rounded hover:bg-[rgba(255,80,80,0.1)]"
-                          style={{ color: "var(--danger)" }}
-                        >
-                          <X size={12} />
-                        </button>
+                        <AdminGate>
+                          <button
+                            onClick={() => revokeAuth.mutate({ id: auth.id })}
+                            className="p-1 rounded hover:bg-[rgba(255,80,80,0.1)]"
+                            style={{ color: "var(--danger)" }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </AdminGate>
                       )}
                     </div>
                   </div>

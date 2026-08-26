@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
+import { AdminGate } from "@/components/AdminGate";
 import { Cpu, RefreshCw, Star, Check, Users, CloudDownload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -72,16 +73,18 @@ export default function ModelsPanel() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => syncPricingMutation.mutate()}
-              disabled={syncPricingMutation.isPending}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors disabled:opacity-50"
-              style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
-              title={`从官方定价源（${pricingStatusQuery.data?.sourceHost ?? "basellm.github.io"}）同步最新定价，与天枢同源`}
-            >
-              <CloudDownload size={14} className={syncPricingMutation.isPending ? "animate-pulse" : ""} />
-              {syncPricingMutation.isPending ? "同步中..." : "同步官方定价"}
-            </button>
+            <AdminGate>
+              <button
+                onClick={() => syncPricingMutation.mutate()}
+                disabled={syncPricingMutation.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors disabled:opacity-50"
+                style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
+                title={`从官方定价源（${pricingStatusQuery.data?.sourceHost ?? "basellm.github.io"}）同步最新定价，与天枢同源`}
+              >
+                <CloudDownload size={14} className={syncPricingMutation.isPending ? "animate-pulse" : ""} />
+                {syncPricingMutation.isPending ? "同步中..." : "同步官方定价"}
+              </button>
+            </AdminGate>
             <button
               onClick={() => { listQuery.refetch(); agentsQuery.refetch(); }}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
@@ -171,14 +174,16 @@ export default function ModelsPanel() {
                         </td>
                         <td className="py-2 px-3">
                           {!isDefault && (
-                            <button
-                              onClick={() => setDefaultMutation.mutate({ model: m })}
-                              disabled={setDefaultMutation.isPending}
-                              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors hover:bg-[rgba(180,200,255,0.06)]"
-                              style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
-                            >
-                              <Check size={11} /> 设为默认
-                            </button>
+                            <AdminGate>
+                              <button
+                                onClick={() => setDefaultMutation.mutate({ model: m })}
+                                disabled={setDefaultMutation.isPending}
+                                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors hover:bg-[rgba(180,200,255,0.06)]"
+                                style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
+                              >
+                                <Check size={11} /> 设为默认
+                              </button>
+                            </AdminGate>
                           )}
                         </td>
                       </tr>
@@ -219,23 +224,25 @@ export default function ModelsPanel() {
                         {a.model || "跟随默认"}
                       </td>
                       <td className="py-2 px-3">
-                        <select
-                          value={a.model ?? ""}
-                          onChange={(e) =>
-                            setAgentModelMutation.mutate({ agentId: a.id, model: e.target.value === "" ? null : e.target.value })
-                          }
-                          className="text-[11px] px-2 py-1 rounded font-mono"
-                          style={{
-                            background: "rgba(0,0,0,0.3)",
-                            border: "1px solid var(--border-default)",
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          <option value="">跟随默认{defaultModel ? ` (${defaultModel})` : ""}</option>
-                          {models.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))}
-                        </select>
+                        <AdminGate>
+                          <select
+                            value={a.model ?? ""}
+                            onChange={(e) =>
+                              setAgentModelMutation.mutate({ agentId: a.id, model: e.target.value === "" ? null : e.target.value })
+                            }
+                            className="text-[11px] px-2 py-1 rounded font-mono"
+                            style={{
+                              background: "rgba(0,0,0,0.3)",
+                              border: "1px solid var(--border-default)",
+                              color: "var(--text-primary)",
+                            }}
+                          >
+                            <option value="">跟随默认{defaultModel ? ` (${defaultModel})` : ""}</option>
+                            {models.map((m) => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </AdminGate>
                       </td>
                     </tr>
                   ))}

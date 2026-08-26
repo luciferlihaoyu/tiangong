@@ -3,6 +3,7 @@
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
+import { AdminGate } from "@/components/AdminGate";
 import { DollarSign, Plus, Trash2, Edit3, Save, X, RefreshCw } from "lucide-react";
 
 interface PricingForm {
@@ -133,13 +134,15 @@ export default function PricingPanel() {
             >
               <RefreshCw size={14} /> 刷新
             </button>
-            <button
-              onClick={handleOpenCreate}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors"
-              style={{ background: "var(--accent-red)", color: "#fff" }}
-            >
-              <Plus size={14} /> 新增定价
-            </button>
+            <AdminGate>
+              <button
+                onClick={handleOpenCreate}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors"
+                style={{ background: "var(--accent-red)", color: "#fff" }}
+              >
+                <Plus size={14} /> 新增定价
+              </button>
+            </AdminGate>
           </div>
         </div>
 
@@ -175,12 +178,14 @@ export default function PricingPanel() {
                       <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-secondary)" }}>{r.notes ?? "-"}</td>
                       <td className="py-2 px-3">
                         <div className="flex items-center gap-2">
-                          <button onClick={() => handleOpenEdit(r)} className="p-1 rounded hover:bg-[rgba(180,200,255,0.05)]" style={{ color: "var(--text-muted)" }} title="编辑">
-                            <Edit3 size={12} />
-                          </button>
-                          <button onClick={() => handleDelete(r.model)} className="p-1 rounded hover:bg-[rgba(255,50,50,0.1)]" style={{ color: "var(--accent-red-bright)" }} title="删除">
-                            <Trash2 size={12} />
-                          </button>
+                          <AdminGate>
+                            <button onClick={() => handleOpenEdit(r)} className="p-1 rounded hover:bg-[rgba(180,200,255,0.05)]" style={{ color: "var(--text-muted)" }} title="编辑">
+                              <Edit3 size={12} />
+                            </button>
+                            <button onClick={() => handleDelete(r.model)} className="p-1 rounded hover:bg-[rgba(255,50,50,0.1)]" style={{ color: "var(--accent-red-bright)" }} title="删除">
+                              <Trash2 size={12} />
+                            </button>
+                          </AdminGate>
                         </div>
                       </td>
                     </tr>

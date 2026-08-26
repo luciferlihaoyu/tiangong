@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/providers/trpc";
+import { useAdminGate } from "@/components/AdminGate";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,16 @@ interface TaskDetailModalProps {
   onClose: () => void;
 }
 
+/**
+ * 后端 taskboard 中 adminQuery 保护的操作（普通用户调用返回 403）。
+ * claim / submit / block / unblock / updateStatus 为 authedQuery，所有登录用户可用。
+ */
+const ADMIN_ONLY_ACTIONS: ReadonlySet<string> = new Set([
+  "approve",
+  "reject",
+  "requestChanges",
+]);
+
 export function TaskDetailModal({
   task,
   agents,
@@ -74,6 +85,13 @@ export function TaskDetailModal({
   const currentStatus = (task?.boardStatus || "triage") as BoardStatus;
   const statusConfig = BOARD_STATUS_CONFIG[currentStatus];
   const actions = STATUS_ACTIONS[currentStatus] || [];
+
+  const isAdmin = useAdminGate();
+  // 非管理员隐藏 approve / reject / requestChanges（后端 adminQuery，点了只会 403）
+  const visibleActions = useMemo(
+    () => actions.filter((action) => !ADMIN_ONLY_ACTIONS.has(action.api) || isAdmin),
+    [actions, isAdmin]
+  );
 
   const isCurrentAgentReviewer = useMemo(() => {
     if (!task?.reviewerId) return false;
@@ -292,7 +310,7 @@ export function TaskDetailModal({
         <div className="flex flex-col overflow-hidden" style={{ maxHeight: "calc(90vh - 60px)" }}>
           <ScrollArea className="flex-1 px-5 py-4">
             {/* Actions */}
-            {actions.length > 0 && (
+            {visibleActions.length > 0 && (
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
@@ -301,7 +319,7 @@ export function TaskDetailModal({
                   <Separator className="flex-1" style={{ background: "var(--border-default)" }} />
                 </div>
                 <div className="flex flex-wrap gap-2 mb-2">
-                  {actions.map((action) => (
+                  {visibleActions.map((action) => (
                     <button
                       key={`${action.api}-${action.to}`}
                       onClick={() => handleAction(action)}

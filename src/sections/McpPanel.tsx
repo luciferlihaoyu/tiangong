@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AdminGate } from "@/components/AdminGate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -426,37 +427,39 @@ function ApiKeyRow({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {isActive ? (
+          <AdminGate>
+            {isActive ? (
+              <button
+                onClick={onRevoke}
+                className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors"
+                style={{ color: "var(--accent-red)" }}
+              >
+                撤销
+              </button>
+            ) : (
+              <button
+                onClick={onActivate}
+                className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-gold)] transition-colors"
+                style={{ color: "var(--accent-gold)" }}
+              >
+                启用
+              </button>
+            )}
             <button
-              onClick={onRevoke}
-              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)] transition-colors"
+              onClick={onEdit}
+              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors"
+              style={{ color: "var(--accent-cyan)" }}
+            >
+              编辑
+            </button>
+            <button
+              onClick={onDelete}
+              className="text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)] transition-colors"
               style={{ color: "var(--accent-red)" }}
             >
-              撤销
+              ✕
             </button>
-          ) : (
-            <button
-              onClick={onActivate}
-              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-gold)] transition-colors"
-              style={{ color: "var(--accent-gold)" }}
-            >
-              启用
-            </button>
-          )}
-          <button
-            onClick={onEdit}
-            className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] transition-colors"
-            style={{ color: "var(--accent-cyan)" }}
-          >
-            编辑
-          </button>
-          <button
-            onClick={onDelete}
-            className="text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)] transition-colors"
-            style={{ color: "var(--accent-red)" }}
-          >
-            ✕
-          </button>
+          </AdminGate>
         </div>
       </div>
 
@@ -1046,17 +1049,19 @@ export default function McpPanel() {
         ))}
         <div className="flex-1" />
         {tab === "keys" && (
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110"
-            style={{
-              background: "var(--accent-red)",
-              color: "#fff",
-              boxShadow: "0 0 12px rgba(194,58,48,0.2)",
-            }}
-          >
-            + 新建 Key
-          </button>
+          <AdminGate>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-3 py-1.5 rounded text-xs font-bold tracking-wider transition-all hover:brightness-110"
+              style={{
+                background: "var(--accent-red)",
+                color: "#fff",
+                boxShadow: "0 0 12px rgba(194,58,48,0.2)",
+              }}
+            >
+              + 新建 Key
+            </button>
+          </AdminGate>
         )}
       </div>
 

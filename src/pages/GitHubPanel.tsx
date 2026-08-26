@@ -10,6 +10,7 @@
 import { useState } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/providers/trpc";
+import { AdminGate } from "@/components/AdminGate";
 import type { AppRouter } from "../../api/router";
 import {
   GitBranch,
@@ -187,13 +188,15 @@ function RepoPanel({ repos, onRefresh }: { repos: readonly GithubRepo[]; onRefre
           >
             <RefreshCw size={12} />
           </button>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
-            style={{ background: "var(--accent-cyan)", color: "#000" }}
-          >
-            <Plus size={12} /> 添加
-          </button>
+          <AdminGate>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
+              style={{ background: "var(--accent-cyan)", color: "#000" }}
+            >
+              <Plus size={12} /> 添加
+            </button>
+          </AdminGate>
         </div>
       </div>
 
@@ -325,13 +328,15 @@ function PermissionPanel({
           >
             <RefreshCw size={12} />
           </button>
-          <button
-            onClick={() => setShowGrant(true)}
-            className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
-            style={{ background: "var(--accent-cyan)", color: "#000" }}
-          >
-            <Plus size={12} /> 授权
-          </button>
+          <AdminGate>
+            <button
+              onClick={() => setShowGrant(true)}
+              className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
+              style={{ background: "var(--accent-cyan)", color: "#000" }}
+            >
+              <Plus size={12} /> 授权
+            </button>
+          </AdminGate>
         </div>
       </div>
 
@@ -408,14 +413,16 @@ function PermissionPanel({
                     {p.permissionLevel}
                   </span>
                 </div>
-                <button
-                  onClick={() => revokeMut.mutate({ permId: p.id })}
-                  className="p-1 rounded hover:bg-[rgba(255,255,255,0.05)]"
-                  style={{ color: "var(--text-muted)" }}
-                  title="撤销权限"
-                >
-                  <Trash2 size={12} />
-                </button>
+                <AdminGate>
+                  <button
+                    onClick={() => revokeMut.mutate({ permId: p.id })}
+                    className="p-1 rounded hover:bg-[rgba(255,255,255,0.05)]"
+                    style={{ color: "var(--text-muted)" }}
+                    title="撤销权限"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </AdminGate>
               </div>
             );
           })}
@@ -527,13 +534,15 @@ function PRApprovalPanel({
           >
             <RefreshCw size={12} />
           </button>
-          <button
-            onClick={() => setShowRegister(true)}
-            className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
-            style={{ background: "var(--accent-gold)", color: "#000" }}
-          >
-            <Plus size={12} /> 注册 PR
-          </button>
+          <AdminGate>
+            <button
+              onClick={() => setShowRegister(true)}
+              className="flex items-center gap-1 text-[10px] font-mono px-2 py-1 rounded"
+              style={{ background: "var(--accent-gold)", color: "#000" }}
+            >
+              <Plus size={12} /> 注册 PR
+            </button>
+          </AdminGate>
         </div>
       </div>
 
@@ -642,22 +651,24 @@ function PRApprovalPanel({
                 <StatusBadge value={pr.status} />
                 {pr.status === "pending" && (
                   <>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); approveMut.mutate({ prId: pr.id }); }}
-                      className="p-1 rounded hover:bg-[rgba(0,255,0,0.1)]"
-                      style={{ color: "var(--success)" }}
-                      title="批准"
-                    >
-                      <CheckCircle2 size={14} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setShowReject(pr.id); setRejectReason(""); }}
-                      className="p-1 rounded hover:bg-[rgba(255,0,0,0.1)]"
-                      style={{ color: "var(--danger)" }}
-                      title="拒绝"
-                    >
-                      <XCircle size={14} />
-                    </button>
+                    <AdminGate>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); approveMut.mutate({ prId: pr.id }); }}
+                        className="p-1 rounded hover:bg-[rgba(0,255,0,0.1)]"
+                        style={{ color: "var(--success)" }}
+                        title="批准"
+                      >
+                        <CheckCircle2 size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setShowReject(pr.id); setRejectReason(""); }}
+                        className="p-1 rounded hover:bg-[rgba(255,0,0,0.1)]"
+                        style={{ color: "var(--danger)" }}
+                        title="拒绝"
+                      >
+                        <XCircle size={14} />
+                      </button>
+                    </AdminGate>
                   </>
                 )}
               </div>
@@ -814,14 +825,16 @@ export default function GitHubPanel() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => bootstrapMut.mutate()}
-              disabled={bootstrapMut.isPending}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono disabled:opacity-50"
-              style={{ background: "var(--accent-gold)", color: "#000" }}
-            >
-              <Shield size={14} /> {bootstrapMut.isPending ? "初始化中" : "初始化天宫权限"}
-            </button>
+            <AdminGate>
+              <button
+                onClick={() => bootstrapMut.mutate()}
+                disabled={bootstrapMut.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono disabled:opacity-50"
+                style={{ background: "var(--accent-gold)", color: "#000" }}
+              >
+                <Shield size={14} /> {bootstrapMut.isPending ? "初始化中" : "初始化天宫权限"}
+              </button>
+            </AdminGate>
             <button
               onClick={handleRefresh}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"

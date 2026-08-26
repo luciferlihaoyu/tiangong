@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import { trpc } from "@/providers/trpc";
+import { AdminGate } from "@/components/AdminGate";
 import { HardDrive, RefreshCw, FolderOpen, File, ArrowLeft, ExternalLink, Save, Trash2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -228,23 +229,27 @@ export default function AlistPanel() {
               />
               任务产物自动上传
             </label>
-            <button
-              onClick={handleSave}
-              disabled={saveMutation.isPending}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
-              style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
-            >
-              <Save size={13} /> {saveMutation.isPending ? "保存并探测中..." : "保存并测试连接"}
-            </button>
-            {status?.source === "ui" && (
+            <AdminGate>
               <button
-                onClick={() => clearMutation.mutate()}
-                disabled={clearMutation.isPending}
+                onClick={handleSave}
+                disabled={saveMutation.isPending}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
-                style={{ color: "var(--accent-red)", border: "1px solid var(--accent-red)" }}
+                style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
               >
-                <Trash2 size={13} /> 清除界面配置
+                <Save size={13} /> {saveMutation.isPending ? "保存并探测中..." : "保存并测试连接"}
               </button>
+            </AdminGate>
+            {status?.source === "ui" && (
+              <AdminGate>
+                <button
+                  onClick={() => clearMutation.mutate()}
+                  disabled={clearMutation.isPending}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                  style={{ color: "var(--accent-red)", border: "1px solid var(--accent-red)" }}
+                >
+                  <Trash2 size={13} /> 清除界面配置
+                </button>
+              </AdminGate>
             )}
           </div>
           <div className="text-[10px] font-mono mt-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>

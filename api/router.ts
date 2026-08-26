@@ -1,6 +1,6 @@
 import { localAuthRouter } from "./local-auth-router";
 import { agentRouter } from "./agent-router";
-import { taskRouter } from "./task-router";
+import { unifiedTaskRouter } from "./lib/task-unified-router";
 import { messageRouter } from "./message-router";
 import { systemRouter } from "./system-router";
 import { orgRouter } from "./org-router";
@@ -39,7 +39,7 @@ export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
   auth: localAuthRouter,
   agent: agentRouter,
-  task: taskRouter,
+  task: unifiedTaskRouter,
   dag: dagRouter,
   execution: executionRouter,
   message: messageRouter,

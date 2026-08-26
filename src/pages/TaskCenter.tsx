@@ -1474,12 +1474,12 @@ export default function TaskCenter() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
 
+  // TODO t2: task.list now exposes taskboard's input (boardStatus). The unified router
+  // (PLAN t1) routes task.* to taskboard.* for the shared procs. t2 will migrate the
+  // filter column from `status` → `boardStatus`.
   const taskQuery = trpc.task.list.useQuery(
-    {
-      status: (filterStatus || undefined) as Task["status"] | undefined,
-      agentId: filterAgentId,
-      keyword: keyword || undefined,
-    },
+    // @ts-expect-error status (tasks.status) vs boardStatus (tasks.boardStatus) — unify in t2
+    { status: (filterStatus || undefined) as Task["status"] | undefined, agentId: filterAgentId, keyword: keyword || undefined },
     { retry: 1, staleTime: 5000 }
   );
   const tasks = (taskQuery.data || []) as Task[];

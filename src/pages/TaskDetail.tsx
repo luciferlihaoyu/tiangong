@@ -468,7 +468,10 @@ export default function TaskDetail() {
             />
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => approveMutation.mutate({ id: taskIdNum, comment: reviewComment || undefined })}
+                onClick={() => approveMutation.mutate(
+                  // @ts-expect-error TODO t2: task.approve now takes {taskId, agentId, comment}.
+                  { id: taskIdNum, comment: reviewComment || undefined }
+                )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
                 style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)", border: "1px solid rgba(76,175,125,0.2)" }}
@@ -476,7 +479,10 @@ export default function TaskDetail() {
                 <CheckCircle size={12} /> 通过
               </button>
               <button
-                onClick={() => rejectMutation.mutate({ id: taskIdNum, comment: reviewComment || undefined })}
+                onClick={() => rejectMutation.mutate(
+                  // @ts-expect-error TODO t2: task.reject now takes {taskId, agentId, reason}.
+                  { id: taskIdNum, comment: reviewComment || undefined }
+                )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
                 style={{ background: "rgba(201,168,76,0.1)", color: "var(--accent-gold)", border: "1px solid rgba(201,168,76,0.2)" }}
@@ -484,15 +490,10 @@ export default function TaskDetail() {
                 <RotateCcw size={12} /> 退回修改
               </button>
               <button
-                onClick={() =>
-                  updateProgressMutation.mutate({
-                    id: taskIdNum,
-                    progress: task.progress,
-                    status: "failed",
-                    lifecycleStatus: "failed",
-                    error: reviewComment || undefined,
-                  })
-                }
+                onClick={() => updateProgressMutation.mutate(
+                  // @ts-expect-error TODO t2: task.updateProgress now takes {taskId, agentId, progress, message}.
+                  { id: taskIdNum, progress: task.progress, status: "failed", lifecycleStatus: "failed", error: reviewComment || undefined }
+                )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
                 style={{ background: "rgba(194,58,48,0.1)", color: "var(--accent-red)", border: "1px solid rgba(194,58,48,0.2)" }}

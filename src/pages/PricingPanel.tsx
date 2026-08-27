@@ -36,6 +36,8 @@ export default function PricingPanel() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<PricingForm | null>(null);
   const [form, setForm] = useState<PricingForm>(emptyForm);
+  /** 审计：mutation 失败不再静默吞掉 —— 用临时态展示，10s 后自动清 */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const listQuery = trpc.pricing.list.useQuery(undefined, { retry: 1, staleTime: 30_000 });
   const utils = trpc.useUtils();
@@ -46,11 +48,23 @@ export default function PricingPanel() {
       setShowModal(false);
       setForm(emptyForm);
       setEditing(null);
+      setActionError(null);
+    },
+    onError: (e) => {
+      setActionError(`保存失败：${e.message}`);
+      window.setTimeout(() => setActionError(null), 10_000);
     },
   });
 
   const deleteMutation = trpc.pricing.delete.useMutation({
-    onSuccess: () => utils.pricing.list.invalidate(),
+    onSuccess: () => {
+      utils.pricing.list.invalidate();
+      setActionError(null);
+    },
+    onError: (e) => {
+      setActionError(`删除失败：${e.message}`);
+      window.setTimeout(() => setActionError(null), 10_000);
+    },
   });
 
   const handleOpenCreate = () => {
@@ -88,11 +102,24 @@ export default function PricingPanel() {
 
   const handleSave = () => {
     if (!form.model.trim()) return;
+    // 审计：阻止空价提交到 server（DB decimal 在空串上会抛 500）
+    const inP = form.inputPrice.trim();
+    const outP = form.outputPrice.trim();
+    if (!inP || !outP) {
+      setActionError("输入价 / 输出价 不能为空");
+      window.setTimeout(() => setActionError(null), 10_000);
+      return;
+    }
+    if (Number.isNaN(Number(inP)) || Number.isNaN(Number(outP))) {
+      setActionError("输入价 / 输出价 必须是数字");
+      window.setTimeout(() => setActionError(null), 10_000);
+      return;
+    }
     upsertMutation.mutate({
       model: form.model.trim(),
       provider: form.provider.trim() || undefined,
-      inputPrice: form.inputPrice,
-      outputPrice: form.outputPrice,
+      inputPrice: inP,
+      outputPrice: outP,
       cachedInputPrice: form.cachedInputPrice || undefined,
       notes: form.notes || undefined,
     });
@@ -116,6 +143,40 @@ export default function PricingPanel() {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-24 pb-16">
+        {/* 审计：list 加载失败显式呈现，避免空白页吞错 */}
+        {listQuery.isError && (
+          <div
+            className="text-xs px-3 py-2 rounded mb-4 font-mono"
+            style={{
+              background: "rgba(220,38,38,0.12)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              color: "#fca5a5",
+            }}
+            onClick={() => listQuery.refetch()}
+            role="alert"
+            title="点击重新加载"
+          >
+            加载失败：{listQuery.error?.message ?? "未知错误"}（点击重试）
+          </div>
+        )}
+
+        {/* 审计：upsert / delete 失败的临时错误条（mutation onError 写入） */}
+        {actionError && (
+          <div
+            className="text-xs px-3 py-2 rounded mb-4 font-mono"
+            style={{
+              background: "rgba(220,38,38,0.12)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              color: "#fca5a5",
+            }}
+            role="alert"
+            onClick={() => setActionError(null)}
+            title="点击关闭"
+          >
+            {actionError}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -280,6 +341,20 @@ export default function PricingPanel() {
                 />
               </div>
             </div>
+            {/* 审计：modal 内嵌错误提示，避免用户保存失败后以为已成功 */}
+            {upsertMutation.isError && (
+              <div
+                className="text-xs px-3 py-2 rounded mt-3 font-mono"
+                style={{
+                  background: "rgba(220,38,38,0.12)",
+                  border: "1px solid rgba(220,38,38,0.35)",
+                  color: "#fca5a5",
+                }}
+                role="alert"
+              >
+                {upsertMutation.error?.message ?? "保存失败"}
+              </div>
+            )}
             <div className="flex items-center justify-end gap-2 mt-5">
               <button
                 onClick={() => setShowModal(false)}

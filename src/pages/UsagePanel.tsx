@@ -620,6 +620,17 @@ export default function UsagePanel() {
   const records: readonly UsageRecord[] = listQuery.data ?? [];
   const loading = byModelQuery.isLoading || byDayQuery.isLoading;
 
+  /** 审计：把任意查询的失败显式呈现，避免数字悄悄归零。 */
+  const firstError = [
+    byModelQuery,
+    byAgentQuery,
+    byAgentAndModelQuery,
+    cacheStatsQuery,
+    byDayQuery,
+    bySourceQuery,
+    listQuery,
+  ].find((q) => q.isError);
+
   const tabs = [
     { key: "overview", label: "概览", icon: <BarChart3 size={12} /> },
     { key: "agent", label: "按 Agent", icon: <Users size={12} /> },
@@ -642,6 +653,23 @@ export default function UsagePanel() {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-16">
+        {/* Error banner — 任一查询失败都显式呈现，避免数字悄悄归零 */}
+        {firstError && (
+          <div
+            className="text-xs px-3 py-2 rounded mb-4 font-mono"
+            style={{
+              background: "rgba(220,38,38,0.12)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              color: "#fca5a5",
+            }}
+            onClick={handleRefresh}
+            role="alert"
+            title="点击重新加载"
+          >
+            加载失败：{firstError.error?.message ?? "未知错误"}（点击重试）
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>

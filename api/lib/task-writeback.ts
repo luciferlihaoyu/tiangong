@@ -1,13 +1,14 @@
 /**
  * 任务进度回写共享逻辑（单一事实源）
  *
- * updateProgress 的业务核心原生于 api/task-router.ts，任务 2.1 为 MCP 执行面工具
- * （report_progress）抽出为共享 lib：tRPC 面与 MCP 工具面必须走同一份回写决策
+ * progress 回写业务核心由 taskboard.progress 与 MCP report_progress 工具共用
+ * （原生于已删除的 api/task-router.ts，任务 2.1 为 MCP 工具面抽出共享 lib）：
+ * tRPC 面与 MCP 工具面必须走同一份回写决策
  * （beidou 拒绝 / 终态不可变 / 越权防护 / 完成闸门 / 长产物通道 / 用量记账 /
  * 统一归档入口），防止两份拷贝漂移（本仓库 P0 修复过的"钩子复制漂移"教训）。
  *
- * 入参 zod 定义（UpdateProgressInputSchema）在此导出，task-router 与 MCP
- * report_progress 工具共用同一套校验。
+ * 入参 zod 定义（UpdateProgressInputSchema）在此导出，taskboard.progress 与 MCP
+ * report_progress 工具共用同一套校验（原 task-router 已并入 taskboardRouter）。
  *
  * TRPCError 从本 lib 抛出会正常穿透 tRPC 错误处理（行为与原先一致）；
  * MCP 工具面捕获后转 failResult。
@@ -29,7 +30,7 @@ import { notifyLessonRecorded } from "./notification-hooks";
 import { recordNotification } from "./notification";
 import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
 
-/** updateProgress 入参（task-router 与 MCP report_progress 共用） */
+/** progress 入参（taskboard.progress 与 MCP report_progress 共用，原 task-router updateProgress） */
 export const UpdateProgressInputSchema = z.object({
   id: z.number(),
   progress: z.number().min(0).max(100),

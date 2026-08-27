@@ -130,7 +130,7 @@ node /path/to/tiangong/scripts/openclaw-connector/connector.mjs
 |---|---|---|
 | task.list | GET | 查询任务列表 |
 | task.create | POST | 创建任务（需认证） |
-| task.updateProgress | POST | 更新任务进度和状态（需认证） |
+| taskboard.progress | POST | 更新任务进度和状态（需认证） |
 | task.submitForReview | POST | 提交审批（需认证） |
 | task.approve | POST | 审批通过（需认证） |
 | task.reject | POST | 审批退回（需认证） |

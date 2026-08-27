@@ -1,3 +1,10 @@
+> **迁移注记（2026-08-27）**：本文件为历史设计快照，正文中的 `task.*` 命名空间、
+> `api/task-router.ts` 及 `task.updateProgress` 等引用描述的是当时的设计/状态。
+> 深度整合（commit 060cea1, #57）已把 taskRouter 全部并入 taskboardRouter：
+> `task.updateProgress` → `taskboard.progress`（委托 api/lib/task-writeback.ts 的
+> reportTaskProgress，与 MCP report_progress 同一实现）；approve/reject 为
+> adminQuery；`task.*` 命名空间已删除。当前实现以 api/taskboard-router.ts 为准。
+
 # 天宫 P4：任务中枢完善 Spec
 
 > 状态：✅ Implemented

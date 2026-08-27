@@ -312,7 +312,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/agent.claimTask \
 **运行中：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/task.updateProgress \
+curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,
@@ -325,7 +325,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/task.updateProgress \
 **完成：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/task.updateProgress \
+curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,
@@ -338,7 +338,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/task.updateProgress \
 **失败：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/task.updateProgress \
+curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,

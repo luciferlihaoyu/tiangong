@@ -43,7 +43,7 @@ created → queued → dispatched → claimed → running → done/failed
 ### 3. 助手认领逻辑（各助手 runner）
 各助手的 runner 需要增强，使其能：
 - 定期检查自己的 mailbox
-- 收到任务通知后，调用 `task.updateProgress` 更新状态为 claimed/running
+- 收到任务通知后，调用 `taskboard.progress` 更新状态为 claimed/running
 - 执行任务
 - 回写结果
 

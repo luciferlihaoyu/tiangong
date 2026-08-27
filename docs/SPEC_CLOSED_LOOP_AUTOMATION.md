@@ -106,7 +106,7 @@
 
 ### 环节 4：完成自动回写 ⚠️ → ✅ 已修复（任务 1.4 外部用量记账）
 
-回写链路本身正常：dsh-poller → `task.updateProgress`（`api/task-router.ts:214`）→ 完成闸门拦截高风险 self-approve → `done/completed`。
+回写链路本身正常：dsh-poller → `taskboard.progress`（`api/taskboard-router.ts:195`，委托 `api/lib/task-writeback.ts` 的 reportTaskProgress）→ 完成闸门拦截高风险 self-approve → `done/completed`。
 
 **断点 ③（用量）**：内部 Runner 有 `recordUsage` 把天枢 usage 写 `token_usage` 表并更新 `spentCents`（`api/lib/task-runner.ts:1070-1097`）；外部路径**完全没有等价物**。后果链：外部任务的模型消耗不进 `agent.spentCents` → `guard_check` 的预算硬熔断（`api/guard-router.ts:311-317`，已实现且有效）对外部执行体**形同虚设**——因为查到的 spent 永远是旧值。
 
@@ -125,8 +125,8 @@
 | 完成路径 | 位置 | 璇玑同步 | AList 同步 |
 |---|---|---|---|
 | 内部 Runner 执行完成 | `task-runner.ts:545` / `:558` | ✅ | ✅ |
-| `task.updateProgress`（**dsh-poller 走这里**） | `task-router.ts:250` | ✅ | ❌ |
-| `task.approve` | `task-router.ts:393` | ✅ | ❌ |
+|  `taskboard.progress`（**dsh-poller 走这里**，原 task.updateProgress 迁移） |  `taskboard-router.ts:195` | ✅ | ❌ |
+|  `taskboard.approve` |  `taskboard-router.ts:529` | ✅ | ❌ |
 | `taskboard.approve`（高风险放行） | `taskboard-router.ts:470, :589` | ✅ | ❌ |
 | A2A 提交 | `a2a-router.ts:456` | ✅ | ❌ |
 | 补偿 sweeper | `sweepers/memory-compensation.ts` | ✅ | ❌ |
@@ -164,7 +164,7 @@
 #### 任务 1.1 收敛完成钩子为 `finalizeCompletedTask()` 【根治，最优先】
 
 - **动机**：断点①的根因是钩子复制漂移。先收敛，后续所有接收端（AList/璇玑/汇总/未来的通知）只改一处。
-- **涉及**：新建 `api/lib/task-finalize.ts`；改 `task-runner.ts:545-570`、`task-router.ts:250`、`task-router.ts:393`、`taskboard-router.ts:470,589`、`a2a-router.ts:456` 六个调用点
+- **涉及**：新建 `api/lib/task-finalize.ts`；改 `task-runner.ts:545-570`、`taskboard-router.ts:195,529,684`（原 task-router.ts:250,393 所在，已并入）、`a2a-router.ts:456` 等调用点（taskRouter 已于 #57 并入 taskboardRouter）
 - **改动**：
   ```ts
   // api/lib/task-finalize.ts（伪代码示意）
@@ -196,9 +196,9 @@
 #### 任务 1.4 外部用量记账 + 认领预算检查（断点③）
 
 - **动机**：让预算熔断对外部执行体生效。模型侧真实用量在天枢（dsh 的模型端点按 poller 文档建议配成天枢 OpenAI 兼容地址），天宫侧至少要拿到"任务级"账。
-- **涉及**：`api/task-router.ts`（updateProgress input 扩展）、`scripts/dsh-poller.mjs`、`api/agent-router.ts`（claimTask）、`api/lib/model-pricing.ts`（已有，定价查询）
+- **涉及**：`api/taskboard-router.ts` progress 入参（原 task-router.ts 迁移；updateProgress 扩展现由 task-writeback.ts 的 UpdateProgressInputSchema 承载）、`scripts/dsh-poller.mjs`、`api/agent-router.ts`（claimTask）、`api/lib/model-pricing.ts`（已有，定价查询）
 - **改动**：
-  1. `task.updateProgress` input 增加可选 `usage: { promptTokens, completionTokens, model? }`；服务端按 `model-pricing` 折算 cost_micros 写 `token_usage` + `agents.spentCents += cost`（复用 task-runner 的记账逻辑，抽公共函数）
+  1. `taskboard.progress`（委托 reportTaskProgress）入参增加可选 `usage: { promptTokens, completionTokens, model? }`；服务端按 `model-pricing` 折算 cost_micros 写 `token_usage` + `agents.spentCents += cost`（复用 task-runner 的记账逻辑，抽公共函数）
   2. dsh-poller：dsh 若以 JSON 输出模式运行可解析 usage 则带上；解析不到则不带（天宫侧记 0，不阻塞）
   3. `claimTask`（`agent-router.ts:258`）认领前检查：`spentCents >= budgetCents`（budget>0 时）→ 不返回任务，返回 `{ task: null, reason: "budget_exhausted" }` 并把该 agent 的待认领任务停放（boardStatus=blocked，reason 标预算）——这就是"任务级预算停放"
 - **验收**：带 usage 的 updateProgress 后 `token_usage` 有行、`spentCents` 增长；把测试 agent 预算调到低于已耗时，心跳不再返回任务且任务被停放。
@@ -206,9 +206,9 @@
 #### 任务 1.5 长输出通道（断点④）
 
 - **动机**：12KB 截断丢成果；外部无产物提交端点。
-- **涉及**：`api/task-router.ts` 或 `api/artifact-router.ts`、`scripts/dsh-poller.mjs`
+- **涉及**：`api/taskboard-router.ts`（progress 回写走 reportTaskProgress）或 `api/artifact-router.ts`、`scripts/dsh-poller.mjs`
 - **改动**：
-  1. `task.updateProgress` 增加可选 `artifacts: [{ name, content, mimeType? }]`（每条 ≤50KB，单次 ≤5 条）：写 `task_artifacts` 表——这些产物随后被任务 1.1 的 AList 同步自动捡走（`alist-sync.ts` 本来就会遍历 task_artifacts 上传），零额外工作
+  1. `taskboard.progress`（委托 reportTaskProgress）入参增加可选 `artifacts: [{ name, content, mimeType? }]`（每条 ≤50KB，单次 ≤5 条）：写 `task_artifacts` 表——这些产物随后被任务 1.1 的 AList 同步自动捡走（`alist-sync.ts` 本来就会遍历 task_artifacts 上传），零额外工作
   2. dsh-poller：输出 >10KB 时，inline 只留前 10KB + 截断说明，全文作为 `full-output.md` artifact 提交
   3. 鉴权：走既有 MCP Key（`authedQuery` 已接受 API Key，`middleware.ts:128-131`），但服务端必须校验"该 Key 绑定的 agent 正是此任务的认领人"，防止越权写他人任务产物
 - **验收**：造一份 30KB 输出经 poller 回写 → AList `tasks/{taskId}/artifacts/full-output.md` 完整无截断。

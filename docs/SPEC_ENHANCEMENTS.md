@@ -25,7 +25,7 @@
 **文件：** `scripts/openclaw-connector/connector.mjs` + `scripts/openclaw-connector/runner.mjs`
 **要点：**
 - Runner 执行完任务后，通过 stdout 输出结果
-- Connector 捕获 Runner 的 stdout，调用 `task.updateProgress` 或 `task.update` 把 output 回写
+- Connector 捕获 Runner 的 stdout，调用 `taskboard.progress` 或 `taskboard.updateStatus` 把 output 回写
 - 状态流转：claimed → running → done（有 output）/ failed（有 error）
 - 需要区分"投递确认"和"实际执行结果"
 
@@ -36,7 +36,7 @@
 **要点：**
 - 保留 `publicQuery` 用于：ping、agent.list（只读）、heartbeat
 - 新增 `authedQuery` 需要请求头带 `x-api-key` 或 `x-mcp-key`
-- 需要认证的接口：task.create、task.delete、task.update、mailbox.send、org/dept/agent 的写操作
+- 需要认证的接口：taskboard.create、taskboard.delete、taskboard.updateStatus、mailbox.send、org/dept/agent 的写操作
 - 从 secrets 或数据库验证 API Key
 - 前端也需要适配（如果前端有管理界面的话）
 
@@ -53,11 +53,11 @@
 ## 6. 审批节点（低优先级）
 **问题：** task 状态机没有 review 状态，任务完成后不能审批退回。
 **方案：** 在 task 状态机中增加 `review` 状态和审批 API。
-**文件：** `api/task-router.ts` + `api/orchestration-router.ts`
+**文件：** `api/taskboard-router.ts`（原 task-router 已并入）+ `api/orchestration-router.ts`
 **要点：**
-- 新增 `task.submitForReview` mutation：done → review
-- 新增 `task.approve` mutation：review → completed
-- 新增 `task.reject` mutation：review → running（退回重做）
+- 新增 `taskboard.submitForReview` mutation（迁移自 taskRouter）：done → review
+- 新增 `taskboard.approve` mutation（admin）：review → completed
+- 新增 `taskboard.reject` mutation（admin）：review → running（退回重做）
 - lifecycleStatus 增加 reviewing 状态
 - 审批通过后可以附注审批意见
 

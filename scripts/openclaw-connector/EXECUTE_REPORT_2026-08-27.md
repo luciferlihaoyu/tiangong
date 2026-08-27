@@ -173,3 +173,19 @@ Connector (`scripts/openclaw-connector/connector.mjs`) 仍使用 pre-#57 端点�
 ## 文件改动
 
 无脚本改动。仅新增本报告文件 `scripts/openclaw-connector/EXECUTE_REPORT_2026-08-27.md`。
+
+## 补充：connector 端点迁移修复 + 闭环复验（#59-补）
+
+### 问题
+首轮闭环用 stub 验证旧名 `task.updateProgress` 仍工作，但 connector.mjs 7 处仍调旧端点——真服务器（#57 后）已迁到 `taskboard.progress`，**上线真环境 connector 会 404**。
+
+### 修复
+- `connector.mjs`：7 处 `"task.updateProgress"` → `"taskboard.progress"`（入参形态 {id, progress, status, lifecycleStatus, output} 与 taskboard.progress 兼容 schema 完全一致，仅改端点名）
+- `examples/trpc-stub-smoke.mjs`：stub 监听兼容 `/taskboard.progress` 与 `/task.updateProgress`（供回归两种命名）
+
+### 闭环复验（stub + connector 联动，新端点名）
+- stub 收 5 次 `taskboard.progress`：10/25/50/75/failed，全部 `{success:true}`
+- 心跳认领：agent.updateHeartbeat 第 1 次返回 claimedTask=P2-CMD-STUB，connector 正常接管
+- 失败兜底：a2a.submitResult 404（stub 不实现 A2A-lite，预期范围限制）→ 最终 taskboard.progress status=failed
+- CONN_EXIT=124（timeout 自然到期，connector 持续重连——与首轮一致，正常）
+- **结论：connector 新端点 taskboard.progress 与 #57 部署兼容，闭环真实可用**

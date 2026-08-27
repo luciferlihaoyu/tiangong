@@ -48,7 +48,7 @@ const server = http.createServer(async (req, res) => {
       send(res, { task: null });
       return;
     }
-    if (path.endsWith('/task.updateProgress')) {
+    if (path.endsWith('/task.updateProgress') || path.endsWith('/taskboard.progress')) {
       updates.push(input);
       console.log('UPDATE', JSON.stringify(input));
       send(res, { success: true });

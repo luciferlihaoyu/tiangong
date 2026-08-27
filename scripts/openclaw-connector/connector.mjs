@@ -950,7 +950,7 @@ async function executeTaskWithProgress(cfg, task) {
   });
 
   // Report progress 10%
-  let r = await trpcCall(cfg, "task.updateProgress", {
+  let r = await trpcCall(cfg, "taskboard.progress", {
     id: task.id,
     progress: 10,
     status: "running",
@@ -968,7 +968,7 @@ async function executeTaskWithProgress(cfg, task) {
   });
 
   // Report progress 25%
-  r = await trpcCall(cfg, "task.updateProgress", {
+  r = await trpcCall(cfg, "taskboard.progress", {
     id: task.id,
     progress: 25,
     status: "running",
@@ -983,9 +983,9 @@ async function executeTaskWithProgress(cfg, task) {
     const result = await executor(cfg, task, prompt);
 
     // Report progress 50% and 75% before final
-    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 50, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 执行中 (50%)...` });
+    await trpcCall(cfg, "taskboard.progress", { id: task.id, progress: 50, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 执行中 (50%)...` });
     await sleep(100);
-    await trpcCall(cfg, "task.updateProgress", { id: task.id, progress: 75, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 整理结果 (75%)...` });
+    await trpcCall(cfg, "taskboard.progress", { id: task.id, progress: 75, status: "running", lifecycleStatus: "working", output: `[${cfg.agentName}] 整理结果 (75%)...` });
     await sleep(100);
 
     // A2A-lite: submit result
@@ -1020,7 +1020,7 @@ async function executeTaskWithProgress(cfg, task) {
 
       // P3: Final write-back — ensure task output and status are persisted
       const finalOutput = truncateOutput(result, cfg.resultMaxChars);
-      const updateR = await trpcCall(cfg, "task.updateProgress", {
+      const updateR = await trpcCall(cfg, "taskboard.progress", {
         id: task.id,
         progress: 100,
         status: "done",
@@ -1062,7 +1062,7 @@ async function executeTaskWithProgress(cfg, task) {
       }
 
       // P3: Final write-back on failure — ensure error and failed status are persisted
-      const failWriteR = await trpcCall(cfg, "task.updateProgress", {
+      const failWriteR = await trpcCall(cfg, "taskboard.progress", {
         id: task.id,
         progress: 0,
         status: "failed",

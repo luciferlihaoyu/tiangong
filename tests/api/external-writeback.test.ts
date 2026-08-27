@@ -93,12 +93,12 @@ vi.mock("../../api/lib/password", () => ({
   verifyPassword: vi.fn(async (s: string, h: string) => h === `hashed_${s}`),
 }));
 
-import { taskRouter } from "../../api/task-router";
+import { taskboardRouter } from "../../api/taskboard-router";
 import { agentRouter } from "../../api/agent-router";
 import { finalizeCompletedTask } from "../../api/lib/task-finalize";
 import { createCallerFactory } from "../../api/middleware";
 
-const taskCaller = createCallerFactory(taskRouter);
+const taskCaller = createCallerFactory(taskboardRouter);
 const agentCaller = createCallerFactory(agentRouter);
 
 /** 从 drizzle SQL chunk 树中提取绑定参数值（Param.value 与内联原始值），跳过列与字符串片段 */
@@ -193,7 +193,7 @@ describe("updateProgress 外部用量记账", () => {
     seedPricing();
 
     const caller = taskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 7,
       progress: 100,
       status: "done",
@@ -240,7 +240,7 @@ describe("updateProgress 外部用量记账", () => {
     seedPricing();
 
     const caller = taskCaller(mockCtx());
-    await caller.updateProgress({
+    await caller.progress({
       id: 7,
       progress: 100,
       status: "done",
@@ -264,7 +264,7 @@ describe("updateProgress 外部用量记账", () => {
     state.failNextTokenUsageInsert = true;
 
     const caller = taskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 7,
       progress: 100,
       status: "done",
@@ -282,7 +282,7 @@ describe("updateProgress 外部用量记账", () => {
     seedPricing();
 
     const caller = taskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 7,
       progress: 40,
       status: "running",
@@ -300,7 +300,7 @@ describe("updateProgress 长产物通道", () => {
     seedTask();
 
     const caller = taskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 7,
       progress: 60,
       status: "running",
@@ -329,7 +329,7 @@ describe("updateProgress 长产物通道", () => {
 
     const caller = taskCaller(mockCtx({ user: null, apiKeyAgentId: 6 }));
     await expect(
-      caller.updateProgress({
+      caller.progress({
         id: 7,
         progress: 100,
         status: "done",
@@ -345,7 +345,7 @@ describe("updateProgress 长产物通道", () => {
 
     const caller = taskCaller(mockCtx({ user: null, apiKeyAgentId: 6 }));
     await expect(
-      caller.updateProgress({
+      caller.progress({
         id: 7,
         progress: 100,
         status: "done",
@@ -359,7 +359,7 @@ describe("updateProgress 长产物通道", () => {
     seedTask();
 
     const caller = taskCaller(mockCtx({ user: null, apiKeyAgentId: 5 }));
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 7,
       progress: 100,
       status: "done",
@@ -381,7 +381,7 @@ describe("updateProgress 长产物通道", () => {
     const caller = taskCaller(mockCtx());
 
     await expect(
-      caller.updateProgress({
+      caller.progress({
         id: 7,
         progress: 60,
         status: "running",
@@ -390,7 +390,7 @@ describe("updateProgress 长产物通道", () => {
     ).rejects.toThrow();
 
     await expect(
-      caller.updateProgress({
+      caller.progress({
         id: 7,
         progress: 60,
         status: "running",

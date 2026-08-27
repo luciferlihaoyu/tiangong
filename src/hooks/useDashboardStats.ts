@@ -18,7 +18,7 @@ export function useDashboardStats(): DashboardStats {
     staleTime: 30000,
   });
 
-  const taskQuery = trpc.task.list.useQuery(undefined, {
+  const taskQuery = trpc.taskboard.list.useQuery(undefined, {
     retry: 1,
     staleTime: 30000,
     enabled: agentQuery.isSuccess,

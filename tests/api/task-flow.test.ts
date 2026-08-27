@@ -50,23 +50,23 @@ vi.mock("../../api/lib/password", () => ({
   verifyPassword: vi.fn(async (s: string, h: string) => h === `hashed_${s}`),
 }));
 
-import { taskRouter } from "../../api/task-router";
+// t3: taskRouter 已并入 taskboardRouter（单一命名空间），此文件改测
+// taskboard.* 下从 taskRouter 迁移来的 procs（nextTaskId/create/progress/delete）。
+import { taskboardRouter } from "../../api/taskboard-router";
 import { createCallerFactory } from "../../api/middleware";
-import { parseTaskMetadata } from "../../api/lib/task-metadata";
 
-const createCaller = createCallerFactory(taskRouter);
+const createCaller = createCallerFactory(taskboardRouter);
 
 const TaskInsertCaptureSchema = z.object({
   taskId: z.string(),
   name: z.string(),
-  input: z.string(),
 });
 
 function mockCtx(overrides: Record<string, unknown> = {}) {
   return { req: new Request("http://localhost"), user: { id: 1, role: "admin" }, apiKeyAgentId: -1, ...overrides };
 }
 
-describe("Task Flow - Task Router", () => {
+describe("Task Flow - Taskboard Router (migrated from taskRouter)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockData = [];
@@ -85,7 +85,6 @@ describe("Task Flow - Task Router", () => {
   it("should create a task with valid input", async () => {
     const caller = createCaller(mockCtx());
     const result = await caller.create({
-      taskId: "TG-TEST001",
       name: "Test Task",
       description: "A test task",
       priority: 5,
@@ -96,21 +95,20 @@ describe("Task Flow - Task Router", () => {
     expect(mockDb.insert).toHaveBeenCalled();
 
     const insertedTask = TaskInsertCaptureSchema.parse(mockInsertValues);
-    const metadata = parseTaskMetadata(insertedTask.input);
-    expect(insertedTask.taskId).toBe("TG-TEST001");
+    expect(insertedTask.taskId).toMatch(/^TG-/);
     expect(insertedTask.name).toBe("Test Task");
-    expect(metadata?.taskType).toBe("triage_task");
-    expect(metadata?.traceId).toMatch(/^trc_[0-9a-z]+_[0-9a-z]{8}$/);
   });
 
   it("should update task progress", async () => {
-    mockData = [{ taskId: "TG-TEST001", name: "Test Task", agentId: 1 }];
+    // progress 需要 row.boardStatus === "running" 且 row.agentId === input.agentId
+    mockData = [{ taskId: "TG-TEST001", name: "Test Task", agentId: 1, boardStatus: "running" }];
 
     const caller = createCaller(mockCtx());
-    const result = await caller.updateProgress({
-      id: 1,
+    const result = await caller.progress({
+      taskId: 1,
+      agentId: 1,
       progress: 50,
-      status: "running",
+      message: "working",
     });
 
     expect(result).toBeDefined();
@@ -118,16 +116,16 @@ describe("Task Flow - Task Router", () => {
     expect(mockDb.update).toHaveBeenCalled();
   });
 
-  it("should reject invalid task ID (empty string)", async () => {
+  it("should reject create with empty name", async () => {
     const caller = createCaller(mockCtx());
     await expect(
-      caller.create({ taskId: "", name: "Invalid Task" })
+      caller.create({ name: "" })
     ).rejects.toThrow();
   });
 
   it("should delete a task by id", async () => {
     const caller = createCaller(mockCtx());
-    const result = await caller.delete({ id: 42 });
+    const result = await caller.delete({ taskId: 42 });
 
     expect(result).toBeDefined();
     expect(result.success).toBe(true);

@@ -32,7 +32,7 @@ export default function ExecutionCore() {
   const cardsRef = useRef<HTMLDivElement[]>([]);
   const triggersRef = useRef<ScrollTrigger[]>([]);
 
-  const tasksQuery = trpc.task.list.useQuery(undefined, { staleTime: 30000 });
+  const tasksQuery = trpc.taskboard.list.useQuery(undefined, { staleTime: 30000 });
   const agentsQuery = trpc.agent.list.useQuery(undefined, { staleTime: 30000 });
 
   const agentNameById = useMemo(() => {

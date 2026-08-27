@@ -1474,14 +1474,24 @@ export default function TaskCenter() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
 
-  // taskboard.list 的 boardStatus 是看板状态（triage/backlog/todo/ready/...），
-  // 而 UI 顶栏的 STATUS_CONFIG 是生命周期 status（pending/queued/running/...）。
-  // 两者在 running/done/failed 重叠，其余互斥。t2 阶段先按 strict 编译通过：
-  // 过滤用 boardStatus 的合法子集——这是 task.* → taskboard.* 的契约变化，
-  // 后续 t3 阶段会单独处理 UI 过滤器语义（不阻塞 t2 的 9 处迁移）。
-  const boardStatusFilter = (filterStatus === "running" || filterStatus === "done" || filterStatus === "failed")
-    ? filterStatus
-    : undefined;
+  // taskboard.list 的 boardStatus 是看板状态枚举（triage/backlog/todo/ready/
+  // running/review/blocked/done/failed/cancelled），UI 顶栏 STATUS_CONFIG
+  // 是生命周期 status（pending/queued/running/done/failed）。两者重叠子集
+  // 不够覆盖生命周期过滤，t3 阶段做完整语义映射：
+  //   pending  → backlog（待处理/未排期）
+  //   queued   → todo    （已排队/可执行）
+  //   running  → running（直传）
+  //   done     → done   （直传）
+  //   failed   → failed （直传）
+  // boardStatus 字段必填枚举值之一，否则后端 zod 拒绝。
+  const statusToBoardStatus: Record<string, "backlog" | "todo" | "running" | "done" | "failed"> = {
+    pending: "backlog",
+    queued: "todo",
+    running: "running",
+    done: "done",
+    failed: "failed",
+  };
+  const boardStatusFilter = filterStatus ? statusToBoardStatus[filterStatus] : undefined;
   const taskQuery = trpc.taskboard.list.useQuery(
     { boardStatus: boardStatusFilter, agentId: filterAgentId, keyword: keyword || undefined },
     { retry: 1, staleTime: 5000 }

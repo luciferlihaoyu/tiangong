@@ -216,7 +216,7 @@ describe("beidou service principal HTTP auth", () => {
     expect(adminRes.status).toBe(401);
     // General (weak, unbound) task mutation probe.
     const weakRes = await callTrpc(
-      "/task.updateProgress",
+      "/taskboard.progress",
       serviceHeaders(issued),
       { input: { id: 1, progress: 50 } },
     );
@@ -231,7 +231,7 @@ describe("beidou service principal HTTP auth", () => {
     });
     // authedQuery (agent/user) endpoints reject the service principal.
     const dispatchRes = await callTrpc(
-      "/task.dispatch",
+      "/taskboard.dispatch",
       serviceHeaders(issued),
       { taskId: 1 },
     );

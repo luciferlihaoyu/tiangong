@@ -109,7 +109,6 @@ vi.mock("../../api/lib/executor-cancellation", () => ({
   requestExecutorCancellation: vi.fn(() => true),
 }));
 
-import { taskRouter } from "../../api/task-router";
 import { taskboardRouter } from "../../api/taskboard-router";
 import { a2aRouter } from "../../api/a2a-router";
 import { createCallerFactory } from "../../api/middleware";
@@ -129,7 +128,7 @@ delete process.env.TIANGONG_TASK_RUNNER_EXEC_FILE;
 delete process.env.TIANGONG_TASK_RUNNER_EXEC_ARGS_JSON;
 const { taskRunner } = await import("../../api/lib/task-runner");
 
-const createTaskCaller = createCallerFactory(taskRouter);
+const createTaskCaller = createCallerFactory(taskboardRouter);
 const createTaskboardCaller = createCallerFactory(taskboardRouter);
 const createA2aCaller = createCallerFactory(a2aRouter);
 
@@ -336,7 +335,7 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
     ]);
 
     // When
-    const result = await createTaskCaller(mockCtx()).updateProgress({
+    const result = await createTaskCaller(mockCtx()).progress({
       id: 19,
       progress: 100,
       status: "failed",
@@ -365,7 +364,7 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
     ]);
 
     // When
-    const result = await createTaskCaller(mockCtx()).updateProgress({
+    const result = await createTaskCaller(mockCtx()).progress({
       id: 19,
       progress: 100,
       status: "failed",

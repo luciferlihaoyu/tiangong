@@ -11,6 +11,7 @@ import { finalizeCompletedTask } from "./lib/task-finalize";
 import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 import { notifyLessonRecorded } from "./lib/notification-hooks";
 import { recordNotification } from "./lib/notification";
+import { reportTaskProgress } from "./lib/task-writeback";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -182,47 +183,59 @@ export const taskboardRouter = createRouter({
       return { success: true };
     }),
 
+  // 进度回写（单一事实源 = api/lib/task-writeback.ts 的 reportTaskProgress，
+  // 与 taskRouter.updateProgress 迁移、MCP report_progress 同一实现）：
+  // beidou 拒绝 / 终态不可变 / 越权防护 / 完成闸门 / artifacts / 用量记账 /
+  // 统一归档 / 广播 全量走共享 lib，避免"看板进度"与"回写进度"两份逻辑漂移。
+  // 入参兼容两种形态：老 taskRouter 的 {id, status?, lifecycleStatus?, output?,
+  // error?, usage?, artifacts?} 与看板 UI 的 {taskId, agentId?, progress, message?}
+  // —— taskId 是 id 的别名；agentId/message 为看板辅助字段（核心权限由
+  // apiKeyAgentId 决定，不做 agent 强制校验，保持与老 taskRouter.updateProgress
+  // 一致的宽松面）。
   progress: authedQuery
     .input(
-      z.object({
-        taskId: z.number(),
-        agentId: z.number(),
-        progress: z.number().min(0).max(100),
-        message: z.string().optional(),
-      })
+      z
+        .object({
+          id: z.number().optional(),
+          taskId: z.number().optional(),
+          agentId: z.number().optional(),
+          progress: z.number().min(0).max(100),
+          message: z.string().optional(),
+          status: z.enum(["running", "pending", "done", "failed", "queued"]).optional(),
+          lifecycleStatus: z
+            .enum([
+              "created", "queued", "claimed", "dispatched", "accepted", "working",
+              "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
+            ])
+            .optional(),
+          output: z.string().optional(),
+          error: z.string().optional(),
+          usage: z
+            .object({
+              model: z.string().min(1).max(100),
+              promptTokens: z.number().int().min(0).max(10_000_000),
+              completionTokens: z.number().int().min(0).max(10_000_000),
+              cachedPromptTokens: z.number().int().min(0).max(10_000_000).optional(),
+            })
+            .optional(),
+          artifacts: z
+            .array(
+              z.object({
+                name: z.string().min(1).max(100),
+                content: z.string().min(1).max(50_000),
+                mimeType: z.string().max(50).optional(),
+              })
+            )
+            .max(5)
+            .optional(),
+        })
+        .refine((v) => v.id !== undefined || v.taskId !== undefined, {
+          message: "id 或 taskId 必须提供一个",
+        })
     )
-    .mutation(async ({ input }) => {
-      const db = getDb();
-      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
-      if (!row) throw new Error("Task not found");
-      if (row.agentId !== input.agentId) throw new Error("Task is not assigned to this agent");
-      if (row.boardStatus !== "running") throw new Error(`Task is not running (current: ${row.boardStatus})`);
-
-      await db
-        .update(tasks)
-        .set({ progress: input.progress })
-        .where(eq(tasks.id, input.taskId));
-
-      await db.insert(taskMessages).values({
-        taskId: input.taskId,
-        fromAgentId: input.agentId,
-        eventType: "progress",
-        content: input.message || `Progress ${input.progress}%`,
-        metadata: stringifyJson({ action: "progress", progress: input.progress }),
-      });
-
-      wsManager.broadcastToDashboard({
-        type: "task_update",
-        action: "progress",
-        id: input.taskId,
-        taskId: row.taskId,
-        name: row.name,
-        progress: input.progress,
-        agentId: input.agentId,
-        timestamp: new Date().toISOString(),
-      });
-
-      return { success: true };
+    .mutation(async ({ input, ctx }) => {
+      const id = input.taskId ?? input.id!;
+      return reportTaskProgress(getDb(), { ...input, id }, { apiKeyAgentId: ctx.apiKeyAgentId });
     }),
 
   submit: authedQuery

@@ -493,7 +493,7 @@ export default function TaskDetail() {
               </button>
               <button
                 onClick={() => updateProgressMutation.mutate(
-                  { taskId: taskIdNum, agentId: operatorAgentId, progress: 100, message: reviewComment || undefined }
+                  { taskId: taskIdNum, progress: task.progress, status: "failed", lifecycleStatus: "failed", error: reviewComment || undefined }
                 )}
                 disabled={isActionPending}
                 className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"

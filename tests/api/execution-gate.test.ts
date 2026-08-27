@@ -54,13 +54,12 @@ const dbMocks = vi.hoisted(() => {
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
 import { agentRouter } from "../../api/agent-router";
-import { taskRouter } from "../../api/task-router";
-import { a2aRouter } from "../../api/a2a-router";
 import { taskboardRouter } from "../../api/taskboard-router";
+import { a2aRouter } from "../../api/a2a-router";
 import { _globalApiKeys, createCallerFactory, createContext } from "../../api/middleware";
 
 const createAgentCaller = createCallerFactory(agentRouter);
-const createTaskCaller = createCallerFactory(taskRouter);
+const createTaskCaller = createCallerFactory(taskboardRouter);
 const createA2aCaller = createCallerFactory(a2aRouter);
 const createBoardCaller = createCallerFactory(taskboardRouter);
 
@@ -244,7 +243,7 @@ describe("Execution approval gate", () => {
 
     // When
     const caller = createTaskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 21,
       progress: 100,
       status: "done",
@@ -261,7 +260,7 @@ describe("Execution approval gate", () => {
     dbMocks.queueSelectResults([[unparked]]);
 
     const caller = createTaskCaller(mockCtx());
-    const result = await caller.updateProgress({ id: 20, progress: 100, status: "done", lifecycleStatus: "completed" });
+    const result = await caller.progress({ id: 20, progress: 100, status: "done", lifecycleStatus: "completed" });
 
     expect(result.success).toBe(false);
     expect(String(result.error)).toContain("requires human approval");
@@ -274,7 +273,7 @@ describe("Execution approval gate", () => {
 
     // When
     const caller = createTaskCaller(mockCtx());
-    const result = await caller.updateProgress({
+    const result = await caller.progress({
       id: 19,
       progress: 100,
       status: "done",

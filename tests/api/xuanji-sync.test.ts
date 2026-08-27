@@ -72,12 +72,12 @@ vi.mock("../../api/connectors/xuanji/service", () => ({
   createXuanjiClient: xuanjiMocks.createXuanjiClient,
 }));
 
-import { taskRouter } from "../../api/task-router";
+import { taskboardRouter } from "../../api/taskboard-router";
 import { a2aRouter } from "../../api/a2a-router";
 import { createCallerFactory } from "../../api/middleware";
 import { syncTaskMemoryToXuanji, XUANJI_MEMORY_ARTIFACT_TYPE } from "../../api/lib/xuanji-sync";
 
-const createTaskCaller = createCallerFactory(taskRouter);
+const createTaskCaller = createCallerFactory(taskboardRouter);
 const createA2aCaller = createCallerFactory(a2aRouter);
 
 const mockDb = dbMocks.db as unknown as Parameters<typeof syncTaskMemoryToXuanji>[0];
@@ -191,7 +191,7 @@ describe("Xuanji task memory sync on completion", () => {
     dbMocks.queueSelectResults([[completedTask]]);
 
     // When
-    const result = await createTaskCaller(mockCtx()).updateProgress({
+    const result = await createTaskCaller(mockCtx()).progress({
       id: 19,
       progress: 100,
       status: "done",
@@ -222,7 +222,7 @@ describe("Xuanji task memory sync on completion", () => {
     dbMocks.queueSelectResults([[completedTask]]);
 
     // When
-    const result = await createTaskCaller(mockCtx()).updateProgress({
+    const result = await createTaskCaller(mockCtx()).progress({
       id: 19,
       progress: 100,
       status: "done",
@@ -254,7 +254,7 @@ describe("Xuanji task memory sync on completion", () => {
     dbMocks.queueSelectResults([[completedTask]]);
 
     // When
-    const result = await createTaskCaller(mockCtx()).updateProgress({
+    const result = await createTaskCaller(mockCtx()).progress({
       id: 19,
       progress: 100,
       status: "done",

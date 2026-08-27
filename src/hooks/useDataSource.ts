@@ -60,7 +60,7 @@ let nextId = 300;
 
 export function useDataSource() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 30000 });
-  const taskQuery = trpc.task.list.useQuery(undefined, { retry: 1, staleTime: 30000, enabled: agentQuery.isSuccess });
+  const taskQuery = trpc.taskboard.list.useQuery(undefined, { retry: 1, staleTime: 30000, enabled: agentQuery.isSuccess });
   const systemQuery = trpc.system.list.useQuery(undefined, { retry: 1, staleTime: 30000, enabled: agentQuery.isSuccess });
   const msgStatsQuery = trpc.message.stats.useQuery(undefined, { retry: 1, staleTime: 30000, enabled: agentQuery.isSuccess });
   const orgListQuery = trpc.org.orgList.useQuery(undefined, { retry: 1, staleTime: 30000, enabled: agentQuery.isSuccess });

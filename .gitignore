@@ -25,3 +25,6 @@ backups/
 
 # Local planning docs (never commit)
 PLAN*.md
+
+# SQLite 数据库文件（data/tiangong.db 由 volume 持久化，不入 git）
+data/

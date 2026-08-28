@@ -15,11 +15,14 @@ COPY . .
 RUN npm run build
 
 ENV TIANGONG_ARTIFACT_ROOT=/app/data/tiangong-artifacts
-RUN mkdir -p /app/data/tiangong-artifacts/by-sha /app/data/tiangong-artifacts/staged /app/data/tiangong-artifacts/gc /app/data/tiangong-artifacts/probe \
-  && chown -R tiangong:tiangong /app /app/data/tiangong-artifacts \
-  && chmod 0750 /app/data/tiangong-artifacts /app/data/tiangong-artifacts/by-sha /app/data/tiangong-artifacts/staged /app/data/tiangong-artifacts/gc /app/data/tiangong-artifacts/probe
+RUN mkdir -p /app/data/tiangong-artifacts/by-sha /app/data/tiangong-artifacts/staged /app/data/tiangong-artifacts/gc /app/data/tiangong-artifacts/probe /app/data \
+  && chown -R tiangong:tiangong /app /app/data \
+  && chmod 0750 /app/data /app/data/tiangong-artifacts /app/data/tiangong-artifacts/by-sha /app/data/tiangong-artifacts/staged /app/data/tiangong-artifacts/gc /app/data/tiangong-artifacts/probe
 
-VOLUME ["/app/data/tiangong-artifacts"]
+# SQLite 数据库文件（/app/data/tiangong.db）由 /app/data 持久化 volume 承载
+# （zeabur.json mountPaths 已挂 /app/data → tiangong-data）；artifact 目录在
+# /app/data 之下，随全局挂载一并持久化。
+VOLUME ["/app/data"]
 USER tiangong:tiangong
 
 # 保留 drizzle-kit（push schema 需要）

@@ -9,10 +9,20 @@ import { claimNextTask } from "./lib/task-claim";
 
 type AgentNode = Agent & { children: AgentNode[] };
 type AgentCapability = AgentCard["capabilities"][number];
-type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+type InsertResult =
+  | MySqlRawQueryResult
+  | (({ readonly insertId?: number; readonly lastInsertRowid?: number | bigint; readonly changes?: number }));
 
 function getInsertId(result: InsertResult): number {
-  return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+  if (Array.isArray(result)) return result[0].insertId;
+  // S1 (PLAN_SQLITE_MIGRATION): better-sqlite3 RunResult exposes the new
+  // row id as `lastInsertRowid`; mirror the MySQL `insertId` path so the
+  // existing call sites keep working without per-site refactors (S2 will
+  // consolidate the union on the S2 union `{ insertId; affectedRows }`).
+  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
+    return Number(result.lastInsertRowid);
+  }
+  return result.insertId ?? 0;
 }
 
 /** update 返回的受影响行数（兼容 mysql2 数组形状与测试 mock 的普通对象形状） */

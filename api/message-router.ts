@@ -593,11 +593,25 @@ type SerializedMessage = Omit<Message, "createdAt" | "readAt" | "ackedAt" | "del
 };
 
 type DefaultMessagePayloadInput = Pick<Message, "fromAgent" | "toAgent" | "content" | "type">;
-type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+type InsertResult =
+  | MySqlRawQueryResult
+  | (({ readonly insertId?: number; readonly lastInsertRowid?: number | bigint; readonly changes?: number }));
 
 function getInsertId(result: InsertResult): number | undefined {
-  const insertId = Array.isArray(result) ? result[0].insertId : result.insertId;
-  return insertId === 0 ? undefined : insertId;
+  // S1 (PLAN_SQLITE_MIGRATION): better-sqlite3 RunResult exposes the new
+  // row id as `lastInsertRowid`; mirror the MySQL `insertId` path so the
+  // existing call sites keep working without per-site refactors (S2 will
+  // consolidate the union on the S2 union `{ insertId; affectedRows }`).
+  let insertId: number | bigint | undefined;
+  if (Array.isArray(result)) {
+    insertId = result[0].insertId;
+  } else if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
+    insertId = result.lastInsertRowid;
+  } else {
+    insertId = result.insertId;
+  }
+  const normalized = insertId === undefined ? undefined : Number(insertId);
+  return normalized === 0 ? undefined : normalized;
 }
 
 function serializeMessage(msg: Message): SerializedMessage {

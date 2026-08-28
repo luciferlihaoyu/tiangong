@@ -26,10 +26,20 @@ import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
  * GPT-5.5 high 等模型 costCents >= 100 视为高价
  */
 export const HIGH_COST_THRESHOLD_CENTS = 100;
-type InsertResult = MySqlRawQueryResult | { readonly insertId?: number };
+type InsertResult =
+  | MySqlRawQueryResult
+  | (({ readonly insertId?: number; readonly lastInsertRowid?: number | bigint; readonly changes?: number }));
 
 function getInsertId(result: InsertResult): number {
-  return Array.isArray(result) ? result[0].insertId : result.insertId ?? 0;
+  if (Array.isArray(result)) return result[0].insertId;
+  // S1 (PLAN_SQLITE_MIGRATION): better-sqlite3 RunResult exposes the new
+  // row id as `lastInsertRowid`; mirror the MySQL `insertId` path so the
+  // existing call sites keep working without per-site refactors (S2 will
+  // consolidate the union on the S2 union `{ insertId; affectedRows }`).
+  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
+    return Number(result.lastInsertRowid);
+  }
+  return result.insertId ?? 0;
 }
 
 /** 已知高价模型列表（硬编码 + 数据库动态维护） */

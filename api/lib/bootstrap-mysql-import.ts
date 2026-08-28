@@ -19,46 +19,36 @@
  */
 import { createConnection, type RowDataPacket } from "mysql2/promise";
 import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
+import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { env } from "./env";
 import { resolveDbPath } from "../queries/connection";
 import { repairMissingColumns } from "./schema-repair";
+import * as schema from "@db/schema";
 
 /**
- * 解析 db/schema.ts，返回 { 表名: Set<timestamp 列名> }。
- * 与 scripts/migrate-mysql-to-sqlite.mjs 同一套括号配对法（避免引入 TS AST）。
- * MySQL datetime 是 'YYYY-MM-DD HH:MM:SS' 字符串；SQLite 该列声明为 INTEGER
- * （drizzle mode:"timestamp"），字符串插入会以 TEXT 存储，读回 drizzle 返回
- * null → 前端渲染崩（退化点）。导入时需把字符串转 epoch 秒。
+ * 从 drizzle schema 对象反射各表的 timestamp 列（mode:"timestamp"）。
+ * 不用读文件/AST（生产 dist/boot.js 是 esbuild bundle，schema.ts 内联，
+ * 无独立文件可读——之前用 __dirname 读文件导致 '__dirname is not defined'
+ * 崩掉整个 bootstrap）。getTableConfig 走运行时列元数据，bundle 安全。
  */
-function parseSchemaTimestampCols(): Record<string, Set<string>> {
-  const schemaPath = path.resolve(__dirname, "../../db/schema.ts");
-  const schemaText = fs.readFileSync(schemaPath, "utf8");
-  const tables: Record<string, Set<string>> = {};
-  const tableStartRe = /sqliteTable\(\s*"([\w_]+)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = tableStartRe.exec(schemaText)) !== null) {
-    const tableName = m[1];
-    let i = m.index;
-    while (i < schemaText.length && schemaText[i] !== "{") i++;
-    let depth = 1;
-    const bodyStart = i + 1;
-    i++;
-    while (i < schemaText.length && depth > 0) {
-      const ch = schemaText[i];
-      if (ch === "{") depth++;
-      else if (ch === "}") depth--;
-      i++;
+function reflectTimestampCols(): Record<string, Set<string>> {
+  const out: Record<string, Set<string>> = {};
+  for (const [tableName, table] of Object.entries(schema)) {
+    // drizzle 表对象有 tableName 属性；关系/函数等其他导出会抛错，跳过
+    try {
+      const cfg = getTableConfig(table as never);
+      if (!cfg || !Array.isArray(cfg.columns)) continue;
+      const tsSet = new Set<string>();
+      for (const col of cfg.columns) {
+        const anyCol = col as unknown as { mode?: string };
+        if (anyCol.mode === "timestamp" || anyCol.mode === "timestamp_ms") tsSet.add(col.name);
+      }
+      if (tsSet.size > 0) out[tableName] = tsSet;
+    } catch {
+      // 非表导出（relations 等）→ 跳过
     }
-    const body = schemaText.slice(bodyStart, i - 1);
-    const tsSet = new Set<string>();
-    const tsRe = /integer\(\s*"([\w_]+)"\s*,\s*\{\s*mode:\s*["']timestamp["']/g;
-    let tm: RegExpExecArray | null;
-    while ((tm = tsRe.exec(body)) !== null) tsSet.add(tm[1]);
-    tables[tableName] = tsSet;
   }
-  return tables;
+  return out;
 }
 
 /** 把 MySQL datetime 字符串转 epoch 秒（number）；非字符串/无效值返回原值。 */
@@ -101,7 +91,7 @@ export async function bootstrapMysqlImport(): Promise<string[]> {
 
   logs.push(`bootstrap-import: db=${dbPath}, importing empty tables from MySQL…`);
 
-  const schemaTsCols = parseSchemaTimestampCols();
+  const schemaTsCols = reflectTimestampCols();
   let conn;
   try {
     conn = await createConnection({ uri: databaseUrl, connectTimeout: 10000 });

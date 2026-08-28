@@ -5,8 +5,9 @@ RUN addgroup -g 10001 tiangong && adduser -D -u 10001 -G tiangong tiangong
 WORKDIR /app
 
 # 安装依赖（包含 devDependencies，drizzle-kit 需要）
-COPY package.json package-lock.json ./
-RUN npm ci
+# .npmrc 提供网络重试配置（构建机偶发 ECONNRESET，见 2026-08-28）；参数再兜一层
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --fetch-retries=6 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000
 
 # 复制源码
 COPY . .

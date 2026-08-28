@@ -19,37 +19,69 @@
  */
 import { createConnection, type RowDataPacket } from "mysql2/promise";
 import { DatabaseSync } from "node:sqlite";
-import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { env } from "./env";
 import { resolveDbPath } from "../queries/connection";
 import { repairMissingColumns } from "./schema-repair";
-import * as schema from "@db/schema";
 
 /**
- * 从 drizzle schema 对象反射各表的 timestamp 列（mode:"timestamp"）。
- * 不用读文件/AST（生产 dist/boot.js 是 esbuild bundle，schema.ts 内联，
- * 无独立文件可读——之前用 __dirname 读文件导致 '__dirname is not defined'
- * 崩掉整个 bootstrap）。getTableConfig 走运行时列元数据，bundle 安全。
+ * 各表的 timestamp 列（mode:"timestamp"）静态清单。
+ * 生成：node -e 括号配对法扫 db/schema.ts（2026-08-28 提取，47 表）。
+ * 不用运行时反射原因：生产 dist/boot.js 是 esbuild bundle，getTableConfig
+ * 列元数据在 bundle 后不可靠（本地 tsx 源码模式 verified 但 bundle 模式不
+ * 工作——生产 9266902 部署 bootstrap 跑通但 repaired 0 就是此因）。静态
+ * 常量 bundle 安全、确定性。schema 列变更时需同步此表（可用脚本重生成）。
  */
-function reflectTimestampCols(): Record<string, Set<string>> {
-  const out: Record<string, Set<string>> = {};
-  for (const [tableName, table] of Object.entries(schema)) {
-    // drizzle 表对象有 tableName 属性；关系/函数等其他导出会抛错，跳过
-    try {
-      const cfg = getTableConfig(table as never);
-      if (!cfg || !Array.isArray(cfg.columns)) continue;
-      const tsSet = new Set<string>();
-      for (const col of cfg.columns) {
-        const anyCol = col as unknown as { mode?: string };
-        if (anyCol.mode === "timestamp" || anyCol.mode === "timestamp_ms") tsSet.add(col.name);
-      }
-      if (tsSet.size > 0) out[tableName] = tsSet;
-    } catch {
-      // 非表导出（relations 等）→ 跳过
-    }
-  }
-  return out;
-}
+// AUTO-GENERATED from db/schema.ts — DO NOT EDIT BY HAND
+const TIMESTAMP_COLS: Record<string, string[]> = {
+  "agent_memories": ["created_at", "updated_at"],
+  "agents": ["last_heartbeat", "created_at", "updated_at"],
+  "artifact_registry": ["created_at", "updated_at"],
+  "audit_events": ["created_at"],
+  "connector_registry": ["created_at", "updated_at"],
+  "conversations": ["archived_at", "created_at", "updated_at"],
+  "departments": ["created_at", "updated_at"],
+  "external_agents": ["last_heartbeat", "created_at", "updated_at"],
+  "github_audit_log": ["created_at"],
+  "github_integrations": ["created_at", "updated_at"],
+  "github_pull_requests": ["approved_at", "merged_at", "created_at", "updated_at"],
+  "github_repo_permissions": ["created_at", "updated_at"],
+  "github_repos": ["created_at", "updated_at"],
+  "high_cost_model_auth": ["expires_at", "created_at"],
+  "mailbox_messages": ["created_at", "acknowledged_at", "replied_at", "resolved_at", "updated_at"],
+  "mcp_api_keys": ["last_used_at", "created_at"],
+  "mcp_audit_log": ["created_at"],
+  "messages": ["read_at", "expires_at", "acked_at", "delivered_at", "created_at"],
+  "model_allowlist": ["created_at"],
+  "model_pricing": ["updated_at"],
+  "notifications": ["read_at", "created_at"],
+  "organizations": ["created_at", "updated_at"],
+  "projects": ["created_at", "updated_at"],
+  "sealed_artifact_descriptors": ["sealed_at", "retain_until"],
+  "sealed_artifact_manifests": ["sealed_at"],
+  "secret_vault_items": ["created_at", "updated_at"],
+  "service_key_audit_log": ["created_at"],
+  "session_messages": ["created_at"],
+  "shared_sessions": ["created_at", "updated_at"],
+  "staged_objects": ["created_at", "expires_at"],
+  "system_settings": ["updated_at"],
+  "systems": ["created_at", "updated_at"],
+  "task_artifacts": ["created_at"],
+  "task_dependencies": [],
+  "task_execution_slots": ["acquired_at", "expires_at"],
+  "task_messages": ["created_at"],
+  "task_outbox_events": ["next_attempt_at", "first_attempt_at", "delivered_at", "dead_letter_at", "created_at", "updated_at"],
+  "task_threads": ["created_at", "updated_at"],
+  "tasks": ["claimed_at", "dispatched_at", "accepted_at", "completed_at", "failed_at", "timeout_at", "last_heartbeat_at", "worker_lease_expires_at", "cancel_requested_at", "cancel_acknowledged_at", "triaged_at", "backlogged_at", "ready_at", "review_at", "blocked_at", "task_retain_until", "idempotency_retain_until", "created_at", "updated_at"],
+  "tiangong_artifact_limits": ["updated_at"],
+  "tiangong_provider_identity": ["created_at"],
+  "tiangong_service_keys": ["issued_at", "rotation_window_end", "revoked_at", "created_at", "updated_at"],
+  "tiangong_task_limits": ["updated_at"],
+  "tiangong_worker_leases": ["issued_at", "expires_at", "revoked_at"],
+  "token_usage": ["started_at", "created_at"],
+  "users": ["created_at", "updated_at", "last_sign_in_at"],
+  "workspace_memberships": ["created_at", "updated_at"],
+  "workspaces": ["created_at", "updated_at"],
+};
 
 /** 把 MySQL datetime 字符串转 epoch 秒（number）；非字符串/无效值返回原值。 */
 function toEpochSeconds(v: unknown): number | unknown {
@@ -91,7 +123,7 @@ export async function bootstrapMysqlImport(): Promise<string[]> {
 
   logs.push(`bootstrap-import: db=${dbPath}, importing empty tables from MySQL…`);
 
-  const schemaTsCols = reflectTimestampCols();
+  const schemaTsCols = TIMESTAMP_COLS;
   let conn;
   try {
     conn = await createConnection({ uri: databaseUrl, connectTimeout: 10000 });
@@ -113,7 +145,7 @@ export async function bootstrapMysqlImport(): Promise<string[]> {
         // 存量表：修复历史导入遗留的 TEXT 时间戳（旧版 bootstrap 未转换，
         // MySQL datetime 字符串存成 TEXT → drizzle 返回 null → 前端渲染崩）。
         const tsColsExisting = schemaTsCols[table];
-        if (tsColsExisting && tsColsExisting.size > 0) {
+        if (tsColsExisting && tsColsExisting.length > 0) {
           let fixed = 0;
           for (const col of tsColsExisting) {
             // rowid AS rid：SQLite 整数主键别名 rowid 会被 node:sqlite 映射为 id，
@@ -152,7 +184,7 @@ export async function bootstrapMysqlImport(): Promise<string[]> {
           const values = cols.map((c) => {
             let v = row[c];
             if (v === undefined || v === null) return null;
-            if (tsCols && tsCols.has(c)) v = toEpochSeconds(v);
+            if (tsCols && tsCols.includes(c)) v = toEpochSeconds(v);
             if (typeof v === "string" || typeof v === "number" || typeof v === "bigint" || Buffer.isBuffer(v)) return v;
             return String(v);
           });

@@ -946,18 +946,11 @@ function seedMcpKeys(db: import("node:sqlite").DatabaseSync, logs: string[]): vo
 }
 
 /**
- * 解析 SQLite 文件路径：复用 connection.ts 的 resolveDbPath 语义
- * （DATABASE_URL=mysql://... 兜底为 data/tiangong.db）。
+ * 解析 SQLite 文件路径：单一事实源在 connection.ts（resolveDbPath 已导出），
+ * 此处直接复用，避免出现两份语义漂移副本（曾因本地副本停留在
+ * data/tiangong.db 而 getDb 已迁 artifact 卷，导致建表与读写分离）。
  */
-function resolveDbPath(databaseUrl: string): string {
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL not configured. Set it in environment variables.");
-  }
-  if (databaseUrl.startsWith("mysql://") || databaseUrl.startsWith("mysql2://")) {
-    return path.resolve(process.cwd(), "data", "tiangong.db");
-  }
-  return databaseUrl;
-}
+import { resolveDbPath } from "../queries/connection";
 
 function ensureParentDir(filePath: string): void {
   const parent = path.dirname(filePath);

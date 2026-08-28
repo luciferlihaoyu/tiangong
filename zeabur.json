@@ -1,7 +1,6 @@
 {
   "builder": "docker",
   "mountPaths": {
-    "/app/data/tiangong-artifacts": "tiangong-artifacts",
-    "/app/data": "tiangong-data"
+    "/app/data/tiangong-artifacts": "tiangong-artifacts"
   }
 }

@@ -28,17 +28,22 @@ export function setDbInstance(db: unknown): void {
  *
  * Pre-S1 deployments used `mysql://user:pass@host:port/db` for MySQL. After
  * the SQLite switch (S1) we ignore the MySQL DSN and fall back to a
- * project-local file path so existing env files keep working without
- * operator action. The fallback path lives under `data/tiangong.db` at the
- * project root — auto-created on first call. S4 (deploy) will formalize
- * the volume mount.
+ * volume-persisted file path so existing env files keep working without
+ * operator action. The fallback lives under `TIANGONG_ARTIFACT_ROOT`
+ * (default `/app/data/tiangong-artifacts`, the Zeabur-persisted artifact
+ * volume — see `zeabur.json` mountPaths) as `tiangong.db`. Artifact GC only
+ * sweeps the `by-sha/` and `gc/` subdirectories, so the db file at the
+ * volume root is never touched by cleanup.
+ *
+ * Explicit non-DSN `DATABASE_URL` values (plain file paths) pass through.
  */
-function resolveDbPath(databaseUrl: string): string {
+export function resolveDbPath(databaseUrl: string): string {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL not configured. Set it in environment variables.");
   }
   if (databaseUrl.startsWith("mysql://") || databaseUrl.startsWith("mysql2://")) {
-    return path.resolve(process.cwd(), "data", "tiangong.db");
+    const artifactRoot = env.artifactRoot ?? "/app/data/tiangong-artifacts";
+    return path.resolve(artifactRoot, "tiangong.db");
   }
   return databaseUrl;
 }

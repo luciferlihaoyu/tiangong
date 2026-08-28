@@ -63,6 +63,7 @@
     "@trpc/server": "^11.8.1",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^5.1.1",
+    "better-sqlite3": "file:vendor/better-sqlite3-shim",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

@@ -1,0 +1,8 @@
+{
+  "name": "better-sqlite3",
+  "version": "7.0.0",
+  "description": "Local shim: drizzle-orm/better-sqlite3 does `import Client from 'better-sqlite3'` at module load. Tiangong's S1 migration replaces better-sqlite3 with the built-in node:sqlite (DatabaseSync) via api/lib/node-sqlite-adapter.ts, so the default Client constructor is never invoked. This shim exists only to satisfy the import statement and is gitignored (node_modules/).",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "private": true
+}

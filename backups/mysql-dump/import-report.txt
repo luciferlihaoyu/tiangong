@@ -1,16 +1,16 @@
 # MySQL dump → SQLite 导入报告 (S3)
-generatedAt: 2026-08-28T05:17:19.405Z
+generatedAt: 2026-08-28T05:26:05.768Z
 dumpDir:     /srv/proxy/github/luciferlihaoyu__tiangong/backups/mysql-dump
-db:          /tmp/tiangong-s3-test.db
-mode:        force
+db:          /srv/proxy/github/luciferlihaoyu__tiangong/data/tiangong.db
+mode:        incremental
 manifestTotalRows: 4934
 sourceTotalRows:   4934
-importedTotalRows: 4934
+importedTotalRows: 4646
 
 ## 汇总
-MATCH:    48
+MATCH:    47
 MISMATCH: 0
-SKIPPED:  0
+SKIPPED:  1
 ERROR:    0
 TOTAL:    48
 
@@ -35,7 +35,7 @@ mcp_api_keys                                 16        16  MATCH
 mcp_audit_log                              4227      4227  MATCH
 messages                                     10        10  MATCH
 model_allowlist                               1         1  MATCH
-model_pricing                               288       288  MATCH
+model_pricing                               288        15  SKIPPED_NONEMPTY
 notifications                                 0         0  EMPTY
 organizations                                 1         1  MATCH
 projects                                      0         0  EMPTY

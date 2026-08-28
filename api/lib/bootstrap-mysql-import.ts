@@ -83,13 +83,26 @@ const TIMESTAMP_COLS: Record<string, string[]> = {
   "workspaces": ["created_at", "updated_at"],
 };
 
-/** 把 MySQL datetime 字符串转 epoch 秒（number）；非字符串/无效值返回原值。 */
+/**
+ * 把 MySQL datetime 值转 epoch 秒（number）。覆盖三种形态：
+ *  - Date 对象（mysql2 默认把 DATETIME 转成 JS Date）：getTime()/1000
+ *  - ISO 字符串（'2026-06-27T13:10:30.000Z'）：Date.parse 直接解析
+ *  - 其他文本（'2026-08-24 05:30:00' 无 Z → 按 +08:00 解析；
+ *    String(Date) 形如 'Mon Jun 27 2026 ...' → Date.parse 兜底）
+ * 解析失败/非日期 → 返回原值。
+ */
 function toEpochSeconds(v: unknown): number | unknown {
+  if (v instanceof Date) {
+    const ms = v.getTime();
+    return Number.isNaN(ms) ? v : Math.floor(ms / 1000);
+  }
   if (typeof v !== "string") return v;
   if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(v)) {
     const ms = Date.parse(v.replace(" ", "T") + (v.includes("Z") ? "" : "+08:00"));
     if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
   }
+  const fallback = Date.parse(v);
+  if (!Number.isNaN(fallback)) return Math.floor(fallback / 1000);
   return v;
 }
 

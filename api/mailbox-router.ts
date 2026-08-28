@@ -4,7 +4,6 @@ import { getDb } from "./queries/connection";
 import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
-import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 
 const mailboxTypeEnum = z.enum([
   "direct",
@@ -28,19 +27,22 @@ const mailboxStatusEnum = z.enum([
 type AgentRow = typeof agents.$inferSelect;
 type MailboxMessageRow = typeof mailboxMessages.$inferSelect;
 type MailboxType = typeof mailboxMessages.$inferInsert["type"];
-type InsertResult =
-  | MySqlRawQueryResult
-  | (({ readonly insertId?: number; readonly lastInsertRowid?: number | bigint; readonly changes?: number }));
+
+/**
+ * S2 (PLAN_SQLITE_MIGRATION): SQLite (via drizzle/better-sqlite3) returns the
+ * insert result as a plain RunResult object — `{ lastInsertRowid, changes }`.
+ * The legacy MySQL `MySqlRawQueryResult` tuple shape is no longer in the
+ * pipeline, so the union collapses to a single SQLite-compatible object.
+ */
+type InsertResult = {
+  readonly insertId?: number;
+  readonly lastInsertRowid?: number | bigint;
+  readonly changes?: number;
+};
 
 function getInsertId(result: InsertResult): number | undefined {
-  // S1 (PLAN_SQLITE_MIGRATION): better-sqlite3 RunResult exposes the new
-  // row id as `lastInsertRowid`; mirror the MySQL `insertId` path so the
-  // existing call sites keep working without per-site refactors (S2 will
-  // consolidate the union on the S2 union `{ insertId; affectedRows }`).
   let insertId: number | bigint | undefined;
-  if (Array.isArray(result)) {
-    insertId = result[0].insertId;
-  } else if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
+  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
     insertId = result.lastInsertRowid;
   } else {
     insertId = result.insertId;

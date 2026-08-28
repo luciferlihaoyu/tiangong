@@ -19,7 +19,6 @@ import {
   agents,
 } from "@db/schema";
 import { eq, and, desc, asc, type SQL } from "drizzle-orm";
-import type { MySqlRawQueryResult } from "drizzle-orm/mysql2";
 import { env } from "./lib/env";
 
 /* ═══════════════════════════════════════════
@@ -27,16 +26,20 @@ import { env } from "./lib/env";
    ═══════════════════════════════════════════ */
 
 const GITHUB_API_BASE = "https://api.github.com";
-type InsertResult =
-  | MySqlRawQueryResult
-  | (({ readonly insertId?: number; readonly lastInsertRowid?: number | bigint; readonly changes?: number }));
+
+/**
+ * S2 (PLAN_SQLITE_MIGRATION): SQLite (via drizzle/better-sqlite3) returns the
+ * insert result as a plain RunResult object — `{ lastInsertRowid, changes }`.
+ * The legacy MySQL `MySqlRawQueryResult` tuple shape is no longer in the
+ * pipeline, so the union collapses to a single SQLite-compatible object.
+ */
+type InsertResult = {
+  readonly insertId?: number;
+  readonly lastInsertRowid?: number | bigint;
+  readonly changes?: number;
+};
 
 function getInsertId(result: InsertResult): number {
-  if (Array.isArray(result)) return result[0].insertId;
-  // S1 (PLAN_SQLITE_MIGRATION): better-sqlite3 RunResult exposes the new
-  // row id as `lastInsertRowid`; mirror the MySQL `insertId` path so the
-  // existing call sites keep working without per-site refactors (S2 will
-  // consolidate the union on the S2 union `{ insertId; affectedRows }`).
   if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
     return Number(result.lastInsertRowid);
   }

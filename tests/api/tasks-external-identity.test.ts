@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getTableConfig } from "drizzle-orm/mysql-core";
+// S2 (PLAN_SQLITE_MIGRATION): S1 schema 切到 sqliteTable；getTableConfig 同步切
+// 到 sqlite-core 版本。MySQL 版的 getTableConfig 不能解析 SQLiteTable 实例。
+import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { taskMessages, tasks } from "@db/schema";
 
 const shared = vi.hoisted(() => ({ db: null as unknown as import("./helpers/fake-db").FakeDb }));

@@ -5,7 +5,10 @@ function optional(name: string, defaultValue: string = ""): string {
 }
 
 export const env = {
-  // 数据库连接（可选：没设也能启动，API 调用时才会报错）
+  // S2 (PLAN_SQLITE_MIGRATION): 数据库连接 — SQLite 文件路径
+  //（如 `data/tiangong.db` 或 `:memory:`）。
+  // 兼容旧值：若设为 `mysql://...` / `mysql2://...`，connection.ts
+  // 的 resolveDbPath 兜底走 `data/tiangong.db`（见 api/queries/connection.ts）。
   databaseUrl: optional("DATABASE_URL"),
 
   // JWT 密钥

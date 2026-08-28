@@ -29,7 +29,9 @@ const DEAD_SCHEMA_TABLES = new Set([
 function extractSchemaTables(): string[] {
   const src = readFileSync(join(REPO_ROOT, "db", "schema.ts"), "utf-8");
   const names = new Set<string>();
-  for (const m of src.matchAll(/mysqlTable\(\s*"(\w+)"/g)) names.add(m[1]!);
+  // S2 (PLAN_SQLITE_MIGRATION): S1 把 mysqlTable 全部替换为 sqliteTable，匹配
+  // 字符串相应更新。
+  for (const m of src.matchAll(/sqliteTable\(\s*"(\w+)"/g)) names.add(m[1]!);
   return [...names].sort();
 }
 

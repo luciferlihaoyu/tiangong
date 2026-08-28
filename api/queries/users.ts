@@ -19,13 +19,13 @@ export async function upsertUser(data: InsertUser) {
     ...data,
   };
 
+  // S2 (PLAN_SQLITE_MIGRATION): SQLite's `onConflictDoUpdate` mirrors MySQL's
+  // `ON DUPLICATE KEY UPDATE` semantics. We target the unique `username` column
+  // (the conflict resolution key in the MySQL version). The fake-db test
+  // harness still mocks `getDb` entirely, so this path is exercised in
+  // production by the login flow.
   await getDb()
     .insert(schema.users)
     .values(values)
-    // S1 (PLAN_SQLITE_MIGRATION): S2 will replace the MySQL-specific
-    // `onDuplicateKeyUpdate` with SQLite's `onConflictDoUpdate({ target,
-    // set })` against `schema.users.username`. The fake-db tests mock
-    // `getDb` entirely, so this path is not exercised in S1.
-    // @ts-expect-error -- MySQL-only API; S2 will rewrite to onConflictDoUpdate.
-    .onDuplicateKeyUpdate({ set: updateSet });
+    .onConflictDoUpdate({ target: schema.users.username, set: updateSet });
 }

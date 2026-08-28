@@ -1,0 +1,66 @@
+# MySQL dump → SQLite 导入报告 (S3)
+generatedAt: 2026-08-28T05:17:19.405Z
+dumpDir:     /srv/proxy/github/luciferlihaoyu__tiangong/backups/mysql-dump
+db:          /tmp/tiangong-s3-test.db
+mode:        force
+manifestTotalRows: 4934
+sourceTotalRows:   4934
+importedTotalRows: 4934
+
+## 汇总
+MATCH:    48
+MISMATCH: 0
+SKIPPED:  0
+ERROR:    0
+TOTAL:    48
+
+## 逐表
+table                                   source  imported  status
+agent_memories                                0         0  EMPTY
+agents                                       14        14  MATCH
+artifact_registry                             0         0  EMPTY
+audit_events                                 19        19  MATCH
+connector_registry                            0         0  EMPTY
+conversations                                 0         0  EMPTY
+departments                                   7         7  MATCH
+external_agents                               0         0  EMPTY
+github_audit_log                              0         0  EMPTY
+github_integrations                           0         0  EMPTY
+github_pull_requests                          0         0  EMPTY
+github_repo_permissions                       2         2  MATCH
+github_repos                                  3         3  MATCH
+high_cost_model_auth                          0         0  EMPTY
+mailbox_messages                            182       182  MATCH
+mcp_api_keys                                 16        16  MATCH
+mcp_audit_log                              4227      4227  MATCH
+messages                                     10        10  MATCH
+model_allowlist                               1         1  MATCH
+model_pricing                               288       288  MATCH
+notifications                                 0         0  EMPTY
+organizations                                 1         1  MATCH
+projects                                      0         0  EMPTY
+sealed_artifact_descriptors                   0         0  EMPTY
+sealed_artifact_manifests                     0         0  EMPTY
+secret_vault_items                            0         0  EMPTY
+service_key_audit_log                         0         0  EMPTY
+session_messages                              1         1  MATCH
+shared_sessions                               1         1  MATCH
+staged_objects                                0         0  EMPTY
+system_settings                               5         5  MATCH
+systems                                       0         0  EMPTY
+task_artifacts                               38        38  MATCH
+task_dependencies                             0         0  EMPTY
+task_execution_slots                          0         0  EMPTY
+task_messages                                78        78  MATCH
+task_outbox_events                            0         0  EMPTY
+task_threads                                  0         0  EMPTY
+tasks                                        22        22  MATCH
+tiangong_artifact_limits                      0         0  EMPTY
+tiangong_provider_identity                    0         0  EMPTY
+tiangong_service_keys                         0         0  EMPTY
+tiangong_task_limits                          0         0  EMPTY
+tiangong_worker_leases                        0         0  EMPTY
+token_usage                                  18        18  MATCH
+users                                         1         1  MATCH
+workspace_memberships                         0         0  EMPTY
+workspaces                                    0         0  EMPTY

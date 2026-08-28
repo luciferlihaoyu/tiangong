@@ -11,6 +11,7 @@ import { env } from "./lib/env";
 import { verifyToken } from "./local-auth-router";
 import { autoMigrate } from "./lib/auto-migrate";
 import { migrateV2 } from "./lib/migrate-v2";
+import { bootstrapMysqlImport } from "./lib/bootstrap-mysql-import";
 import { serveStaticFiles } from "./lib/vite";
 import { wsManager } from "./ws-manager";
 import { verifyMcpKey } from "./mcp/auth";
@@ -446,6 +447,14 @@ try {
   await migrateV2();
 } catch (e: unknown) {
   console.warn("V2 migration failed:", e instanceof Error ? e.message : String(e));
+}
+
+// MySQL → SQLite 启动自迁移（#61）：若仍配置 MySQL DSN 且 SQLite 空，全量导入。
+try {
+  const impLogs = await bootstrapMysqlImport();
+  for (const l of impLogs) console.log(l);
+} catch (e: unknown) {
+  console.warn("Bootstrap MySQL import failed (app continues):", e instanceof Error ? e.message : String(e));
 }
 
 // Load MCP tokens from DB into global key set for API key verification

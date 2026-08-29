@@ -66,6 +66,32 @@ app.use("/api/trpc/*", async (c) => {
   });
 });
 
+// ========== 统一健康检查端点（P0-3）==========
+// 与北斗/璇玑一致：GET /health → {ok, name, db}。getDb() 打开 SQLite 连接，
+// 失败（路径/卷异常）则 db=false 并返回 503。
+const healthStartTime = Date.now();
+app.get("/health", (c) => {
+  try {
+    getDb();
+    return c.json({
+      ok: true,
+      name: "tiangong",
+      db: true,
+      uptime: Math.floor((Date.now() - healthStartTime) / 1000),
+    });
+  } catch {
+    return c.json(
+      {
+        ok: true,
+        name: "tiangong",
+        db: false,
+        uptime: Math.floor((Date.now() - healthStartTime) / 1000),
+      },
+      503
+    );
+  }
+});
+
 // P11.4: 版本信息端点（读取部署环境变量或构建时注入的 commit，无运行时 .git 依赖）
 app.get("/api/version", async (c) => {
   let buildMeta: Record<string, string | null> = {};
@@ -418,7 +444,7 @@ app.get("/ws/dashboard", async (c) => {
       }
     },
 
-    onClose: (_evt, ws) => {
+    onClose: () => {
       wsManager.unregisterDashboard(ws);
       console.log("[WS] Dashboard client disconnected");
     },

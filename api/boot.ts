@@ -444,7 +444,7 @@ app.get("/ws/dashboard", async (c) => {
       }
     },
 
-    onClose: () => {
+    onClose: (_evt, ws) => {
       wsManager.unregisterDashboard(ws);
       console.log("[WS] Dashboard client disconnected");
     },

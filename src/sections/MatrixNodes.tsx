@@ -60,7 +60,10 @@ function Scene({ nodeCount }: { nodeCount: number }) {
 
 function Connections({ positions }: { positions: THREE.Vector3[] }) {
   const maxDistance = 4.5;
-  const lineGeo = useRef<THREE.BufferGeometry>(new THREE.BufferGeometry());
+  // geometry 独立创建一次（useState 惰性初始化），setAttribute 更新它；
+  // 不绑到 lineSegments ref（r3f 会把 ref 赋成 LineSegments 对象而非 geometry，
+  // 旧代码因此 current.setAttribute 崩溃）。
+  const [lineGeo] = useState<THREE.BufferGeometry>(() => new THREE.BufferGeometry());
 
   useEffect(() => {
     if (!positions || positions.length === 0) return;
@@ -76,11 +79,14 @@ function Connections({ positions }: { positions: THREE.Vector3[] }) {
         }
       }
     }
-    lineGeo.current.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
-  }, [positions]);
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    lineGeo.computeBoundingSphere();
+  }, [positions, lineGeo]);
+
+  useEffect(() => () => lineGeo.dispose(), [lineGeo]);
 
   return (
-    <lineSegments ref={lineGeo}>
+    <lineSegments geometry={lineGeo}>
       <lineBasicMaterial color="#c9a84c" transparent opacity={0.06} />
     </lineSegments>
   );

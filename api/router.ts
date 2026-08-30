@@ -30,6 +30,7 @@ import { newapiRouter } from "./newapi-router";
 import { tianshuRouter } from "./tianshu-router";
 import { alistRouter } from "./alist-router";
 import { beidouExternalRouter } from "./beidou-external-router";
+import { platformRouter } from "./platform-router";
 import { createRouter, publicQuery } from "./middleware";
 
 import { executionRouter } from "./execution-router";
@@ -70,6 +71,7 @@ export const appRouter = createRouter({
   tianshu: tianshuRouter,
   alist: alistRouter,
   beidouExternal: beidouExternalRouter,
+  platform: platformRouter,
 });
 
 export type AppRouter = typeof appRouter;

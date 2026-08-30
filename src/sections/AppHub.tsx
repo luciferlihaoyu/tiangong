@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import AppCard from "@/components/AppCard";
+import { toast } from "sonner";
 
 type AppStatus = "ok" | "down" | "unknown";
 
@@ -11,6 +13,9 @@ const APP_META: Record<string, { description: string }> = {
   tianshu: { description: "模型网关" },
   alist: { description: "文件存储" },
 };
+
+/** 仅这些平台有 SSO /sso/launch 接收端：点击先调 launch 签票，成功后再开窗免登进入 */
+const SSO_KEYS = new Set(["beidou", "xuanji"]);
 
 interface HealthEntry {
   ok: boolean;
@@ -41,6 +46,29 @@ export default function AppHub() {
     retry: 1,
     refetchInterval: 30000,
   });
+  /** 正在走 SSO 签票的平台 key；非空时对应卡片禁点，防连击 */
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  const launchMutation = trpc.platform.launch.useMutation({
+    onSuccess: (res) => {
+      if (res.ok) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      } else {
+        toast.error(`进入失败：${res.error ?? "未知错误"}`);
+      }
+    },
+    onError: (e) => toast.error(`进入失败：${e.message}`),
+    onSettled: () => setBusyKey(null),
+  });
+
+  const handleOpen = (key: string, url: string) => {
+    if (SSO_KEYS.has(key)) {
+      setBusyKey(key);
+      launchMutation.mutate({ app: key });
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   const services = registryQuery.data ?? [];
 
@@ -78,6 +106,8 @@ export default function AppHub() {
                   latencyMs={health?.latencyMs}
                   reason={resolved.reason}
                   badge={isSelf ? "当前平台" : undefined}
+                  busy={busyKey === svc.key}
+                  onOpen={(url) => handleOpen(svc.key, url)}
                 />
               );
             })}

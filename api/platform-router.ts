@@ -8,9 +8,8 @@
  *   外部请求一律 fetch + AbortSignal.timeout，异常全部捕获转成结构化
  *   { ok: false, reason }，绝不向上抛崩。
  * - launch: P1-3 SSO 联邦认证签发端 —— 为已登录用户签发进入北斗/璇玑等子服务的
- *   短期一次性凭证（JWT HS256，typ=sso-launch，exp=iat+120s，jti 一次性）。
- *   接收端约定 GET /sso/launch?token=...；签名密钥取 TIANGONG_SSO_SECRET，
- *   未配置时回退 APP_SECRET（启动时必已存在）。
+ *   短期一次性凭证（JWT HS256，typ=sso-launch，exp=iat+120s，jti 一次性；接收端
+ *   GET /sso/launch?token=...；密钥取 TIANGONG_SSO_SECRET 或 APP_SECRET）。
  */
 import { z } from "zod";
 import { createRouter, userQuery } from "./middleware";
@@ -62,11 +61,6 @@ export function getPlatformServices(): PlatformService[] {
     { key: "alist", label: "AList", url: stripTrailingSlash(process.env.ALIST_BASE_URL || ""), kind: "storage" },
   ];
 }
-
-// ─── SSO launch ───
-
-/** SSO Launch 协议 v1：凭证有效期（秒），exp = iat + 120 */
-const SSO_LAUNCH_TTL_SEC = 120;
 
 // ─── 健康探测 ───
 
@@ -146,15 +140,11 @@ export const platformRouter = createRouter({
     }),
   }),
 
-  /**
-   * P1-3 SSO launch：为已登录用户签发进入子服务的短期一次性凭证。
-   * 目标服务必须已注册且非 self；返回可直接跳转的 /sso/launch URL。
-   */
+  /** P1-3 SSO launch：为已登录用户签发进入子服务的短期一次性凭证 */
   launch: userQuery
     .input(z.object({ app: z.string().min(1).max(50) }))
     .mutation(async ({ input, ctx }) => {
       try {
-        // 目标服务必须已注册且非 self（不能"签发进入天宫自身"）
         const service = getPlatformServices().find((s) => s.key === input.app);
         if (!service || service.kind === "self") {
           return { ok: false as const, error: "unknown app" };
@@ -162,44 +152,31 @@ export const platformRouter = createRouter({
         if (!service.url) {
           return { ok: false as const, error: "not configured" };
         }
-
-        // 签名密钥：TIANGONG_SSO_SECRET 优先，回退 APP_SECRET（启动时必已存在）
         const secret = process.env.TIANGONG_SSO_SECRET || process.env.APP_SECRET;
         if (!secret) {
           return { ok: false as const, error: "sso secret not configured" };
         }
-
-        // 查用户名（可选 enrich：查不到则省略 username claim，sub/role 照常）
-        const user = await getDb()
-          .select()
-          .from(users)
-          .where(eq(users.id, ctx.user.id))
-          .then((rows) => rows[0]);
-
-        const claims = {
+        // 查用户名（可选 enrich：查不到则省略 username claim）
+        const user = await getDb().select().from(users).where(eq(users.id, ctx.user!.id)).then((rows) => rows[0]);
+        const token = await new SignJWT({
           typ: "sso-launch",
-          sub: String(ctx.user.id),
-          role: ctx.user.role,
+          sub: String(ctx.user!.id),
+          role: ctx.user!.role,
           app: service.key,
           ...(user?.username ? { username: user.username } : {}),
-        };
-        const token = await new SignJWT(claims)
+        })
           .setProtectedHeader({ alg: "HS256" })
           .setIssuedAt()
-          .setExpirationTime(`${SSO_LAUNCH_TTL_SEC}s`)
+          .setExpirationTime("120s")
           .setJti(crypto.randomUUID())
           .sign(new TextEncoder().encode(secret));
-
         return {
           ok: true as const,
           url: `${service.url}/sso/launch?token=${encodeURIComponent(token)}`,
-          expiresInSec: SSO_LAUNCH_TTL_SEC,
+          expiresInSec: 120,
         };
       } catch (e) {
-        return {
-          ok: false as const,
-          error: e instanceof Error ? e.message : String(e),
-        };
+        return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
       }
     }),
 });

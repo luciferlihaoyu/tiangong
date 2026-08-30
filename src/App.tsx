@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router'
+import AppHub from './sections/AppHub'
 import Starfield from './sections/Starfield'
 import Dashboard from './sections/Dashboard'
 import MatrixNodes from './sections/MatrixNodes'
@@ -55,6 +56,7 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
 function HomePage() {
   return (
     <>
+      <AppHub />
       <Dashboard />
       <MatrixNodes />
       <Features />

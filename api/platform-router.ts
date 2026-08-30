@@ -7,12 +7,12 @@
  * - health.all: 并发探活全平台；单个服务失败只影响自身结果，不拖垮整体。
  *   外部请求一律 fetch + AbortSignal.timeout，异常全部捕获转成结构化
  *   { ok: false, reason }，绝不向上抛崩。
- * - launch: P1-3 SSO 联邦认证签发端 —— 为已登录用户签发进入北斗/璇玑等子服务的
- *   短期一次性凭证（JWT HS256，typ=sso-launch，exp=iat+120s，jti 一次性；接收端
- *   GET /sso/launch?token=...；密钥取 TIANGONG_SSO_SECRET 或 APP_SECRET）。
+ * - launch: P1-3 SSO 联邦认证签发端 —— 仅管理员为已登录用户签发进入北斗/璇玑等
+ *   子服务的短期一次性凭证（JWT HS256，typ=sso-launch，exp=iat+120s，jti 一次性；
+ *   接收端 GET /sso/launch?token=...；密钥取 TIANGONG_SSO_SECRET 或 APP_SECRET）。
  */
 import { z } from "zod";
-import { createRouter, userQuery } from "./middleware";
+import { createRouter, adminQuery, userQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
@@ -140,8 +140,8 @@ export const platformRouter = createRouter({
     }),
   }),
 
-  /** P1-3 SSO launch：为已登录用户签发进入子服务的短期一次性凭证 */
-  launch: userQuery
+  /** P1-3 SSO launch：管理员为已登录用户签发进入子服务的短期一次性凭证 */
+  launch: adminQuery
     .input(z.object({ app: z.string().min(1).max(50) }))
     .mutation(async ({ input, ctx }) => {
       try {
@@ -154,7 +154,7 @@ export const platformRouter = createRouter({
         }
         const secret = process.env.TIANGONG_SSO_SECRET || process.env.APP_SECRET;
         if (!secret) {
-          return { ok: false as const, error: "sso secret not configured" };
+          return { ok: false as const, error: "签发服务未配置" };
         }
         // 查用户名（可选 enrich：查不到则省略 username claim）
         const user = await getDb().select().from(users).where(eq(users.id, ctx.user!.id)).then((rows) => rows[0]);
@@ -175,8 +175,8 @@ export const platformRouter = createRouter({
           url: `${service.url}/sso/launch?token=${encodeURIComponent(token)}`,
           expiresInSec: 120,
         };
-      } catch (e) {
-        return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+      } catch {
+        return { ok: false as const, error: "签发失败，请稍后重试" };
       }
     }),
 });

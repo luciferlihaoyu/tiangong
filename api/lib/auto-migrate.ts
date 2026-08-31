@@ -768,6 +768,18 @@ const CREATE_TABLES_SQL: string[] = [
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,
+
+  // ─── plugins (P2-1 插件中心，与 db/schema.ts 对齐) ───
+  `CREATE TABLE IF NOT EXISTS plugins (
+    "key" TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    url TEXT NOT NULL,
+    token_env_key TEXT,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
 ];
 
 /**

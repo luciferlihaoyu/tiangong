@@ -11,6 +11,8 @@ interface AppCardProps {
   badge?: string;
   /** SSO 签票进行中：该卡禁点并显示忙碌态，防止连击 */
   busy?: boolean;
+  /** 站内路由地址（如 /plugins）：设置后点击在本页跳转，优先于外部 url */
+  internalHref?: string;
   /** 外部接管点击（如 SSO 联邦登录签票）；缺省时直接 window.open */
   onOpen?: (url: string) => void;
 }
@@ -25,12 +27,18 @@ export default function AppCard({
   disabled,
   badge,
   busy,
+  internalHref,
   onOpen,
 }: AppCardProps) {
-  const clickable = !disabled && !!url;
+  const clickable = !disabled && (!!url || !!internalHref);
 
   const handleClick = () => {
-    if (!clickable || !url || busy) return;
+    if (!clickable || busy) return;
+    if (internalHref) {
+      window.open(internalHref, "_self");
+      return;
+    }
+    if (!url) return;
     if (onOpen) {
       onOpen(url);
       return;
@@ -43,7 +51,7 @@ export default function AppCard({
       type="button"
       onClick={handleClick}
       disabled={disabled || busy}
-      title={clickable ? url : undefined}
+      title={clickable ? (url ?? internalHref) : undefined}
       className={`glass-panel p-4 sci-border transition-all text-left w-full ${
         clickable ? "cursor-pointer hover:border-[var(--accent-gold)]/30 hover:brightness-110" : "cursor-default"
       }`}

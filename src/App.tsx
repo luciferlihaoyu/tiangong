@@ -13,10 +13,8 @@ import NotFound from './pages/NotFound'
 import MissionLog from './pages/MissionLog'
 import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
-import PricingPanel from './pages/PricingPanel'
 import ModelsPanel from './pages/ModelsPanel'
 import AlistPanel from './pages/AlistPanel'
-import GuardPanel from './pages/GuardPanel'
 import OpsPanel from './pages/OpsPanel'
 import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
@@ -90,10 +88,8 @@ export default function App() {
           <Route path="/missions" element={<MissionLog />} />
           <Route path="/task-center" element={<TaskCenter />} />
           <Route path="/usage" element={<UsagePanel />} />
-          <Route path="/pricing" element={<PricingPanel />} />
           <Route path="/models" element={<ModelsPanel />} />
           <Route path="/alist" element={<AlistPanel />} />
-          <Route path="/guard" element={<GuardPanel />} />
           <Route path="/ops" element={<OpsPanel />} />
           <Route path="/fusion" element={<FusionPanel />} />
           <Route path="/agents" element={<AgentList />} />

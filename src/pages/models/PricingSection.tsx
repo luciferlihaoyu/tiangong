@@ -1,10 +1,11 @@
 /**
- * P13: 模型定价管理页面
+ * 定价管理区块（原 PricingPanel 提取，用于合并进模型管理页）。
+ * 去掉了页面外层容器与页头（由父页 Tabs 承载）。
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
-import { DollarSign, Plus, Trash2, Edit3, Save, X, RefreshCw } from "lucide-react";
+import { DollarSign, Plus, Trash2, Edit3, Save, X } from "lucide-react";
 
 interface PricingForm {
   model: string;
@@ -32,7 +33,7 @@ function fmtPrice(v: string | number | null): string {
   return `$${n.toFixed(6)}`;
 }
 
-export default function PricingPanel() {
+export function PricingSection() {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<PricingForm | null>(null);
   const [form, setForm] = useState<PricingForm>(emptyForm);
@@ -141,121 +142,106 @@ export default function PricingPanel() {
   }>;
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-24 pb-16">
-        {/* 审计：list 加载失败显式呈现，避免空白页吞错 */}
-        {listQuery.isError && (
-          <div
-            className="text-xs px-3 py-2 rounded mb-4 font-mono"
-            style={{
-              background: "rgba(220,38,38,0.12)",
-              border: "1px solid rgba(220,38,38,0.35)",
-              color: "#fca5a5",
-            }}
-            onClick={() => listQuery.refetch()}
-            role="alert"
-            title="点击重新加载"
-          >
-            加载失败：{listQuery.error?.message ?? "未知错误"}（点击重试）
-          </div>
-        )}
-
-        {/* 审计：upsert / delete 失败的临时错误条（mutation onError 写入） */}
-        {actionError && (
-          <div
-            className="text-xs px-3 py-2 rounded mb-4 font-mono"
-            style={{
-              background: "rgba(220,38,38,0.12)",
-              border: "1px solid rgba(220,38,38,0.35)",
-              color: "#fca5a5",
-            }}
-            role="alert"
-            onClick={() => setActionError(null)}
-            title="点击关闭"
-          >
-            {actionError}
-          </div>
-        )}
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-black tracking-wider" style={{ color: "var(--text-primary)" }}>
-              模型定价管理
-            </h1>
-            <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>
-              MODEL PRICING · USD / 1K tokens
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => listQuery.refetch()}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
-              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
-            >
-              <RefreshCw size={14} /> 刷新
-            </button>
-            <AdminGate>
-              <button
-                onClick={handleOpenCreate}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors"
-                style={{ background: "var(--accent-red)", color: "#fff" }}
-              >
-                <Plus size={14} /> 新增定价
-              </button>
-            </AdminGate>
-          </div>
+    <div>
+      {/* 审计：list 加载失败显式呈现，避免空白页吞错 */}
+      {listQuery.isError && (
+        <div
+          className="text-xs px-3 py-2 rounded mb-4 font-mono"
+          style={{
+            background: "rgba(220,38,38,0.12)",
+            border: "1px solid rgba(220,38,38,0.35)",
+            color: "#fca5a5",
+          }}
+          onClick={() => listQuery.refetch()}
+          role="alert"
+          title="点击重新加载"
+        >
+          加载失败：{listQuery.error?.message ?? "未知错误"}（点击重试）
         </div>
+      )}
 
-        {/* Table */}
-        <div className="glass-panel p-4 sci-border">
-          {listQuery.isLoading ? (
-            <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>
-          ) : rows.length === 0 ? (
-            <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
-              <DollarSign size={32} className="mx-auto mb-3 opacity-30" />
-              <div className="text-sm font-mono">暂无定价数据</div>
-              <div className="text-[10px]">点击「新增定价」添加模型</div>
-            </div>
-          ) : (
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
-                    {["模型", "提供方", "输入价/1K", "输出价/1K", "缓存价/1K", "货币", "备注", "操作"].map((h) => (
-                      <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.model} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <td className="py-2 px-3 truncate max-w-48" style={{ color: "var(--text-primary)" }}>{r.model}</td>
-                      <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{r.provider}</td>
-                      <td className="py-2 px-3" style={{ color: "var(--accent-cyan)" }}>{fmtPrice(r.inputPrice)}</td>
-                      <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtPrice(r.outputPrice)}</td>
-                      <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtPrice(r.cachedInputPrice)}</td>
-                      <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{r.currency}</td>
-                      <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-secondary)" }}>{r.notes ?? "-"}</td>
-                      <td className="py-2 px-3">
-                        <div className="flex items-center gap-2">
-                          <AdminGate>
-                            <button onClick={() => handleOpenEdit(r)} className="p-1 rounded hover:bg-[rgba(180,200,255,0.05)]" style={{ color: "var(--text-muted)" }} title="编辑">
-                              <Edit3 size={12} />
-                            </button>
-                            <button onClick={() => handleDelete(r.model)} className="p-1 rounded hover:bg-[rgba(255,50,50,0.1)]" style={{ color: "var(--accent-red-bright)" }} title="删除">
-                              <Trash2 size={12} />
-                            </button>
-                          </AdminGate>
-                        </div>
-                      </td>
-                    </tr>
+      {/* 审计：upsert / delete 失败的临时错误条（mutation onError 写入） */}
+      {actionError && (
+        <div
+          className="text-xs px-3 py-2 rounded mb-4 font-mono"
+          style={{
+            background: "rgba(220,38,38,0.12)",
+            border: "1px solid rgba(220,38,38,0.35)",
+            color: "#fca5a5",
+          }}
+          role="alert"
+          onClick={() => setActionError(null)}
+          title="点击关闭"
+        >
+          {actionError}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <DollarSign size={14} style={{ color: "var(--accent-cyan)" }} />
+          <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>定价管理</span>
+          <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>MODEL PRICING · USD / 1K tokens</span>
+        </div>
+        <AdminGate>
+          <button
+            onClick={handleOpenCreate}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors"
+            style={{ background: "var(--accent-red)", color: "#fff" }}
+          >
+            <Plus size={14} /> 新增定价
+          </button>
+        </AdminGate>
+      </div>
+
+      {/* Table */}
+      <div className="glass-panel p-4 sci-border">
+        {listQuery.isLoading ? (
+          <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>
+        ) : rows.length === 0 ? (
+          <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>
+            <DollarSign size={32} className="mx-auto mb-3 opacity-30" />
+            <div className="text-sm font-mono">暂无定价数据</div>
+            <div className="text-[10px]">点击「新增定价」添加模型</div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                  {["模型", "提供方", "输入价/1K", "输出价/1K", "缓存价/1K", "货币", "备注", "操作"].map((h) => (
+                    <th key={h} className="text-left py-2 px-3" style={{ color: "var(--text-muted)", fontWeight: 400 }}>{h}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.model} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                    <td className="py-2 px-3 truncate max-w-48" style={{ color: "var(--text-primary)" }}>{r.model}</td>
+                    <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{r.provider}</td>
+                    <td className="py-2 px-3" style={{ color: "var(--accent-cyan)" }}>{fmtPrice(r.inputPrice)}</td>
+                    <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtPrice(r.outputPrice)}</td>
+                    <td className="py-2 px-3" style={{ color: "var(--success)" }}>{fmtPrice(r.cachedInputPrice)}</td>
+                    <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{r.currency}</td>
+                    <td className="py-2 px-3 truncate max-w-40" style={{ color: "var(--text-secondary)" }}>{r.notes ?? "-"}</td>
+                    <td className="py-2 px-3">
+                      <div className="flex items-center gap-2">
+                        <AdminGate>
+                          <button onClick={() => handleOpenEdit(r)} className="p-1 rounded hover:bg-[rgba(180,200,255,0.05)]" style={{ color: "var(--text-muted)" }} title="编辑">
+                            <Edit3 size={12} />
+                          </button>
+                          <button onClick={() => handleDelete(r.model)} className="p-1 rounded hover:bg-[rgba(255,50,50,0.1)]" style={{ color: "var(--accent-red-bright)" }} title="删除">
+                            <Trash2 size={12} />
+                          </button>
+                        </AdminGate>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Modal */}

@@ -1046,3 +1046,22 @@ export const notifications = sqliteTable("notifications", {
   agentReadIdx: index("idx_notifications_agent_read").on(table.agentId, table.readAt),
   createdAtIdx: index("idx_notifications_created_at").on(table.createdAt),
 }));
+
+// ═══════════════════════════════════════════════════════════════
+// 插件中心（P2-1）
+// MCP 插件注册表：url / tokenEnvKey 仅服务端持有，任何对普通用户的输出
+// （pluginCenter.list 等）都不得外泄这两个字段。
+// ─── Plugins: 插件中心 ───
+export const plugins = sqliteTable("plugins", {
+  key: text("key", { length: 50 }).primaryKey(),
+  name: text("name", { length: 100 }).notNull(),
+  description: text("description", { length: 200 }).notNull(),
+  url: text("url").notNull(),
+  tokenEnvKey: text("token_env_key"),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Plugin = typeof plugins.$inferSelect;
+export type InsertPlugin = typeof plugins.$inferInsert;

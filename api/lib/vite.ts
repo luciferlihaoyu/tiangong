@@ -27,6 +27,17 @@ export function serveStaticFiles(app: App) {
     }
   });
 
+  // SPA 入口文档禁强缓存：保证发版后浏览器总拿到新 index.html
+  // （hash 资源名不受影响，仍可长缓存）。必须在 serveStatic 之前注册才能包住其响应。
+  // 事故：2026-08-31 用户浏览器缓存旧 index.html，插件中心卡点击无反应。
+  app.use("*", async (c, next) => {
+    await next();
+    const contentType = c.res.headers.get("content-type") ?? "";
+    if (contentType.includes("text/html")) {
+      c.res.headers.set("Cache-Control", "no-cache");
+    }
+  });
+
   app.use("*", serveStatic({
     root: publicPath,
   }));

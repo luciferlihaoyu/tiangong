@@ -35,7 +35,8 @@ export default function AppCard({
   const handleClick = () => {
     if (!clickable || busy) return;
     if (internalHref) {
-      window.open(internalHref, "_self");
+      // HashRouter 站内路由必须走 hash 路径；普通 path 会被路由器无视并落回首页
+      window.open(`#${internalHref}`, "_self");
       return;
     }
     if (!url) return;

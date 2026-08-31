@@ -111,7 +111,7 @@ export default function AppHub() {
                 />
               );
             })}
-            <AppCard label="插件中心" description="即将上线" status="unknown" disabled />
+            <AppCard label="插件中心" description="能力可插拔" status="ok" internalHref="/plugins" />
           </div>
         )}
       </div>

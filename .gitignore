@@ -28,3 +28,6 @@ PLAN*.md
 
 # SQLite 数据库文件（data/tiangong.db 由 volume 持久化，不入 git）
 data/
+
+# SSO v2 自动生成的 Ed25519 签名密钥（私钥材料，绝不入 git；密钥文件与 SQLite 同目录）
+sso-ed25519-key.json

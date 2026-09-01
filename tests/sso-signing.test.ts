@@ -78,6 +78,8 @@ describe("getSsoJwks（Ed25519 密钥管理）", () => {
     expect(key.alg).toBe("EdDSA");
     expect(key.use).toBe("sig");
     expect(typeof key.x).toBe("string");
+    // JWKS 绝不泄漏私钥材料：输出 key 对象不得含私钥字段 d（天演评审点名断言）
+    expect(key).not.toHaveProperty("d");
     // kid = sha256(x) 前 16 位 hex
     expect(key.kid).toBe(
       createHash("sha256").update(key.x!).digest("hex").slice(0, 16),
@@ -141,6 +143,25 @@ describe("getSsoJwks（Ed25519 密钥管理）", () => {
 
     process.env.SSO_SIGNING_KEY_JWK = JSON.stringify({ private: { kty: "OKP" } });
     expect(() => getSsoJwks()).toThrow(/SSO_SIGNING_KEY_JWK/);
+  });
+
+  it("SSO_SIGNING_KEY_JWK 算法错配（非 Ed25519 OKP）：private / public 分别抛出中文原因（m-3）", () => {
+    const dataDir = makeDataDir();
+    process.env.DATABASE_URL = fileDbUrl(dataDir);
+
+    // private 不是 OKP（如误配 RSA）
+    process.env.SSO_SIGNING_KEY_JWK = JSON.stringify({
+      private: { kty: "RSA", crv: "", d: "xxx" },
+      public: { kty: "RSA", crv: "", x: "yyy" },
+    });
+    expect(() => getSsoJwks()).toThrow(/private 必须是 Ed25519 OKP/);
+
+    // public 缺 x 或算法不符
+    process.env.SSO_SIGNING_KEY_JWK = JSON.stringify({
+      private: { kty: "OKP", crv: "Ed25519", d: "xxx" },
+      public: { kty: "OKP", crv: "Ed25519" },
+    });
+    expect(() => getSsoJwks()).toThrow(/public 必须是 Ed25519 OKP/);
   });
 });
 

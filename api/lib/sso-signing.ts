@@ -95,17 +95,20 @@ function parseEnvKeyPair(): SsoKeyPairJwk | null {
     throw new Error("SSO_SIGNING_KEY_JWK 配置无效：不是合法 JSON");
   }
   const pair = parsed as Partial<SsoKeyPairJwk> | null;
-  if (
-    !pair ||
-    typeof pair !== "object" ||
-    !pair.private ||
-    !pair.private.kty ||
-    !pair.private.d ||
-    !pair.public ||
-    !pair.public.x
-  ) {
+  if (!pair || typeof pair !== "object" || !pair.private || !pair.public) {
     throw new Error(
-      "SSO_SIGNING_KEY_JWK 配置无效：需要 {\"private\":PrivateKeyJwk,\"public\":PublicKeyJwk}，且 public.x 用于推导 kid",
+      "SSO_SIGNING_KEY_JWK 配置无效：需要 {\"private\":PrivateKeyJwk,\"public\":PublicKeyJwk}",
+    );
+  }
+  // 显式算法校验（m-3）：两把 JWK 都必须是 Ed25519 OKP，杜绝错配密钥在签发期才暴雷
+  if (pair.private.kty !== "OKP" || pair.private.crv !== "Ed25519" || !pair.private.d) {
+    throw new Error(
+      "SSO_SIGNING_KEY_JWK 配置无效：private 必须是 Ed25519 OKP 私钥 JWK（kty=OKP、crv=Ed25519、含 d）",
+    );
+  }
+  if (pair.public.kty !== "OKP" || pair.public.crv !== "Ed25519" || !pair.public.x) {
+    throw new Error(
+      "SSO_SIGNING_KEY_JWK 配置无效：public 必须是 Ed25519 OKP 公钥 JWK（kty=OKP、crv=Ed25519、含 x），x 用于推导 kid",
     );
   }
   return pair as SsoKeyPairJwk;

@@ -149,7 +149,10 @@ app.get("/api/version", async (c) => {
 // Ed25519 验签公钥（见 api/lib/sso-signing.ts）。匿名可访问：boot.ts 裸路由
 // 默认公开（须注册在下方 /api/* 404 兜底之前）；GET 无 CSRF 风险；
 // 响应只含公钥材料（kty/crv/x/kid/alg/use），绝无私钥。
-app.get("/api/sso/jwks.json", (c) => c.json(getSsoJwks()));
+// Cache-Control：允许接收端/CDN 短缓存（5 分钟），降低轮换窗口外的重复拉取。
+app.get("/api/sso/jwks.json", (c) =>
+  c.json(getSsoJwks(), 200, { "Cache-Control": "public, max-age=300" }),
+);
 
 // P7: Runner 状态诊断端点（需要管理员认证，不泄露 secrets/command/args/token 内容）
 app.get("/api/runner/status", async (c) => {

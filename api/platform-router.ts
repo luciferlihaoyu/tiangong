@@ -62,6 +62,7 @@ export function getPlatformServices(): PlatformService[] {
     { key: "xuanji", label: "璇玑", url: stripTrailingSlash(process.env.XUANJI_BASE_URL || ""), healthPath: "/health", kind: "app" },
     { key: "tianshu", label: "天枢", url: stripTrailingSlash(process.env.TIANSHU_BASE_URL || ""), kind: "gateway" },
     { key: "alist", label: "AList", url: stripTrailingSlash(process.env.ALIST_BASE_URL || ""), kind: "storage" },
+    { key: "dsh", label: "DSH", url: stripTrailingSlash(process.env.DSH_BASE_URL || ""), kind: "gateway" },
   ];
 }
 

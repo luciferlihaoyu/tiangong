@@ -12,6 +12,7 @@ const APP_META: Record<string, { description: string }> = {
   xuanji: { description: "知识库与记忆" },
   tianshu: { description: "模型网关" },
   alist: { description: "文件存储" },
+  dsh: { description: "编程 · 部署执行" },
 };
 
 /** 仅这些平台有 SSO /sso/launch 接收端：点击先调 launch 签票，成功后再开窗免登进入 */

@@ -41,6 +41,20 @@ export default function ModelsPanel() {
     onError: (e) => toast.error(`同步失败: ${e.message}`),
   });
 
+  /** 一键按天枢上游模型列表增删本地 pricing 表 */
+  const syncModelsMutation = trpc.pricing.syncFromTianshu.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(`模型列表已同步：上游 ${data.total} 个（新增 ${data.created} / 清理下线 ${data.removed}）`);
+      } else {
+        toast.error(`同步失败: ${data.error ?? "未知错误"}`);
+      }
+      utils.tianshu.listModels.invalidate();
+      utils.pricing.list.invalidate();
+    },
+    onError: (e) => toast.error(`同步模型列表失败: ${e.message}`),
+  });
+
   const setDefaultMutation = trpc.tianshu.setDefaultModel.useMutation({
     onSuccess: (data) => {
       toast.success(`默认模型已切换为 ${data.defaultModel}`);
@@ -94,6 +108,18 @@ export default function ModelsPanel() {
               >
                 <CloudDownload size={14} className={syncPricingMutation.isPending ? "animate-pulse" : ""} />
                 {syncPricingMutation.isPending ? "同步中..." : "同步官方定价"}
+              </button>
+            </AdminGate>
+            <AdminGate>
+              <button
+                onClick={() => syncModelsMutation.mutate()}
+                disabled={syncModelsMutation.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors disabled:opacity-50"
+                style={{ color: "var(--accent-gold)", border: "1px solid var(--border-default)" }}
+                title="按天枢上游 /v1/models 全量比对：新增上游新模型、清理上游已下线模型（仅动 provider=tianshu 的条目，不动手工/官方定价模型）"
+              >
+                <RefreshCw size={14} className={syncModelsMutation.isPending ? "animate-pulse" : ""} />
+                {syncModelsMutation.isPending ? "同步中..." : "同步模型列表"}
               </button>
             </AdminGate>
             <button

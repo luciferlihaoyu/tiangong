@@ -74,6 +74,10 @@ export const pricingRouter = createRouter({
    * 拉取 {TIANSHU_BASE_URL}/v1/models（需 TIANSHU_API_KEY），
    * 新模型以 provider="tianshu"、价格 0 占位插入（价格需后续人工维护），
    * 已存在的模型不覆盖价格。
+   *
+   * 增删同步：除插入新模型外，还会删除「provider=tianshu 且上游已下线」
+   * 的本地条目——只清理天枢同步来源的模型，不动手工维护或官方定价同步
+   * 的条目，避免误删。
    */
   syncFromTianshu: adminQuery.mutation(async () => {
     const baseUrl = (process.env.TIANSHU_BASE_URL || "https://woppis1.zeabur.app").replace(/\/+$/, "");
@@ -100,8 +104,9 @@ export const pricingRouter = createRouter({
     }
 
     const db = getDb();
-    const existing = await db.select({ model: modelPricing.model }).from(modelPricing);
+    const existing = await db.select({ model: modelPricing.model, provider: modelPricing.provider }).from(modelPricing);
     const existingSet = new Set(existing.map((r) => r.model));
+    const upstreamSet = new Set(modelIds);
 
     let created = 0;
     for (const id of modelIds) {
@@ -117,10 +122,19 @@ export const pricingRouter = createRouter({
       created++;
     }
 
+    // 删除：仅清理 provider=tianshu 且上游已下线的条目（保护手工/官方模型）
+    let removed = 0;
+    const candidates = existing.filter((r) => r.provider === "tianshu" && !upstreamSet.has(r.model));
+    for (const row of candidates) {
+      await db.delete(modelPricing).where(eq(modelPricing.model, row.model));
+      removed++;
+    }
+
     return {
       success: true as const,
       total: modelIds.length,
       created,
+      removed,
       skipped: modelIds.length - created,
     };
   }),

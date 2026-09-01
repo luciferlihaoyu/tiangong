@@ -8,15 +8,18 @@
  *   外部请求一律 fetch + AbortSignal.timeout，异常全部捕获转成结构化
  *   { ok: false, reason }，绝不向上抛崩。
  * - launch: P1-3 SSO 联邦认证签发端 —— 仅管理员为已登录用户签发进入北斗/璇玑等
- *   子服务的短期一次性凭证（JWT HS256，typ=sso-launch，exp=iat+120s，jti 一次性；
- *   接收端 GET /sso/launch?token=...；密钥取 TIANGONG_SSO_SECRET 或 APP_SECRET）。
+ *   子服务的短期一次性凭证（协议 v2：JWT EdDSA/Ed25519，typ=sso-launch，exp=iat+120s，
+ *   jti 一次性；接收端 GET /sso/launch?token=... 用 JWKS 公钥验签，
+ *   公开端点 GET /api/sso/jwks.json；签名实现见 api/lib/sso-signing.ts。
+ *   v1 的 TIANGONG_SSO_SECRET/APP_SECRET 共享密钥签发已废弃，密钥仅作接收端
+ *   HS256 历史兼容保留）。
  */
 import { z } from "zod";
 import { createRouter, adminQuery, userQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
-import { SignJWT } from "jose";
+import { signSsoTicket } from "./lib/sso-signing";
 
 // ─── 类型定义 ───
 
@@ -152,24 +155,18 @@ export const platformRouter = createRouter({
         if (!service.url) {
           return { ok: false as const, error: "not configured" };
         }
-        const secret = process.env.TIANGONG_SSO_SECRET || process.env.APP_SECRET;
-        if (!secret) {
-          return { ok: false as const, error: "签发服务未配置" };
-        }
+        // 协议 v2：Ed25519 私钥签发（密钥管理见 api/lib/sso-signing.ts）。
+        // 历史兼容：TIANGONG_SSO_SECRET / APP_SECRET 不再用于签发，仅作
+        // 接收端（璇玑）验签 v1 HS256 票据的共享密钥保留。
         // 查用户名（可选 enrich：查不到则省略 username claim）
         const user = await getDb().select().from(users).where(eq(users.id, ctx.user!.id)).then((rows) => rows[0]);
-        const token = await new SignJWT({
+        const token = await signSsoTicket({
           typ: "sso-launch",
           sub: String(ctx.user!.id),
           role: ctx.user!.role,
           app: service.key,
           ...(user?.username ? { username: user.username } : {}),
-        })
-          .setProtectedHeader({ alg: "HS256" })
-          .setIssuedAt()
-          .setExpirationTime("120s")
-          .setJti(crypto.randomUUID())
-          .sign(new TextEncoder().encode(secret));
+        });
         return {
           ok: true as const,
           url: `${service.url}/sso/launch?token=${encodeURIComponent(token)}`,

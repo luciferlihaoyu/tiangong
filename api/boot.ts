@@ -9,6 +9,7 @@ import { createContext, _globalApiKeys } from "./middleware";
 import { createMcpApp } from "./mcp/transport";
 import { env } from "./lib/env";
 import { verifyToken } from "./local-auth-router";
+import { getSsoJwks } from "./lib/sso-signing";
 import { autoMigrate } from "./lib/auto-migrate";
 import { migrateV2 } from "./lib/migrate-v2";
 import { bootstrapMysqlImport } from "./lib/bootstrap-mysql-import";
@@ -143,6 +144,12 @@ app.get("/api/version", async (c) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// P1-3 协议 v2：SSO 联邦认证 JWKS 公开端点 —— 璇玑/北斗等接收端在此拉取
+// Ed25519 验签公钥（见 api/lib/sso-signing.ts）。匿名可访问：boot.ts 裸路由
+// 默认公开（须注册在下方 /api/* 404 兜底之前）；GET 无 CSRF 风险；
+// 响应只含公钥材料（kty/crv/x/kid/alg/use），绝无私钥。
+app.get("/api/sso/jwks.json", (c) => c.json(getSsoJwks()));
 
 // P7: Runner 状态诊断端点（需要管理员认证，不泄露 secrets/command/args/token 内容）
 app.get("/api/runner/status", async (c) => {

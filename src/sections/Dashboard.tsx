@@ -1185,13 +1185,34 @@ export default function Dashboard() {
         <div className="mt-6 glass-panel px-4">
           <div className="flex items-center justify-between py-2">
             <div className="flex items-center gap-4">
-              {['GitHub', '文档', 'Discord'].map(l => (
-                <button key={l} type="button" onClick={() => showFootToast(`「${l}」即将上线`)}
-                  className="text-xs transition-colors hover:text-[var(--accent-red)] cursor-pointer"
-                  style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--text-muted)', fontFamily: 'inherit' }}>
-                  {l}
-                </button>
-              ))}
+              {[
+                { label: "GitHub", href: "https://github.com/luciferlihaoyu/tiangong" },
+                { label: "文档", href: undefined },
+                { label: "Discord", href: undefined },
+              ].map(item =>
+                item.href ? (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs transition-colors hover:text-[var(--accent-red)]"
+                    style={{ color: "var(--text-muted)", textDecoration: "none" }}
+                  >
+                    {item.label}
+                  </a>
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => showFootToast(`「${item.label}」即将上线`)}
+                    className="text-xs transition-colors hover:text-[var(--accent-red)] cursor-pointer"
+                    style={{ background: "transparent", border: "none", padding: 0, color: "var(--text-muted)", fontFamily: "inherit" }}
+                  >
+                    {item.label}
+                  </button>
+                )
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}><span className="w-1 h-1 rounded-full" style={{ background: data.hasBackend ? 'var(--success)' : 'var(--accent-red)' }} />{data.hasBackend ? 'API 已连接' : '离线模式'}</span>

@@ -206,13 +206,35 @@ export default function FooterTerminal() {
               <span>开源</span>
             </div>
             <div className="flex items-center gap-4">
-              {['GitHub', '文档', 'Discord', 'Twitter'].map((l) => (
-                <button key={l} type="button" onClick={() => showToast(`「${l}」即将上线`)}
-                  className="hover:text-[var(--accent-red)] transition-colors cursor-pointer"
-                  style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--text-muted)', fontFamily: 'inherit', fontSize: 'inherit' }}>
-                  {l}
-                </button>
-              ))}
+              {[
+                { label: "GitHub", href: "https://github.com/luciferlihaoyu/tiangong" },
+                { label: "文档", href: undefined },
+                { label: "Discord", href: undefined },
+                { label: "Twitter", href: undefined },
+              ].map(item =>
+                item.href ? (
+                  <a
+                    key={item.label}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-[var(--accent-red)] transition-colors"
+                    style={{ background: "transparent", padding: 0, color: "var(--text-muted)", fontFamily: "inherit", fontSize: "inherit", textDecoration: "none" }}
+                  >
+                    {item.label}
+                  </a>
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => showToast(`「${item.label}」即将上线`)}
+                    className="hover:text-[var(--accent-red)] transition-colors cursor-pointer"
+                    style={{ background: "transparent", border: "none", padding: 0, color: "var(--text-muted)", fontFamily: "inherit", fontSize: "inherit" }}
+                  >
+                    {item.label}
+                  </button>
+                )
+              )}
             </div>
           </div>
         </div>

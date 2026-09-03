@@ -7,6 +7,8 @@
  */
 import { useState, useCallback, useEffect } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
+import { TASK_STATUS_CONFIG as STATUS_CONFIG } from "@/lib/taskStatus";
+import { fmtTime } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import type { AppRouter } from "../../api/router";
@@ -79,14 +81,6 @@ type CollabSubtask = CollabStatus["subtasks"][number];
 
 // ═══════════════════════ Constants ═══════════════════════
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  pending: { label: "待处理", color: "var(--text-muted)", bg: "rgba(180,200,255,0.03)", icon: <Clock size={12} /> },
-  queued: { label: "已排队", color: "var(--accent-cyan)", bg: "rgba(74,158,255,0.08)", icon: <Pause size={12} /> },
-  running: { label: "执行中", color: "var(--warning)", bg: "var(--accent-glow-gold)", icon: <Play size={12} /> },
-  done: { label: "已完成", color: "var(--success)", bg: "rgba(76,175,125,0.08)", icon: <CheckCircle size={12} /> },
-  failed: { label: "失败", color: "var(--accent-red)", bg: "var(--accent-glow-red)", icon: <AlertTriangle size={12} /> },
-};
-
 // A2A-lite v0.1: lifecycle status display
 const LIFECYCLE_LABELS: Record<string, string> = {
   created: "已创建",
@@ -124,12 +118,6 @@ const AGENT_STATUS_LABELS: Record<string, string> = {
   busy: "忙碌",
   idle: "空闲",
 };
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 // ═══════════════════════ Components ═══════════════════════
 

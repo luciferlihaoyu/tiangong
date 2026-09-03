@@ -4,6 +4,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { fmtTime } from "@/lib/format";
 import { trpc } from "@/providers/trpc";
 import {
   ClipboardList,
@@ -72,12 +73,6 @@ const MSG_TYPE_CONFIG: Record<string, string> = {
   broadcast: "广播",
   system: "系统",
 };
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 // ═══════════════════════ Components ═══════════════════════
 

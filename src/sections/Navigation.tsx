@@ -12,9 +12,6 @@ import {
   Radio,
   Bot,
   Users,
-  ClipboardList,
-  Layout,
-  GitBranch,
   Zap,
   Github,
   Mail,
@@ -73,10 +70,7 @@ const navGroups: NavGroup[] = [
     title: '管理',
     items: [
       { path: '/agents', label: 'Agent 列表', icon: <Users size={15} /> },
-      { path: '/task-center', label: '任务中心', icon: <Bot size={15} /> },
-      { path: '/missions', label: '协作日志', icon: <ClipboardList size={15} /> },
-      { path: '/taskboard', label: '任务板', icon: <Layout size={15} /> },
-      { path: '/dag', label: 'DAG', icon: <GitBranch size={15} /> },
+      { path: '/tasks', label: '任务工作台', icon: <Bot size={15} /> },
     ],
   },
   {
@@ -221,6 +215,9 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
   const isActive = (path: string) => {
     if (path === '/') {
       return location.pathname === '/' || location.pathname === '/index.html';
+    }
+    if (path === '/tasks') {
+      return location.pathname === '/tasks' || location.pathname.startsWith('/tasks/');
     }
     return location.pathname === path;
   };

@@ -10,18 +10,15 @@ import FooterTerminal from './sections/FooterTerminal'
 import AccountSettings from './sections/AccountSettings'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
-import MissionLog from './pages/MissionLog'
-import TaskCenter from './pages/TaskCenter'
 import UsagePanel from './pages/UsagePanel'
 import ModelsPanel from './pages/ModelsPanel'
 import AlistPanel from './pages/AlistPanel'
 import OpsPanel from './pages/OpsPanel'
 import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
-import DagPanel from './pages/DagPanel'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
-import TaskBoard from './pages/TaskBoard'
+import Tasks from './pages/Tasks'
 import TaskDetail from './pages/TaskDetail'
 import NotificationsPanel from './pages/NotificationsPanel'
 import AgentList from './pages/AgentList'
@@ -85,8 +82,9 @@ export default function App() {
         }>
           <Route path="/" element={<HomePage />} />
           <Route path="/account" element={<AccountSettings />} />
-          <Route path="/missions" element={<MissionLog />} />
-          <Route path="/task-center" element={<TaskCenter />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/missions" element={<Navigate to="/tasks?tab=log" replace />} />
+          <Route path="/task-center" element={<Navigate to="/tasks?tab=center" replace />} />
           <Route path="/usage" element={<UsagePanel />} />
           <Route path="/models" element={<ModelsPanel />} />
           <Route path="/alist" element={<AlistPanel />} />
@@ -95,8 +93,8 @@ export default function App() {
           <Route path="/agents" element={<AgentList />} />
           <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/events" element={<EventStream />} />
-          <Route path="/dag" element={<DagPanel />} />
-          <Route path="/taskboard" element={<TaskBoard />} />
+          <Route path="/dag" element={<Navigate to="/tasks?tab=dag" replace />} />
+          <Route path="/taskboard" element={<Navigate to="/tasks?tab=board" replace />} />
           <Route path="/notifications" element={<NotificationsPanel />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />

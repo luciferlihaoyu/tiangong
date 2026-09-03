@@ -2,6 +2,8 @@ import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { TASK_STATUS_CONFIG as STATUS_CONFIG } from "@/lib/taskStatus";
+import { fmtTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import {
   ArrowLeft,
@@ -68,14 +70,6 @@ interface TaskDetailData {
 
 // ═══════════════════════ Constants ═══════════════════════
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  pending: { label: "待处理", color: "var(--text-muted)", bg: "rgba(180,200,255,0.03)" },
-  queued: { label: "已排队", color: "var(--accent-cyan)", bg: "rgba(74,158,255,0.08)" },
-  running: { label: "执行中", color: "var(--warning)", bg: "var(--accent-glow-gold)" },
-  done: { label: "已完成", color: "var(--success)", bg: "rgba(76,175,125,0.08)" },
-  failed: { label: "失败", color: "var(--accent-red)", bg: "var(--accent-glow-red)" },
-};
-
 const LIFECYCLE_STAGES = [
   { key: "created", label: "已创建" },
   { key: "queued", label: "已排队" },
@@ -107,12 +101,6 @@ const PRIORITY_COLORS: Record<number, string> = {
 type ReviewAction = "approve" | "reject" | "requestChanges" | "submit";
 
 // ═══════════════════════ Helpers ═══════════════════════
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function formatJson(value: string | null): string {
   if (!value) return "";

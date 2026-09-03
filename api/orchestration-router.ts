@@ -5,6 +5,7 @@ import { tasks, taskDependencies, agents } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
+import { applyRequestedAgentToInput } from "./lib/task-metadata";
 
 // ─── Helpers ───
 
@@ -133,10 +134,14 @@ export const orchestrationRouter = createRouter({
         "awaiting_result", "submitted", "reviewing", "completed", "failed", "timeout", "cancelled",
       ]).optional(),
       dependsOn: z.array(z.number()).optional(),
+      requestedAgentId: z.string().min(1).max(100).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const { dependsOn, ...taskData } = input;
+      const { dependsOn, requestedAgentId, ...taskData } = input;
+      // 归属声明：requestedAgentId 是期望执行者的 agentId 字符串（如 "dsh"），
+      // 写入 input metadata routing.selectedAgentId，认领侧据此阻止其他 agent 抢单。
+      const routedInput = applyRequestedAgentToInput(taskData.input, requestedAgentId);
 
       // Cycle detection
       if (dependsOn && dependsOn.length > 0) {
@@ -147,7 +152,7 @@ export const orchestrationRouter = createRouter({
           agentId: taskData.agentId ?? null,
           description: taskData.description ?? null,
           priority: taskData.priority ?? 0,
-          input: taskData.input ?? null,
+          input: routedInput,
           status: taskData.status ?? "pending",
           lifecycleStatus: taskData.lifecycleStatus ?? "created",
           maxRetries: taskData.maxRetries ?? 3,
@@ -191,7 +196,7 @@ export const orchestrationRouter = createRouter({
         agentId: taskData.agentId ?? null,
         description: taskData.description ?? null,
         priority: taskData.priority ?? 0,
-        input: taskData.input ?? null,
+        input: routedInput,
         status: taskData.status ?? "pending",
         lifecycleStatus: taskData.lifecycleStatus ?? "created",
         maxRetries: taskData.maxRetries ?? 3,
@@ -345,6 +350,7 @@ export const orchestrationRouter = createRouter({
         priority: z.number().optional(),
         input: z.string().optional(),
         dependsOn: z.array(z.number()).optional(),
+        requestedAgentId: z.string().min(1).max(100).optional(),
       })),
     }))
     .mutation(async ({ input }) => {
@@ -353,13 +359,14 @@ export const orchestrationRouter = createRouter({
 
       for (const t of input.tasks) {
         try {
+          const routedInput = applyRequestedAgentToInput(t.input, t.requestedAgentId);
           await db.insert(tasks).values({
             taskId: t.taskId,
             name: t.name,
             agentId: t.agentId ?? null,
             description: t.description ?? null,
             priority: t.priority ?? 0,
-            input: t.input ?? null,
+            input: routedInput,
           });
           const created = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.taskId, t.taskId)).then(r => r[0]);
           if (created && t.dependsOn && t.dependsOn.length > 0) {

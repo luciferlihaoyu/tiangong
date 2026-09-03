@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { tasks, taskMessages, taskArtifacts } from "@db/schema";
+import { tasks, taskMessages, taskArtifacts, agents } from "@db/schema";
 import { eq, and, or, like, desc, asc, inArray } from "drizzle-orm";
 import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-validator";
+import { isAgentAllowedByRouting } from "./lib/task-claim";
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
@@ -127,6 +128,18 @@ export const taskboardRouter = createRouter({
       if (gate.status === "blocked") {
         await parkTaskForApproval(db, row, { requiresApproval: true, riskTypes: gate.riskTypes });
         throw new Error(gate.reason);
+      }
+
+      // 归属保护（P-claim-routing）：任务若在 input metadata 声明期望执行者
+      // （routing.selectedAgentId / candidateAgentIds），board 认领同样受约束，
+      // 防止 dashboard 用户在路由归属外强行认领。
+      const claimingAgent = await db
+        .select({ agentId: agents.agentId })
+        .from(agents)
+        .where(eq(agents.id, input.agentId))
+        .then((r) => r[0]);
+      if (claimingAgent && !isAgentAllowedByRouting(row.input, claimingAgent.agentId)) {
+        throw new Error(`Task ${row.taskId} is routed to another agent (${row.name})`);
       }
 
       await db

@@ -15,6 +15,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { agents, tasks } from "@db/schema";
 import { getApprovalState, selectExecutableTask, type Db } from "./execution-gate";
 import { notifyBudgetExhausted } from "./notification-hooks";
+import { parseTaskMetadata } from "./task-metadata";
 
 /** 认领结果中的任务投影（形状对齐 agent.claimTask 既有返回） */
 export interface ClaimedTask {
@@ -31,11 +32,46 @@ export interface ClaimedTask {
 export type ClaimNextReason = "budget_exhausted" | "agent_not_found";
 
 /**
+ * 路由归属判定（认领保护，P-claim-routing）：
+ * 任务 input 的 TaskMetadata.routing 可能声明期望执行者：
+ *   - routing.selectedAgentId    —— 调度决策选中的 agent（如 "dsh"、"openclaw:main"）
+ *   - routing.candidateAgentIds  —— 可执行的候选 agent 池
+ *
+ * 返回该 agent（agentAgentId，agents.agentId 字符串）是否被路由允许认领：
+ *   - 两者皆未声明 → 通用任务，任何 agent 可认领（保持原行为）
+ *   - 仅 selectedAgentId 声明 → 只有匹配者可认领（"我让 dsh 做" 不被别人抢）
+ *   - 仅 candidateAgentIds 声明 → 候选列表内可认领
+ *   - 两者都声明 → 匹配任一即可
+ *
+ * 注意：selectedAgentId 可能是虚拟池（如 "human:admin"、"openclaw:media-image"），
+ * 此时与真实 agents.agentId 永不匹配 → 该任务对真实 agent 不可认领，等待调度侧落库。
+ */
+export function isAgentAllowedByRouting(
+  taskInput: string | null | undefined,
+  agentAgentId: string | null | undefined,
+): boolean {
+  if (!agentAgentId) return true; // 无认领者身份时不做拦截（调用方应避免）
+  const metadata = parseTaskMetadata(taskInput ?? null);
+  if (!metadata) return true; // 无 metadata → 无归属声明 → 通用
+  const { selectedAgentId, candidateAgentIds } = metadata.routing;
+  const hasSelection = !!selectedAgentId;
+  const hasCandidates = Array.isArray(candidateAgentIds) && candidateAgentIds.length > 0;
+  if (!hasSelection && !hasCandidates) return true; // 通用
+  if (hasSelection && selectedAgentId === agentAgentId) return true;
+  if (hasCandidates && candidateAgentIds.includes(agentAgentId)) return true;
+  return false;
+}
+
+/**
  * 查找该 Agent 可认领的 queued 任务（含通用任务 agentId=null）。
  * 执行审批闸门：高风险且未批准的任务被停放待审批（不会返回），
  * 已批准的高风险任务与低风险任务照常返回。
+ *
+ * 认领保护（P-claim-routing）：通用任务（agentId=null）若在 input metadata 的
+ * routing 里声明了期望执行者（selectedAgentId / candidateAgentIds），仅允许
+ * 匹配的 agent 认领——防止"用户指定 dsh 执行"的任务被任意空闲 agent 抢走。
  */
-export async function findClaimableTask(db: Db, agentId: number) {
+export async function findClaimableTask(db: Db, agentId: number, agentAgentId?: string | null) {
   const claimableTasks = await db
     .select()
     .from(tasks)
@@ -48,7 +84,11 @@ export async function findClaimableTask(db: Db, agentId: number) {
     .where(and(eq(tasks.status, "queued"), isNull(tasks.agentId)))
     .orderBy(desc(tasks.priority))
     .limit(20);
-  return selectExecutableTask(db, [...claimableTasks, ...genericTasks]);
+  // 归属保护：通用任务中，被路由声明了期望执行者的，仅匹配 agent 可认领
+  const allowedGeneric = agentAgentId
+    ? genericTasks.filter((task) => isAgentAllowedByRouting(task.input, agentAgentId))
+    : genericTasks;
+  return selectExecutableTask(db, [...claimableTasks, ...allowedGeneric]);
 }
 
 /**
@@ -100,7 +140,8 @@ export async function claimNextTask(
 
   // 3. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务）。
   //    执行审批闸门在此拦截高风险任务（停放待审批），只有低风险或已批准的任务才会被认领。
-  const task = await findClaimableTask(db, agentId);
+  //    归属保护：通用任务若在 routing metadata 声明期望执行者，仅匹配 agent 可认领。
+  const task = await findClaimableTask(db, agentId, agent.agentId);
 
   if (!task) {
     return { task: null };

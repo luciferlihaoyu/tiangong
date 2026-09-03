@@ -44,7 +44,7 @@ import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-rout
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
-import { createTraceId } from "../lib/task-metadata";
+import { createTraceId, applyRequestedAgentToInput } from "../lib/task-metadata";
 import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
 import { createXuanjiClient } from "../connectors/xuanji/service";
 import { SearchContextRequestSchema } from "../connectors/xuanji/types";
@@ -238,12 +238,14 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       priority: z.number().min(0).max(100).optional().default(0).describe("优先级 0-100"),
       dependencies: z.array(z.number()).optional().describe("依赖的任务 ID 列表"),
       input: z.string().optional().describe("输入数据 (JSON 字符串)"),
+      requestedAgentId: z.string().min(1).max(100).optional().describe("期望执行 Agent 的 agentId（如 \"dsh\"）。指定后此任务只允许该 agent 认领，防止被其他空闲 agent 抢走。不指定 = 通用任务，任意 agent 可认领。"),
       maxRetries: z.number().min(0).max(10).optional().default(3).describe("最大重试次数"),
       timeoutMs: z.number().min(1000).max(3600000).optional().default(300000).describe("超时毫秒"),
     },
     async (params) => {
       const db = getDb();
       const taskId = `T-${Date.now().toString(36).toUpperCase()}`;
+      const routedInput = applyRequestedAgentToInput(params.input, params.requestedAgentId);
 
       await db.insert(tasks).values({
         taskId,
@@ -251,7 +253,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         agentId: params.agentId ?? null,
         description: params.description ?? null,
         priority: params.priority ?? 0,
-        input: params.input ?? null,
+        input: routedInput,
         maxRetries: params.maxRetries ?? 3,
         timeoutMs: params.timeoutMs ?? 300000,
       });

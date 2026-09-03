@@ -36,6 +36,7 @@ import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
+import { parseTaskMetadata } from "./task-metadata";
 import { finalizeCompletedTask } from "./task-finalize";
 import { syncTaskLessonToXuanji } from "./xuanji-sync";
 import { notifyLessonRecorded } from "./notification-hooks";
@@ -312,6 +313,18 @@ class TaskRunner {
         if (executed >= CONFIG.batchSize) break;
         if (task.agentId !== null && externalAgentIds.has(task.agentId)) {
           continue; // 留给外部执行体（dsh 等）认领
+        }
+        // 归属保护（P-claim-routing）：agentId=null 的通用任务若在 input metadata 的
+        // routing 里声明了期望执行者（selectedAgentId），Runner 不抢——留给该 agent
+        // 经 updateHeartbeat / claimTask 认领（Runner 无自身 agent 身份，无法匹配）。
+        if (task.agentId === null) {
+          const metadata = parseTaskMetadata(task.input);
+          if (metadata?.routing.selectedAgentId) {
+            console.log(
+              `[TaskRunner] Task ${task.taskId} (id=${task.id}) routed to ${metadata.routing.selectedAgentId}, skip (waiting for agent claim)`
+            );
+            continue;
+          }
         }
         // 执行审批闸门：高风险任务不得由 Runner 领取执行，停放待人工审批
         const gate = checkExecutionGate(task);

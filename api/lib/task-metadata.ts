@@ -119,6 +119,49 @@ export function mergeTaskMetadata(rawInput: string | null | undefined, input: Ta
   return JSON.stringify({ payload: rawValue, metadata });
 }
 
+/**
+ * 创建端归属声明（P-claim-routing）：把"期望执行 agent"（agentId 字符串，如 "dsh"）
+ * 写入任务的 input metadata（routing.selectedAgentId），认领侧据此做归属保护。
+ *
+ * - requestedAgentId 为空 → 原样返回 input（零副作用，通用任务）
+ * - input 为空 → 生成纯 metadata envelope
+ * - input 非空 → 直接改完整 metadata（保留既有 routing.approvalRequired/riskTypes/
+ *   candidateAgentIds 等字段）。不依赖 mergeTaskMetadata：其 routing 浅合并的 spread
+ *   顺序会把 patch 中未声明的字段以 undefined 形式覆盖 base 的现存值
+ *   （如 candidateAgentIds / approvalRequired 会被抹回默认），属既有缺陷。
+ *   此处直接 mutate base.routing 显式补 selectedAgentId，避免该缺陷。
+ */
+export function applyRequestedAgentToInput(
+  input: string | null | undefined,
+  requestedAgentId: string | null | undefined,
+): string | null {
+  if (!requestedAgentId || !requestedAgentId.trim()) return input ?? null;
+  const normalized = requestedAgentId.trim();
+  if (!input || !input.trim()) {
+    return JSON.stringify({ metadata: createTaskMetadata({ routing: { selectedAgentId: normalized } }) });
+  }
+
+  // 保留原 envelope：{ payload?, metadata? } 或纯 JSON。metadata 存在则就地补 selectedAgentId。
+  const parsed = parseJson(input);
+  const rawRecord: Record<string, unknown> =
+    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { payload: input };
+
+  const existingMeta = rawRecord.metadata;
+  if (existingMeta && typeof existingMeta === "object") {
+    const base = TaskMetadataSchema.parse(existingMeta);
+    base.routing = { ...base.routing, selectedAgentId: normalized };
+    return JSON.stringify({ ...rawRecord, metadata: base });
+  }
+
+  // 无 metadata：纯 payload → 附完整 metadata envelope
+  return JSON.stringify({
+    ...rawRecord,
+    metadata: createTaskMetadata({ routing: { selectedAgentId: normalized } }),
+  });
+}
+
 export function getKnowledgeRefs(raw: unknown): readonly KnowledgeRef[] {
   return parseTaskMetadata(raw)?.knowledgeRefs ?? [];
 }

@@ -9,6 +9,8 @@ interface KanbanColumnProps {
   tasks: Task[];
   agents: { id: number; name: string; status: string }[];
   draggedTaskId: number | null;
+  /** 当前用户可审批的任务 id 集合（用于 TaskCard 高亮 + 角标） */
+  myReviewTaskIds: Set<number>;
   onDragStart: (taskId: number) => void;
   onDragEnd: () => void;
   onDrop: (taskId: number, status: BoardStatus) => void;
@@ -21,6 +23,7 @@ export function KanbanColumn({
   tasks,
   agents,
   draggedTaskId,
+  myReviewTaskIds,
   onDragStart,
   onDragEnd,
   onDrop,
@@ -106,6 +109,7 @@ export function KanbanColumn({
               task={task}
               agents={agents}
               isDragging={draggedTaskId === task.id}
+              isMyReview={myReviewTaskIds.has(task.id)}
               onDragStart={() => onDragStart(task.id)}
               onDragEnd={onDragEnd}
               onClick={() => onTaskClick(task)}

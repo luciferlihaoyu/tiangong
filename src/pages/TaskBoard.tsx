@@ -2,13 +2,14 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useAuth } from "@/hooks/useAuth";
 import { KanbanColumn } from "@/components/taskboard/KanbanColumn";
 import { TaskDetailModal } from "@/components/taskboard/TaskDetailModal";
 import { CreateTaskModal } from "@/components/taskboard/CreateTaskModal";
 import type { Task, TaskDetail, Agent, BoardStatus } from "@/components/taskboard/types";
 import { BOARD_STATUSES, BOARD_STATUS_CONFIG } from "@/components/taskboard/types";
 import { toast } from "sonner";
-import { Plus, RefreshCw, Search, Layout, Shield } from "lucide-react";
+import { Plus, RefreshCw, Search, Layout, Shield, Gavel } from "lucide-react";
 
 export default function TaskBoard() {
   const navigate = useNavigate();
@@ -35,6 +36,8 @@ export default function TaskBoard() {
     { enabled: detailTaskId !== null, retry: 1, staleTime: 5000 }
   );
   const detailTask = (detailQuery.data || null) as TaskDetail | null;
+
+  const { isAdmin } = useAuth();
 
   const firstAgent = agents.find((a) => a.status === "online");
   const currentAgentId = firstAgent?.id ?? agents[0]?.id;
@@ -163,6 +166,24 @@ export default function TaskBoard() {
     return { total, running, review, blocked, done };
   }, [tasks]);
 
+  /**
+   * "我的待审"任务 id 集合：
+   *  - 管理员：所有 boardStatus=review 的任务（admin 可审批任意 review 任务）
+   *  - 非管理员：仅 reviewerId === currentAgentId 的任务
+   *  - 加上后端 listReviewTasks 端点返回的（覆盖 dispatcher/委派场景）
+   */
+  const myReviewTaskIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const t of tasks) {
+      if (t.boardStatus === "review") {
+        if (isAdmin) ids.add(t.id);
+        else if (currentAgentId && t.reviewerId === currentAgentId) ids.add(t.id);
+      }
+    }
+    for (const t of myReviewTasks) ids.add(t.id);
+    return ids;
+  }, [tasks, myReviewTasks, isAdmin, currentAgentId]);
+
   return (
     <div
       className="min-h-screen pt-16 flex flex-col"
@@ -234,6 +255,58 @@ export default function TaskBoard() {
           ))}
         </div>
 
+        {/* 待我审批 — N>0 时展开前 3 条快速入口 */}
+        {myReviewTaskIds.size > 0 && (
+          <div
+            className="mt-2 mb-3 px-3 py-2.5 rounded flex items-start gap-3"
+            style={{
+              background: "rgba(201, 168, 76, 0.06)",
+              border: "1px solid rgba(201, 168, 76, 0.3)",
+            }}
+          >
+            <Gavel size={16} style={{ color: "var(--accent-gold)", marginTop: 2, flexShrink: 0 }} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="text-xs font-bold" style={{ color: "var(--accent-gold)" }}>
+                  待我审批 · {myReviewTaskIds.size} 项
+                </span>
+                <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                  点击打开任务详情审批
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {tasks
+                  .filter((t) => myReviewTaskIds.has(t.id))
+                  .slice(0, 5)
+                  .map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => handleTaskClick(t)}
+                      className="text-[10px] px-2 py-1 rounded font-mono flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
+                      style={{
+                        background: "rgba(201, 168, 76, 0.08)",
+                        color: "var(--accent-gold)",
+                        border: "1px solid rgba(201, 168, 76, 0.25)",
+                      }}
+                      title={t.name}
+                    >
+                      <Shield size={9} />
+                      {t.taskId}
+                      {t.reviewerId && t.reviewerId !== currentAgentId && (
+                        <span style={{ color: "var(--text-muted)" }}>· 委派</span>
+                      )}
+                    </button>
+                  ))}
+                {myReviewTaskIds.size > 5 && (
+                  <span className="text-[10px] font-mono px-2 py-1" style={{ color: "var(--text-muted)" }}>
+                    +{myReviewTaskIds.size - 5} 更多
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Search + drop error */}
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <div
@@ -291,6 +364,7 @@ export default function TaskBoard() {
                 tasks={groupedTasks[status] || []}
                 agents={agents}
                 draggedTaskId={draggedTaskId}
+                myReviewTaskIds={myReviewTaskIds}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 onDrop={handleDrop}

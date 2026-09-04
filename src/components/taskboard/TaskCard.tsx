@@ -7,6 +7,8 @@ interface TaskCardProps {
   task: Task;
   agents: { id: number; name: string; status: string }[];
   isDragging: boolean;
+  /** 当前登录用户作为 reviewer / 管理员时，该任务为「我的待审」高亮 */
+  isMyReview?: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onClick: () => void;
@@ -17,6 +19,7 @@ export function TaskCard({
   task,
   agents,
   isDragging,
+  isMyReview,
   onDragStart,
   onDragEnd,
   onClick,
@@ -50,17 +53,17 @@ export function TaskCard({
       onClick={onClick}
       className="cursor-grab active:cursor-grabbing rounded-lg p-3 transition-all duration-150 group"
       style={{
-        background: "var(--bg-card)",
-        border: "1px solid var(--border-default)",
+        background: isMyReview ? "rgba(201, 168, 76, 0.06)" : "var(--bg-card)",
+        border: isMyReview ? "1px solid rgba(201, 168, 76, 0.35)" : "1px solid var(--border-default)",
         opacity: isDragging ? 0.4 : 1,
         boxShadow: isDragging ? "none" : "0 1px 4px rgba(0,0,0,0.1)",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = "var(--border-hover)";
+        e.currentTarget.style.borderColor = isMyReview ? "rgba(201, 168, 76, 0.6)" : "var(--border-hover)";
         e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "var(--border-default)";
+        e.currentTarget.style.borderColor = isMyReview ? "rgba(201, 168, 76, 0.35)" : "var(--border-default)";
         e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.1)";
       }}
     >
@@ -89,6 +92,19 @@ export function TaskCard({
             {label}
           </span>
         ))}
+        {isMyReview && (
+          <span
+            className="text-[9px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 flex-shrink-0"
+            style={{
+              background: "rgba(201, 168, 76, 0.18)",
+              color: "var(--accent-gold)",
+              border: "1px solid rgba(201, 168, 76, 0.4)",
+            }}
+            title="当前用户可审批"
+          >
+            <Shield size={9} /> 待审
+          </span>
+        )}
         {labels.length > 2 && (
           <span
             className="text-[9px] px-1 py-0.5 rounded"

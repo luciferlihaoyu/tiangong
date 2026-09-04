@@ -8,6 +8,7 @@ import { useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useEffect } from "react";
+import { fmtDateShort } from "@/lib/format";
 import {
   Bot,
   Activity,
@@ -38,12 +39,6 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }
   idle: { color: "var(--text-muted)", bg: "rgba(180,200,255,0.03)", label: "空闲" },
 };
 
-function fmtTime(iso: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 // ═══════════════════════ Components ═══════════════════════
 
@@ -122,7 +117,7 @@ function AgentCard({ agent }: { agent: Agent }) {
         <div className="flex items-center gap-2">
           <Clock size={10} style={{ color: "var(--text-muted)" }} />
           <span style={{ color: "var(--text-muted)" }}>
-            心跳 {fmtTime(agent.lastHeartbeat)}
+            心跳 {fmtDateShort(agent.lastHeartbeat)}
           </span>
         </div>
       </div>

@@ -8,6 +8,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { toast } from "sonner";
+import { fmtDateShort } from "@/lib/format";
 import {
   MessageSquare,
   RefreshCw,
@@ -74,12 +75,6 @@ const ROLE_CONFIG: Record<string, { label: string; color: string; bg: string; ic
   assistant: { label: "助手", color: "var(--success)", bg: "rgba(76,175,125,0.08)", icon: <Bot size={10} /> },
   system: { label: "系统", color: "var(--accent-gold)", bg: "rgba(201,168,76,0.08)", icon: <Settings size={10} /> },
 };
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function fmtDateTime(iso: string) {
   const d = new Date(iso);
@@ -152,7 +147,7 @@ function SessionListItem({
             </span>
             <span className="flex items-center gap-1">
               <Clock size={10} />
-              {fmtTime(session.updatedAt)}
+              {fmtDateShort(session.updatedAt)}
             </span>
           </div>
         </div>

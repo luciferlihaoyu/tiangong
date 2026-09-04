@@ -6,6 +6,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { fmtTimeSec } from "@/lib/format";
 import {
   Activity,
   Filter,
@@ -130,12 +131,6 @@ function getEventStyle(type: string) {
    辅助函数
    ═══════════════════════════════════════════ */
 
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
 function fmtDateTime(iso: string) {
   const d = new Date(iso);
   const pad = (n: number) => n.toString().padStart(2, "0");
@@ -210,7 +205,7 @@ function EventRow({
                 : `$${(Number(event.payload.costCents) / 100).toFixed(2)}`}
             </span>
           )}
-          <span style={{ color: "var(--text-muted)" }}>{fmtTime(event.timestamp)}</span>
+          <span style={{ color: "var(--text-muted)" }}>{fmtTimeSec(event.timestamp)}</span>
         </div>
       </div>
 
@@ -401,7 +396,7 @@ export default function EventStream() {
           <span>Trace 分组: {Object.keys(groups).length}</span>
           <span>状态: {paused ? "⏸ 已暂停" : "▶ 接收中"}</span>
           {lastEventAt && (
-            <span>最后事件: {fmtTime(new Date(lastEventAt).toISOString())}</span>
+            <span>最后事件: {fmtTimeSec(new Date(lastEventAt).toISOString())}</span>
           )}
         </div>
 

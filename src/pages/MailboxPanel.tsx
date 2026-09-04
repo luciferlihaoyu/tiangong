@@ -8,6 +8,7 @@ import { useState, useCallback, useEffect } from "react";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { toast } from "sonner";
+import { fmtTime } from "@/lib/format";
 import {
   Mail,
   RefreshCw,
@@ -73,12 +74,6 @@ const TYPE_LABELS: Record<string, string> = {
   handoff: "交接",
   result_notice: "结果通知",
 };
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function truncateBody(text: string | null, maxLen = 120) {
   if (!text) return "—";

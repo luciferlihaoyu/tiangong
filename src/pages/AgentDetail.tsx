@@ -8,6 +8,7 @@ import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useEffect } from "react";
+import { fmtTime } from "@/lib/format";
 import {
   Bot,
   ArrowLeft,
@@ -99,13 +100,6 @@ const TASK_STATUS_CONFIG: Record<string, { label: string; color: string; icon: R
   queued: { label: "排队中", color: "var(--accent-cyan)", icon: <Pause size={12} /> },
   pending: { label: "待处理", color: "var(--text-muted)", icon: <Clock size={12} /> },
 };
-
-function fmtTime(iso: string | null) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function fmtCost(cents: number | null) {
   if (cents === null || cents === 0) return "$0.00";

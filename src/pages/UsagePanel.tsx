@@ -20,6 +20,7 @@ import {
   Layers,
   ShieldCheck,
   DollarSign,
+  Cpu,
 } from "lucide-react";
 
 const EXCHANGE_RATE = 7.2;
@@ -679,6 +680,20 @@ export default function UsagePanel() {
             <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>
               TOKEN 用量 · 多维度统计 · 缓存分析 · 双币种
             </p>
+            <a
+              href="#/models"
+              className="inline-flex items-center gap-1.5 mt-2 text-[10px] font-mono px-2 py-1 rounded transition-colors hover:bg-[rgba(74,158,255,0.08)]"
+              style={{
+                background: "rgba(74,158,255,0.04)",
+                color: "var(--accent-cyan)",
+                border: "1px solid rgba(74,158,255,0.2)",
+                textDecoration: "none",
+              }}
+              title="管理模型列表 / 定价 / 熔断 / 一键同步上游"
+            >
+              <Cpu size={10} />
+              模型管理 / 定价 / 熔断 →
+            </a>
           </div>
           <div className="flex items-center gap-3">
             {/* Display mode toggle switch */}

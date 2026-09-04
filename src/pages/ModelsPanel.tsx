@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
-import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield } from "lucide-react";
+import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import { PricingSection } from "./models/PricingSection";
 import { GuardSection } from "./models/GuardSection";
@@ -96,6 +96,20 @@ export default function ModelsPanel() {
             <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>
               TIANSHU MODELS · 模型来源：天枢聚合网关 · 定价 · 熔断
             </p>
+            <a
+              href="#/usage"
+              className="inline-flex items-center gap-1.5 mt-2 text-[10px] font-mono px-2 py-1 rounded transition-colors hover:bg-[rgba(201,168,76,0.08)]"
+              style={{
+                background: "rgba(201,168,76,0.04)",
+                color: "var(--accent-gold)",
+                border: "1px solid rgba(201,168,76,0.2)",
+                textDecoration: "none",
+              }}
+              title="查看成本分析 / Token 用量 / 缓存命中率 / 双币种"
+            >
+              <BarChart3 size={10} />
+              成本分析 / 用量统计 →
+            </a>
           </div>
           <div className="flex items-center gap-2">
             <AdminGate>

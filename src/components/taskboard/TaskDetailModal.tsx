@@ -22,6 +22,7 @@ import {
   CheckCircle,
   RotateCcw,
   Shield,
+  Scale,
 } from "lucide-react";
 import type { Task, TaskDetail, Agent, BoardStatus } from "./types";
 import {
@@ -460,9 +461,9 @@ export function TaskDetailModal({
                     </select>
                   </div>
                 )}
-                {/* Reviewer indicator */}
+                {/* Reviewer indicator + Fusion 快捷链接 */}
                 {task.boardStatus === "review" && reviewer && (
-                  <div className="flex items-center gap-2 mt-2 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                  <div className="flex items-center gap-2 mt-2 text-[10px] font-mono flex-wrap" style={{ color: "var(--text-muted)" }}>
                     <Shield size={10} />
                     <span>审核者: {reviewer.name}</span>
                     {isCurrentAgentReviewer && (
@@ -470,6 +471,34 @@ export function TaskDetailModal({
                         当前 Agent 是审核人
                       </span>
                     )}
+                    <a
+                      href="#/fusion"
+                      className="ml-auto px-2 py-0.5 rounded flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
+                      style={{
+                        background: "rgba(201,168,76,0.06)",
+                        color: "var(--accent-gold)",
+                        border: "1px solid rgba(201,168,76,0.25)",
+                        textDecoration: "none",
+                      }}
+                      title="多 reviewer 审查：提交给多个模型并行审阅并由 Judge 汇总"
+                    >
+                      <Scale size={9} />
+                      Fusion 多模型审查
+                    </a>
+                  </div>
+                )}
+                {/* 非 review 状态也给一个弱提示入口（指向 FusionPanel） */}
+                {task.boardStatus !== "review" && task.boardStatus !== "done" && task.boardStatus !== "cancelled" && (
+                  <div className="mt-2">
+                    <a
+                      href="#/fusion"
+                      className="text-[10px] font-mono flex items-center gap-1 hover:underline"
+                      style={{ color: "var(--text-muted)" }}
+                      title="Fusion 多 reviewer 审查（与本任务独立，可发起新审查）"
+                    >
+                      <Scale size={9} />
+                      Fusion 多模型审查 →
+                    </a>
                   </div>
                 )}
               </div>

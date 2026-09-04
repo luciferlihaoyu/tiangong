@@ -24,6 +24,16 @@ import {
   RefreshCw,
   Trash2,
   Pause,
+  Send,
+  Inbox,
+  GitBranch,
+  Mail,
+  Radio,
+  UserCheck,
+  UserPlus,
+  Bell,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
 /* ═══════════════════════════════════════════
@@ -71,6 +81,41 @@ const EVENT_CATEGORIES: Record<string, { label: string; color: string; icon: Rea
   "fusion.completed": { label: "审查裁决", color: "var(--accent-gold)", icon: <Scale size={12} /> },
   "system.error": { label: "系统错误", color: "var(--danger)", icon: <AlertTriangle size={12} /> },
   "system.migration": { label: "数据库迁移", color: "var(--accent-gold)", icon: <Shield size={12} /> },
+
+  // ── A2A 协议事件（后端实际 broadcast 短名） ──
+  a2a_dispatch: { label: "A2A 派发", color: "var(--accent-cyan)", icon: <Send size={12} /> },
+  a2a_ack: { label: "A2A 确认", color: "var(--accent-cyan)", icon: <CheckCircle2 size={12} /> },
+  a2a_submit: { label: "A2A 提交", color: "var(--accent-cyan)", icon: <Play size={12} /> },
+  a2a_complete: { label: "A2A 完成", color: "var(--success)", icon: <CheckCircle2 size={12} /> },
+  a2a_fail: { label: "A2A 失败", color: "var(--danger)", icon: <XCircle size={12} /> },
+
+  // ── 任务 / 状态 ──
+  task_update: { label: "任务更新", color: "var(--accent-cyan)", icon: <RefreshCw size={12} /> },
+  task_notification: { label: "任务通知", color: "var(--accent-cyan)", icon: <Bell size={12} /> },
+
+  // ── Agent 状态（后端通用 agent_status） ──
+  agent_status: { label: "Agent 状态", color: "var(--accent-gold)", icon: <Activity size={12} /> },
+
+  // ── 会话 ──
+  session_created: { label: "会话创建", color: "var(--accent-cyan)", icon: <UserPlus size={12} /> },
+  session_message: { label: "会话消息", color: "var(--accent-cyan)", icon: <MessageSquare size={12} /> },
+
+  // ── 消息 / 邮件 ──
+  new_message: { label: "新消息", color: "var(--accent-cyan)", icon: <MessageSquare size={12} /> },
+  message_acked: { label: "消息已确认", color: "var(--accent-gold)", icon: <MessageSquare size={12} /> },
+  message_read: { label: "消息已读", color: "var(--success)", icon: <MessageSquare size={12} /> },
+  mailbox_message_sent: { label: "邮件已发", color: "var(--accent-cyan)", icon: <Mail size={12} /> },
+  mailbox_message_replied: { label: "邮件已回", color: "var(--accent-cyan)", icon: <Mail size={12} /> },
+  broadcast: { label: "广播", color: "var(--accent-cyan)", icon: <Radio size={12} /> },
+  feishu_notification: { label: "飞书通知", color: "var(--accent-cyan)", icon: <Bell size={12} /> },
+
+  // ── 协作 ──
+  collab_delegation_message: { label: "协作委派", color: "var(--accent-gold)", icon: <GitBranch size={12} /> },
+  collab_unblocked: { label: "协作解锁", color: "var(--success)", icon: <CheckCircle2 size={12} /> },
+  collab_summary: { label: "协作汇总", color: "var(--accent-gold)", icon: <Inbox size={12} /> },
+
+  // ── 通知 ──
+  notification_created: { label: "通知创建", color: "var(--accent-cyan)", icon: <Bell size={12} /> },
 };
 
 function getEventStyle(type: string) {
@@ -218,10 +263,12 @@ export default function EventStream() {
   const [traceFilter, setTraceFilter] = useState<string>("");
   const [selectedEvent, setSelectedEvent] = useState<EventEnvelope | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [lastEventAt, setLastEventAt] = useState<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // 使用现有的 WebSocket hook 连接 Dashboard 端点
   const ws = useWebSocket();
+  const connected = ws?.connected ?? false;
 
   // 接收事件
   useEffect(() => {
@@ -238,11 +285,14 @@ export default function EventStream() {
             return next.slice(0, MAX_EVENTS);
           });
         } else if (data.type && !data.eventId) {
-          // 可能是旧格式事件，包装成标准格式
+          // 可能是旧格式事件（后端 broadcast 没带 eventId 字段），
+          // 包装成标准格式：使用 crypto.randomUUID 避免遗留 `legacy-` 临时 ID
           setEvents((prev) => {
             const wrapped: EventEnvelope = {
               type: data.type,
-              eventId: `legacy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+              eventId: typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? `legacy-${crypto.randomUUID()}`
+                : `legacy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
               timestamp: data.timestamp || new Date().toISOString(),
               payload: data,
             };
@@ -250,6 +300,7 @@ export default function EventStream() {
             return next.slice(0, MAX_EVENTS);
           });
         }
+        if (data.type) setLastEventAt(Date.now());
       } catch {}
     };
 
@@ -337,12 +388,21 @@ export default function EventStream() {
           </div>
         </div>
 
-        {/* 统计 */}
-        <div className="flex items-center gap-4 mb-4 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+        {/* 统计 + 连接状态 */}
+        <div className="flex items-center gap-4 mb-4 text-[10px] font-mono flex-wrap" style={{ color: "var(--text-muted)" }}>
+          <span className="flex items-center gap-1.5">
+            {connected ? <Wifi size={12} style={{ color: "var(--success)" }} /> : <WifiOff size={12} style={{ color: "var(--danger)" }} />}
+            <span style={{ color: connected ? "var(--success)" : "var(--danger)" }}>
+              {connected ? "WS 已连接" : "WS 离线"}
+            </span>
+          </span>
           <span>总事件: {events.length}</span>
           <span>筛选后: {filteredEvents.length}</span>
           <span>Trace 分组: {Object.keys(groups).length}</span>
           <span>状态: {paused ? "⏸ 已暂停" : "▶ 接收中"}</span>
+          {lastEventAt && (
+            <span>最后事件: {fmtTime(new Date(lastEventAt).toISOString())}</span>
+          )}
         </div>
 
         {/* 筛选栏 */}
@@ -401,8 +461,20 @@ export default function EventStream() {
               style={{ maxHeight: "70vh" }}
             >
               {filteredEvents.length === 0 ? (
-                <div className="text-xs py-8 text-center" style={{ color: "var(--text-muted)" }}>
-                  {events.length === 0 ? "等待事件..." : "没有匹配的事件"}
+                <div className="text-xs py-12 text-center space-y-2" style={{ color: "var(--text-muted)" }}>
+                  <Radio size={32} className="mx-auto opacity-30" />
+                  <div>
+                    {events.length === 0
+                      ? connected
+                        ? "已连接 · 等待事件推送中"
+                        : "WS 离线 · 等待重连…"
+                      : "没有匹配的事件"}
+                  </div>
+                  {events.length === 0 && (
+                    <div className="text-[10px] font-mono opacity-70">
+                      后端每产生一次任务/消息/审查/模型调用都会推送事件到这里
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-0.5">

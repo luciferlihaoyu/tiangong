@@ -1,10 +1,10 @@
 import { useParams, useNavigate } from "react-router";
 import { trpc } from "@/providers/trpc";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useMemo } from "react";
 import { TASK_STATUS_CONFIG as STATUS_CONFIG } from "@/lib/taskStatus";
 import { fmtTime } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
+import { TaskReviewActions } from "@/components/taskboard/TaskReviewActions";
 import {
   ArrowLeft,
   Target,
@@ -66,6 +66,8 @@ interface TaskDetailData {
   updatedAt: string;
   threadMessages: ThreadMessage[];
   artifacts: TaskArtifact[];
+  /** 任务预定审核人 agentId；与 taskboard.tasks.reviewerId 字段对齐 */
+  reviewerId: number | null;
 }
 
 // ═══════════════════════ Constants ═══════════════════════
@@ -174,44 +176,7 @@ export default function TaskDetail() {
     navigate(-1);
   };
 
-  const utils = trpc.useUtils();
-  const [reviewComment, setReviewComment] = useState("");
-
-  const approveMutation = trpc.taskboard.approve.useMutation({
-    onSuccess: () => {
-      toast.success("任务已审批通过");
-      utils.taskboard.get.invalidate({ id: taskIdNum });
-      setReviewComment("");
-    },
-    onError: (err) => {
-      toast.error(`审批失败: ${err.message}`);
-    },
-  });
-
-  const rejectMutation = trpc.taskboard.reject.useMutation({
-    onSuccess: () => {
-      toast.success("任务已退回修改");
-      utils.taskboard.get.invalidate({ id: taskIdNum });
-      setReviewComment("");
-    },
-    onError: (err) => {
-      toast.error(`操作失败: ${err.message}`);
-    },
-  });
-
-  const updateProgressMutation = trpc.taskboard.progress.useMutation({
-    onSuccess: () => {
-      toast.success("任务已拒绝");
-      utils.taskboard.get.invalidate({ id: taskIdNum });
-      setReviewComment("");
-    },
-    onError: (err) => {
-      toast.error(`操作失败: ${err.message}`);
-    },
-  });
-
   const isReviewing = task?.lifecycleStatus === "reviewing";
-  const isActionPending = approveMutation.isPending || rejectMutation.isPending || updateProgressMutation.isPending;
 
   // Loading state
   if (taskQuery.isLoading) {
@@ -435,62 +400,15 @@ export default function TaskDetail() {
           )}
         </div>
 
-        {/* Review Panel */}
+        {/* Review Panel — 统一走 TaskReviewActions（A 阶段抽取） */}
         {isReviewing && (
-          <div className="mb-6 glass-panel p-4 sci-border" style={{ border: "1px solid rgba(74,158,255,0.2)" }}>
-            <div className="flex items-center gap-2 mb-3">
-              <Shield size={14} style={{ color: "var(--accent-cyan)" }} />
-              <span className="section-label" style={{ color: "var(--accent-cyan)" }}>审批操作 · REVIEW</span>
-              <div className="flex-1 h-px" style={{ background: "var(--border-default)" }} />
-            </div>
-            <div className="text-[10px] font-mono mb-3" style={{ color: "var(--text-muted)" }}>
-              该任务已提交审批，请选择审批操作并填写意见。
-            </div>
-            <textarea
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="输入审批意见（可选）..."
-              rows={2}
-              className="w-full px-3 py-2 rounded text-xs outline-none font-mono resize-none mb-3"
-              style={{
-                background: "rgba(0,0,0,0.2)",
-                border: "1px solid var(--border-default)",
-                color: "var(--text-primary)",
-              }}
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => approveMutation.mutate(
-                  { taskId: taskIdNum, agentId: operatorAgentId, comment: reviewComment || undefined }
-                )}
-                disabled={isActionPending}
-                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
-                style={{ background: "rgba(76,175,125,0.1)", color: "var(--success)", border: "1px solid rgba(76,175,125,0.2)" }}
-              >
-                <CheckCircle size={12} /> 通过
-              </button>
-              <button
-                onClick={() => rejectMutation.mutate(
-                  { taskId: taskIdNum, agentId: operatorAgentId, reason: reviewComment || undefined }
-                )}
-                disabled={isActionPending}
-                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
-                style={{ background: "rgba(201,168,76,0.1)", color: "var(--accent-gold)", border: "1px solid rgba(201,168,76,0.2)" }}
-              >
-                <RotateCcw size={12} /> 退回修改
-              </button>
-              <button
-                onClick={() => updateProgressMutation.mutate(
-                  { taskId: taskIdNum, progress: task.progress, status: "failed", lifecycleStatus: "failed", error: reviewComment || undefined }
-                )}
-                disabled={isActionPending}
-                className="px-4 py-2 rounded text-xs font-mono font-bold transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
-                style={{ background: "rgba(194,58,48,0.1)", color: "var(--accent-red)", border: "1px solid rgba(194,58,48,0.2)" }}
-              >
-                <XCircle size={12} /> 拒绝
-              </button>
-            </div>
-          </div>
+          <TaskReviewActions
+            taskId={taskIdNum}
+            reviewerId={task.reviewerId ?? null}
+            operatorAgentId={operatorAgentId}
+            isAdmin={user?.role === "admin"}
+            variant="panel"
+          />
         )}
 
         {/* Review History */}

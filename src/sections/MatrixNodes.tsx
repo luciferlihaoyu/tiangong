@@ -140,7 +140,7 @@ export default function MatrixNodes() {
               { title: '任务智能分派', desc: 'Agent 自动认领，支持优先级与负载均衡' },
               { title: '全链路审计', desc: '思考过程与工具调用全记录，透明可控' },
             ].map((f) => (
-              <div key={f.title} className="flex items-start gap-2 p-2 rounded hover:bg-[rgba(180,200,255,0.02)] transition-colors">
+              <div key={f.title} className="flex items-start gap-2 p-2 rounded">
                 <span className="w-1 h-1 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'var(--accent-red)' }} />
                 <div>
                   <div className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{f.title}</div>

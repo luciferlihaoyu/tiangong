@@ -3,7 +3,6 @@ import AppHub from './sections/AppHub'
 import Starfield from './sections/Starfield'
 import Dashboard from './sections/Dashboard'
 import MatrixNodes from './sections/MatrixNodes'
-import Features from './sections/Features'
 import ExecutionCore from './sections/ExecutionCore'
 import FAQ from './sections/FAQ'
 import FooterTerminal from './sections/FooterTerminal'
@@ -55,7 +54,6 @@ function HomePage() {
       <AppHub />
       <Dashboard />
       <MatrixNodes />
-      <Features />
       <ExecutionCore />
       <FAQ />
       <FooterTerminal />

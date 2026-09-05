@@ -55,6 +55,7 @@ export const AUDIT_EVENT_NAMES = [
   "task:approval_stale",
   "task:dispatch_requeued",
   "task:blocked_recovered",
+  "task:auto_retried",
   "connector:patrol_failed",
 ] as const;
 

@@ -8,7 +8,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   review: ["done", "running", "blocked", "failed", "cancelled"],
   blocked: ["todo", "ready", "running", "cancelled"],
   done: [], // 终端状态
-  failed: ["triage"], // 可以重新打开
+  failed: ["triage"], // 重新打开（重试走 taskboard.retry 专用端点）
   cancelled: [], // 终端状态
 };
 

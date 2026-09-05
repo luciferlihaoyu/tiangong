@@ -1065,6 +1065,69 @@ export const taskboardRouter = createRouter({
       return { success: true, id: insertId, taskId };
     }),
 
+  /**
+   * 失败任务一键重试：failed → queued 重新排队（专用端点，不走 updateStatus
+   * 的看板列转移校验——queued 不是看板列）。
+   * 与 MCP failed→queued 自动重试同一计数语义：retryCount+1，达到 maxRetries
+   * 拒绝；重置错误与租约，保留原 agentId（该 agent 心跳即可拉走）。
+   */
+  retry: authedQuery
+    .input(z.object({ taskId: z.number(), agentId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const row = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
+      if (!row) throw new Error("Task not found");
+      if (row.status !== "failed") throw new Error(`Task is not failed (current: ${row.status})`);
+
+      const retryCount = row.retryCount ?? 0;
+      const maxRetries = row.maxRetries ?? 3;
+      if (retryCount >= maxRetries) {
+        throw new Error(`已达最大重试次数 (${maxRetries})，请「重新打开」走完整流程`);
+      }
+
+      await db
+        .update(tasks)
+        .set({
+          status: "queued",
+          lifecycleStatus: "queued",
+          boardStatus: "ready",
+          retryCount: retryCount + 1,
+          error: null,
+          failedAt: null,
+          workerLeaseToken: null,
+          workerLeaseExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(tasks.id, input.taskId));
+
+      await db.insert(taskMessages).values({
+        taskId: input.taskId,
+        fromAgentId: input.agentId,
+        eventType: "system",
+        content: `手动重试：重新排队（第 ${retryCount + 1}/${maxRetries} 次）`,
+        metadata: stringifyJson({
+          action: "manual_retry",
+          previousStatus: "failed",
+          restoredStatus: "queued",
+          retryCount: retryCount + 1,
+          lastError: row.error?.slice(0, 500) ?? null,
+        }),
+      });
+
+      wsManager.broadcastToDashboard({
+        type: "task_update",
+        action: "retried",
+        id: input.taskId,
+        taskId: row.taskId,
+        name: row.name,
+        status: "queued",
+        agentId: row.agentId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, retryCount: retryCount + 1, maxRetries };
+    }),
+
   dispatch: authedQuery
     .input(z.object({ taskId: z.number() }))
     .mutation(async ({ input }) => {

@@ -79,6 +79,19 @@ export function TaskCard({
         >
           P{task.priority}
         </span>
+        {(task.retryCount ?? 0) > 0 && (
+          <span
+            className="text-[9px] px-1 py-0.5 rounded font-mono flex-shrink-0"
+            style={{
+              background: "rgba(194,58,48,0.08)",
+              color: "var(--accent-red)",
+              border: "1px solid rgba(194,58,48,0.2)",
+            }}
+            title={`已重试 ${task.retryCount} 次（上限 ${task.maxRetries ?? 3}）`}
+          >
+            ↻{task.retryCount}/{task.maxRetries ?? 3}
+          </span>
+        )}
         {labels.slice(0, 2).map((label) => (
           <span
             key={label}

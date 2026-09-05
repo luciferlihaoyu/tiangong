@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/providers/trpc";
 import { useAdminGate } from "@/components/AdminGate";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -211,6 +212,16 @@ export function TaskDetailModal({
     onError: (err) => setActionError(err.message),
   });
 
+  const retryMutation = trpc.taskboard.retry.useMutation({
+    onSuccess: (data) => {
+      utils.taskboard.list.invalidate();
+      utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
+      setActionError(null);
+      toast.success(`任务已重新排队（第 ${data.retryCount}/${data.maxRetries} 次重试）`);
+    },
+    onError: (err) => setActionError(err.message),
+  });
+
   const dependencyChainQuery = trpc.taskboard.getDependencyChain.useQuery(
     { taskId: task?.id ?? 0 },
     { enabled: task?.id !== undefined && task?.id !== null, retry: 1 }
@@ -260,6 +271,10 @@ export function TaskDetailModal({
     }
     if (action.api === "unblock") {
       unblockMutation.mutate({ taskId: task.id, agentId });
+      return;
+    }
+    if (action.api === "retry") {
+      retryMutation.mutate({ taskId: task.id, agentId });
       return;
     }
     if (action.api === "updateStatus") {
@@ -393,11 +408,13 @@ export function TaskDetailModal({
                                 ? "rgba(194,58,48,0.1)"
                                 : action.api === "requestChanges"
                                   ? "rgba(201,168,76,0.1)"
-                                  : action.api === "updateStatus" && action.to === "cancelled"
-                                    ? "rgba(194,58,48,0.08)"
-                                    : action.api === "block"
+                                  : action.api === "retry"
+                                    ? "rgba(74,158,255,0.1)"
+                                    : action.api === "updateStatus" && action.to === "cancelled"
                                       ? "rgba(194,58,48,0.08)"
-                                      : "rgba(180,200,255,0.04)",
+                                      : action.api === "block"
+                                        ? "rgba(194,58,48,0.08)"
+                                        : "rgba(180,200,255,0.04)",
                         color:
                           action.api === "claim"
                             ? "var(--accent-cyan)"
@@ -407,11 +424,13 @@ export function TaskDetailModal({
                                 ? "var(--accent-red)"
                                 : action.api === "requestChanges"
                                   ? "var(--accent-gold)"
-                                  : action.api === "updateStatus" && action.to === "cancelled"
-                                    ? "var(--accent-red)"
-                                    : action.api === "block"
+                                  : action.api === "retry"
+                                    ? "var(--accent-cyan)"
+                                    : action.api === "updateStatus" && action.to === "cancelled"
                                       ? "var(--accent-red)"
-                                      : "var(--text-secondary)",
+                                      : action.api === "block"
+                                        ? "var(--accent-red)"
+                                        : "var(--text-secondary)",
                         border: `1px solid ${
                           action.api === "claim"
                             ? "rgba(74,158,255,0.2)"
@@ -421,11 +440,13 @@ export function TaskDetailModal({
                                 ? "rgba(194,58,48,0.2)"
                                 : action.api === "requestChanges"
                                   ? "rgba(201,168,76,0.2)"
-                                  : action.api === "updateStatus" && action.to === "cancelled"
-                                    ? "rgba(194,58,48,0.2)"
-                                    : action.api === "block"
+                                  : action.api === "retry"
+                                    ? "rgba(74,158,255,0.2)"
+                                    : action.api === "updateStatus" && action.to === "cancelled"
                                       ? "rgba(194,58,48,0.2)"
-                                      : "var(--border-default)"
+                                      : action.api === "block"
+                                        ? "rgba(194,58,48,0.2)"
+                                        : "var(--border-default)"
                         }`,
                       }}
                     >

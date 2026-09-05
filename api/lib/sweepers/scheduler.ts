@@ -17,6 +17,7 @@ import { sweepMemoryCompensation } from "./memory-compensation";
 import { sweepNewApiPatrol } from "./newapi-patrol";
 import { sweepTaskTimeouts } from "./task-lifecycle";
 import { sweepDispatchClaim } from "./task-dispatch-claim";
+import { sweepTaskRetry } from "./task-retry";
 
 type SweepFn = (db: ReturnType<typeof getDb>, now: Date, tick: number) => Promise<void>;
 
@@ -67,6 +68,7 @@ class SweeperScheduler {
       const sweepers: readonly SweepFn[] = [
         sweepTaskTimeouts,
         sweepDispatchClaim,
+        sweepTaskRetry,
         sweepAgentWatchdog,
         sweepApprovalNag,
         sweepBlockedRecovery,

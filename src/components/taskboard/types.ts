@@ -191,43 +191,43 @@ export interface StatusAction {
 export const STATUS_ACTIONS: Record<BoardStatus, StatusAction[]> = {
   triage: [
     { label: "→ Backlog", to: "backlog", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   backlog: [
     { label: "→ Todo", to: "todo", api: "updateStatus" },
     { label: "→ Triage", to: "triage", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   todo: [
     { label: "→ Ready", to: "ready", api: "updateStatus" },
     { label: "→ Backlog", to: "backlog", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   ready: [
     { label: "▶ Claim", to: "running", api: "claim", needsAgent: true },
     { label: "→ Blocked", to: "blocked", api: "block", needsReason: true },
     { label: "→ Backlog", to: "backlog", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   running: [
     { label: "✓ Submit", to: "review", api: "submit" },
     { label: "→ Blocked", to: "blocked", api: "block", needsReason: true },
     { label: "→ Failed", to: "failed", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   review: [
     { label: "✓ Approve", to: "done", api: "approve" },
     { label: "↻ Request Changes", to: "running", api: "requestChanges" },
     { label: "✗ Reject", to: "failed", api: "reject" },
     { label: "→ Blocked", to: "blocked", api: "block", needsReason: true },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   blocked: [
     { label: "↻ Unblock", to: "todo", api: "unblock" },
     { label: "→ Todo", to: "todo", api: "updateStatus" },
     { label: "→ Ready", to: "ready", api: "updateStatus" },
     { label: "→ Running", to: "running", api: "updateStatus" },
-    { label: "→ Cancelled", to: "cancelled", api: "updateStatus" },
+    { label: "✗ 放弃任务", to: "cancelled", api: "updateStatus" },
   ],
   done: [],
   failed: [

@@ -7,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   X,
@@ -219,6 +218,14 @@ export function TaskDetailModal({
 
   const handleAction = (action: (typeof actions)[number]) => {
     if (!task) return;
+
+    // 放弃任务是危险操作（cancelled 为终态，不可逆），先确认
+    if (action.api === "updateStatus" && action.to === "cancelled") {
+      if (!window.confirm(`确认放弃任务「${task.name}」？\n\n放弃后任务立即终止、不再执行，且不可恢复。`)) {
+        return;
+      }
+    }
+
     const agentId = getEffectiveAgentId();
     if (!agentId) {
       setActionError("无可用的 Agent，请先创建 Agent");
@@ -336,8 +343,13 @@ export function TaskDetailModal({
           </div>
         </DialogHeader>
 
-        <div className="flex flex-col overflow-hidden" style={{ maxHeight: "calc(90vh - 60px)" }}>
-          <ScrollArea className="flex-1 px-5 py-4">
+        {/* 布局：Header → 固定操作区 → 原生滚动详情区。
+            滚动用原生 overflow-y-auto 而非 Radix ScrollArea：grid/flex 嵌套下
+            flex-1 缺 min-h-0 会让内容撑破容器被 overflow-hidden 裁掉——此前
+            用户看到"显示不全、按钮够不着"即此因。 */}
+        <div className="flex flex-col overflow-hidden min-h-0" style={{ maxHeight: "calc(90vh - 60px)" }}>
+          {/* 操作区固定在顶部：按钮始终可见可点，不随详情滚动 */}
+          <div className="px-5 pt-3 pb-3 flex-shrink-0" style={{ borderBottom: "1px solid var(--border-default)" }}>
             {/* Actions */}
             {visibleActions.length > 0 && (
               <div className="mb-5">
@@ -381,9 +393,11 @@ export function TaskDetailModal({
                                 ? "rgba(194,58,48,0.1)"
                                 : action.api === "requestChanges"
                                   ? "rgba(201,168,76,0.1)"
-                                  : action.api === "block"
+                                  : action.api === "updateStatus" && action.to === "cancelled"
                                     ? "rgba(194,58,48,0.08)"
-                                    : "rgba(180,200,255,0.04)",
+                                    : action.api === "block"
+                                      ? "rgba(194,58,48,0.08)"
+                                      : "rgba(180,200,255,0.04)",
                         color:
                           action.api === "claim"
                             ? "var(--accent-cyan)"
@@ -393,9 +407,11 @@ export function TaskDetailModal({
                                 ? "var(--accent-red)"
                                 : action.api === "requestChanges"
                                   ? "var(--accent-gold)"
-                                  : action.api === "block"
+                                  : action.api === "updateStatus" && action.to === "cancelled"
                                     ? "var(--accent-red)"
-                                    : "var(--text-secondary)",
+                                    : action.api === "block"
+                                      ? "var(--accent-red)"
+                                      : "var(--text-secondary)",
                         border: `1px solid ${
                           action.api === "claim"
                             ? "rgba(74,158,255,0.2)"
@@ -405,9 +421,11 @@ export function TaskDetailModal({
                                 ? "rgba(194,58,48,0.2)"
                                 : action.api === "requestChanges"
                                   ? "rgba(201,168,76,0.2)"
-                                  : action.api === "block"
+                                  : action.api === "updateStatus" && action.to === "cancelled"
                                     ? "rgba(194,58,48,0.2)"
-                                    : "var(--border-default)"
+                                    : action.api === "block"
+                                      ? "rgba(194,58,48,0.2)"
+                                      : "var(--border-default)"
                         }`,
                       }}
                     >
@@ -548,6 +566,10 @@ export function TaskDetailModal({
                 )}
               </div>
             )}
+          </div>
+
+          {/* 详情滚动区（原生滚动，见上方说明） */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 custom-scrollbar">
 
             {/* Basic Info */}
             <div className="mb-5">
@@ -1049,7 +1071,7 @@ export function TaskDetailModal({
                 </div>
               </div>
             )}
-          </ScrollArea>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

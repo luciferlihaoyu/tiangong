@@ -47,6 +47,12 @@ export default function AppHub() {
     retry: 1,
     refetchInterval: 30000,
   });
+  // 动态 MCP 插件卡片（来自 pluginCenter.list，30s 轮询；新插件无需改前端）
+  const pluginCenterQuery = trpc.pluginCenter.list.useQuery(undefined, {
+    retry: 1,
+    refetchInterval: 30000,
+    staleTime: 30_000,
+  });
   /** 正在走 SSO 签票的平台 key；非空时对应卡片禁点，防连击 */
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
@@ -113,6 +119,36 @@ export default function AppHub() {
               );
             })}
             <AppCard label="插件中心" description="能力可插拔" status="ok" internalHref="/plugins" />
+            {/* 动态 MCP 插件卡片（从 pluginCenter.list 拉取，启用即亮） */}
+            {pluginCenterQuery.data?.plugins
+              ?.filter((p) => p.enabled && p.key !== "echo" /* 演练后未启用的 echo 不展示 */)
+              .map((p) => (
+                <AppCard
+                  key={p.key}
+                  label={p.name}
+                  description={
+                    p.key === "ollama"
+                      ? "本地 LLM 推理 · MCP 8 工具"
+                      : p.key === "xuanji"
+                        ? "璇玑记忆 · MCP 2 工具"
+                        : p.key === "alist"
+                          ? "AList 网盘 · MCP 4 工具"
+                          : p.key === "fmg"
+                            ? "奇幻地图 · MCP 5 工具"
+                            : `${p.description} · MCP ${p.toolCount ?? 0} 工具`
+                  }
+                  status={p.status}
+                  latencyMs={p.latencyMs}
+                  internalHref="/plugins"
+                />
+              ))}
+            {/* 外部应用卡片：Open Web UI（Ollama 的聊天界面） */}
+            <AppCard
+              label="Open Web UI"
+              description="Ollama Web 对话界面"
+              status="ok"
+              url="https://oll199h.zeabur.app/"
+            />
           </div>
         )}
       </div>

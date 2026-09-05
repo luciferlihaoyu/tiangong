@@ -94,6 +94,20 @@ export function TaskDetailModal({
     [actions, isAdmin]
   );
 
+  /**
+   * 生效操作者 agentId：actingAgentId 优先，其次任务执行者，最后第一个在线 agent。
+   * 注意：必须定义在 isCurrentAgentReviewer 的 useMemo 之前——useMemo 回调在
+   * 渲染期间同步执行，若 const 箭头函数定义在后面会触发 TDZ
+   * （"Cannot access 'S' before initialization"，生产黑屏根因，reviewerId
+   * 非空的任务打开详情即崩）。
+   */
+  const getEffectiveAgentId = (): number | null => {
+    if (actingAgentId) return actingAgentId;
+    if (task?.agentId) return task.agentId;
+    const first = agents.find((a) => a.status === "online");
+    return first?.id ?? agents[0]?.id ?? null;
+  };
+
   const isCurrentAgentReviewer = useMemo(() => {
     if (!task?.reviewerId) return false;
     const agentId = getEffectiveAgentId();
@@ -202,13 +216,6 @@ export function TaskDetailModal({
     { taskId: task?.id ?? 0 },
     { enabled: task?.id !== undefined && task?.id !== null, retry: 1 }
   );
-
-  const getEffectiveAgentId = (): number | null => {
-    if (actingAgentId) return actingAgentId;
-    if (task?.agentId) return task.agentId;
-    const first = agents.find((a) => a.status === "online");
-    return first?.id ?? agents[0]?.id ?? null;
-  };
 
   const handleAction = (action: (typeof actions)[number]) => {
     if (!task) return;

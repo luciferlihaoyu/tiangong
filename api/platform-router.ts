@@ -89,13 +89,16 @@ async function probeHealth(service: PlatformService): Promise<ServiceHealth> {
   try {
     const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
     const latencyMs = Date.now() - start;
-    if (!resp.ok) {
+    // gateway / storage（如 dsh-web）：401/403 表示服务在响应、只是要求登录，
+    // 视为可达（ok），避免健康灯误报 down
+    if (service.kind === "gateway" || service.kind === "storage") {
+      if (resp.ok || resp.status === 401 || resp.status === 403) {
+        return { ok: true, latencyMs };
+      }
       return { ok: false, latencyMs, reason: `HTTP ${resp.status}` };
     }
-
-    // gateway / storage：尽力探测，2xx 即健康（不强制 JSON 结构）
-    if (service.kind === "gateway" || service.kind === "storage") {
-      return { ok: true, latencyMs };
+    if (!resp.ok) {
+      return { ok: false, latencyMs, reason: `HTTP ${resp.status}` };
     }
 
     // app（beidou / xuanji）：要求 JSON 中 ok === true，并尽量解析 db 状态

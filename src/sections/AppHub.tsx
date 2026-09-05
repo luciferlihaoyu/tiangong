@@ -78,6 +78,16 @@ export default function AppHub() {
   };
 
   const services = registryQuery.data ?? [];
+  // 已启用 MCP 插件按 key 建索引：网页平台卡若命中，则合入 MCP 能力徽标
+  const pluginByKey = new Map(
+    (pluginCenterQuery.data?.plugins ?? [])
+      .filter((p) => p.enabled && p.key !== "echo" /* 演练后未启用的 echo 不展示 */)
+      .map((p) => [p.key, p]),
+  );
+  // 有网页入口的平台 key（registry 里 kind !== self 且有 url 的）：其 MCP 能力并入顶部卡，底部不再重复展示
+  const platformKeysWithUrl = new Set(
+    services.filter((s) => s.kind !== "self" && s.url).map((s) => s.key),
+  );
 
   return (
     <section className="relative z-10 pt-6 pb-2 px-4 md:px-6">
@@ -103,6 +113,14 @@ export default function AppHub() {
               const health = healthQuery.data?.results?.[svc.key];
               const resolved = resolveStatus(health, healthQuery.isPending);
               const isSelf = svc.kind === "self";
+              const plugin = pluginByKey.get(svc.key);
+              // MCP 能力并入平台卡：仅当服务已配置网页 url 才挂徽标（未配置视为纯 MCP，不占顶部位）
+              const mcpBadge =
+                plugin && svc.url
+                  ? plugin.toolCount !== undefined
+                    ? `MCP ${plugin.toolCount} 工具`
+                    : "MCP 可用"
+                  : undefined;
               return (
                 <AppCard
                   key={svc.key}
@@ -112,16 +130,19 @@ export default function AppHub() {
                   status={resolved.status}
                   latencyMs={health?.latencyMs}
                   reason={resolved.reason}
-                  badge={isSelf ? "当前平台" : undefined}
+                  badge={isSelf ? "当前平台" : mcpBadge}
                   busy={busyKey === svc.key}
                   onOpen={(url) => handleOpen(svc.key, url)}
                 />
               );
             })}
             <AppCard label="插件中心" description="能力可插拔" status="ok" internalHref="/plugins" />
-            {/* 动态 MCP 插件卡片（从 pluginCenter.list 拉取，启用即亮） */}
+            {/* 动态 MCP 插件卡片：只展示「无独立网页入口」的纯 MCP 插件（如 ollama/fmg），
+                避免与顶部平台卡重复；有网页的平台其 MCP 能力已并到顶部卡徽标 */}
             {pluginCenterQuery.data?.plugins
-              ?.filter((p) => p.enabled && p.key !== "echo" /* 演练后未启用的 echo 不展示 */)
+              ?.filter(
+                (p) => p.enabled && p.key !== "echo" && !platformKeysWithUrl.has(p.key),
+              )
               .map((p) => (
                 <AppCard
                   key={p.key}
@@ -129,13 +150,9 @@ export default function AppHub() {
                   description={
                     p.key === "ollama"
                       ? "本地 LLM 推理 · MCP 8 工具"
-                      : p.key === "xuanji"
-                        ? "璇玑记忆 · MCP 2 工具"
-                        : p.key === "alist"
-                          ? "AList 网盘 · MCP 4 工具"
-                          : p.key === "fmg"
-                            ? "奇幻地图 · MCP 5 工具"
-                            : `${p.description} · MCP ${p.toolCount ?? 0} 工具`
+                      : p.key === "fmg"
+                        ? "奇幻地图 · MCP 5 工具"
+                        : `${p.description ?? "MCP 插件"} · MCP ${p.toolCount ?? 0} 工具`
                   }
                   status={p.status}
                   latencyMs={p.latencyMs}

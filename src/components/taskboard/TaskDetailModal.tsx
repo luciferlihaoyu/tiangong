@@ -100,6 +100,27 @@ export function TaskDetailModal({
     return agentId === task.reviewerId;
   }, [task?.reviewerId, actingAgentId, task?.agentId, agents]);
 
+  /**
+   * 执行审批闸门停放（parked）检测：boardStatus=blocked + input metadata
+   * routing.approvalRequired=true && approval.decision=pending。
+   * 这类任务在 approve 端点有专门放行分支（批准后回 ready/queued 重新排队），
+   * 此前 UI 无入口——管理员打开详情也看不到"批准执行"按钮。
+   * envelope 结构兼容 { metadata: {...} } 与直接 metadata 两种。
+   */
+  const isPendingExecutionApproval = useMemo(() => {
+    if (!task || task.boardStatus !== "blocked") return false;
+    try {
+      const parsed = task.input ? JSON.parse(task.input) : null;
+      const metadata = parsed?.metadata ?? parsed;
+      return (
+        metadata?.routing?.approvalRequired === true &&
+        metadata?.approval?.decision === "pending"
+      );
+    } catch {
+      return false;
+    }
+  }, [task]);
+
   const updateStatusMutation = trpc.taskboard.updateStatus.useMutation({
     onSuccess: () => {
       utils.taskboard.list.invalidate();
@@ -320,6 +341,23 @@ export function TaskDetailModal({
                   <Separator className="flex-1" style={{ background: "var(--border-default)" }} />
                 </div>
                 <div className="flex flex-wrap gap-2 mb-2">
+                  {isPendingExecutionApproval && isAdmin && (
+                    <button
+                      onClick={() =>
+                        handleAction({ label: "✓ 批准执行", to: "ready", api: "approve" })
+                      }
+                      disabled={isActionPending}
+                      className="text-[11px] px-3 py-1.5 rounded font-bold transition-all hover:brightness-110 disabled:opacity-50"
+                      style={{
+                        background: "rgba(76,175,125,0.1)",
+                        color: "var(--success)",
+                        border: "1px solid rgba(76,175,125,0.2)",
+                      }}
+                      title="高风险任务已停放在执行审批闸门：批准后回 ready/queued 重新排队执行"
+                    >
+                      ✓ 批准执行（高风险放行）
+                    </button>
+                  )}
                   {visibleActions.map((action) => (
                     <button
                       key={`${action.api}-${action.to}`}

@@ -894,6 +894,54 @@ export const taskboardRouter = createRouter({
         .limit(200);
     }),
 
+  /**
+   * 统一"待审批"数据源：结果审批（review）+ 执行审批停放（parked）合并返回。
+   *
+   * - pendingType="review"：boardStatus=review 的结果审核任务（reviewerId 匹配
+   *   或 reviewerId 为空——reviewerId 为空的由前端按管理员过滤）。
+   * - pendingType="execution_approval"：审批闸门停放的任务（boardStatus=blocked
+   *   + status=pending + metadata approval.decision=pending）。这类任务此前在
+   *   review 列表里不可见，管理员无法发现也无法批准——approve 端点有专门的
+   *   放行分支，但 UI 没有入口。此端点补齐可见性。
+   */
+  listPendingApprovals: publicQuery
+    .input(
+      z.object({
+        agentId: z.number().optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = getDb();
+
+      const reviewRows = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.boardStatus, "review"))
+        .orderBy(desc(tasks.priority), asc(tasks.createdAt))
+        .limit(200);
+
+      const parkedRows = await db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.boardStatus, "blocked"), eq(tasks.status, "pending")))
+        .orderBy(desc(tasks.priority), asc(tasks.createdAt))
+        .limit(200);
+
+      const parked = parkedRows
+        .filter((row) => {
+          const state = getApprovalState(row.input);
+          return state.required && state.decision === "pending";
+        })
+        .map((row) => ({ ...row, pendingType: "execution_approval" as const }));
+
+      const review = reviewRows
+        .filter((row) => input.agentId === undefined || row.reviewerId === null || row.reviewerId === input.agentId)
+        .map((row) => ({ ...row, pendingType: "review" as const }));
+
+      // parked（执行审批）优先级更高——高风险任务卡着执行流
+      return [...parked, ...review];
+    }),
+
   getDependencyChain: publicQuery
     .input(z.object({ taskId: z.number() }))
     .query(async ({ input }) => {

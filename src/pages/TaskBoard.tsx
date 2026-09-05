@@ -42,11 +42,16 @@ export default function TaskBoard() {
   const firstAgent = agents.find((a) => a.status === "online");
   const currentAgentId = firstAgent?.id ?? agents[0]?.id;
 
-  const reviewTasksQuery = trpc.taskboard.listReviewTasks.useQuery(
-    { agentId: currentAgentId ?? 0 },
-    { enabled: currentAgentId !== undefined, retry: 1, staleTime: 5000 }
+  const pendingApprovalsQuery = trpc.taskboard.listPendingApprovals.useQuery(
+    { agentId: currentAgentId },
+    { retry: 1, staleTime: 5000 }
   );
-  const myReviewTasks = (reviewTasksQuery.data || []) as Task[];
+  const pendingApprovals = (pendingApprovalsQuery.data || []) as (Task & {
+    pendingType: "review" | "execution_approval";
+  })[];
+
+  // 向后兼容：旧变量名指向统一待审批列表
+  const myReviewTasks = pendingApprovals;
 
   // WebSocket updates
   const { lastMessage } = useWebSocket();
@@ -69,7 +74,7 @@ export default function TaskBoard() {
       });
       utils.taskboard.list.invalidate();
       if (currentAgentId) {
-        utils.taskboard.listReviewTasks.invalidate({ agentId: currentAgentId });
+        utils.taskboard.listPendingApprovals.invalidate({ agentId: currentAgentId });
       }
     }
     if (lastMessage.type === "mailbox_message_sent") {
@@ -168,9 +173,10 @@ export default function TaskBoard() {
 
   /**
    * "我的待审"任务 id 集合：
-   *  - 管理员：所有 boardStatus=review 的任务（admin 可审批任意 review 任务）
-   *  - 非管理员：仅 reviewerId === currentAgentId 的任务
-   *  - 加上后端 listReviewTasks 端点返回的（覆盖 dispatcher/委派场景）
+   *  - 管理员：所有 review 任务 + 所有审批闸门 parked 任务（高风险待批）
+   *  - 非管理员：仅 reviewerId === currentAgentId 的 review 任务
+   *    （parked/执行审批是管理员职责，非管理员不显示）
+   *  - 加上后端 listPendingApprovals 返回的（reviewerId 空的 review 任务）
    */
   const myReviewTaskIds = useMemo(() => {
     const ids = new Set<number>();
@@ -180,9 +186,12 @@ export default function TaskBoard() {
         else if (currentAgentId && t.reviewerId === currentAgentId) ids.add(t.id);
       }
     }
-    for (const t of myReviewTasks) ids.add(t.id);
+    for (const t of pendingApprovals) {
+      if (t.pendingType === "execution_approval" && !isAdmin) continue;
+      ids.add(t.id);
+    }
     return ids;
-  }, [tasks, myReviewTasks, isAdmin, currentAgentId]);
+  }, [tasks, pendingApprovals, isAdmin, currentAgentId]);
 
   return (
     <div
@@ -248,7 +257,7 @@ export default function TaskBoard() {
                 {s.label}
               </span>
               <span className="text-xs font-bold" style={{ color: s.color }}>
-                {s.key === "myReviews" ? myReviewTasks.length : stats[s.key as keyof typeof stats]}
+                {s.key === "myReviews" ? myReviewTaskIds.size : stats[s.key as keyof typeof stats]}
               </span>
               {s.icon && <s.icon size={10} style={{ color: s.color }} />}
             </div>
@@ -271,32 +280,38 @@ export default function TaskBoard() {
                   待我审批 · {myReviewTaskIds.size} 项
                 </span>
                 <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-                  点击打开任务详情审批
+                  含执行审批（高风险卡住）与结果审核，点击打开详情处理
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {tasks
                   .filter((t) => myReviewTaskIds.has(t.id))
                   .slice(0, 5)
-                  .map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handleTaskClick(t)}
-                      className="text-[10px] px-2 py-1 rounded font-mono flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
-                      style={{
-                        background: "rgba(201, 168, 76, 0.08)",
-                        color: "var(--accent-gold)",
-                        border: "1px solid rgba(201, 168, 76, 0.25)",
-                      }}
-                      title={t.name}
-                    >
-                      <Shield size={9} />
-                      {t.taskId}
-                      {t.reviewerId && t.reviewerId !== currentAgentId && (
-                        <span style={{ color: "var(--text-muted)" }}>· 委派</span>
-                      )}
-                    </button>
-                  ))}
+                  .map((t) => {
+                    const isParked = pendingApprovals.some(
+                      (p) => p.id === t.id && p.pendingType === "execution_approval"
+                    );
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => handleTaskClick(t)}
+                        className="text-[10px] px-2 py-1 rounded font-mono flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
+                        style={{
+                          background: isParked ? "rgba(194, 58, 48, 0.08)" : "rgba(201, 168, 76, 0.08)",
+                          color: isParked ? "var(--accent-red)" : "var(--accent-gold)",
+                          border: isParked ? "1px solid rgba(194, 58, 48, 0.3)" : "1px solid rgba(201, 168, 76, 0.25)",
+                        }}
+                        title={t.name}
+                      >
+                        <Shield size={9} />
+                        {t.taskId}
+                        {isParked && <span>· 高风险待批</span>}
+                        {!isParked && t.reviewerId && t.reviewerId !== currentAgentId && (
+                          <span style={{ color: "var(--text-muted)" }}>· 委派</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 {myReviewTaskIds.size > 5 && (
                   <span className="text-[10px] font-mono px-2 py-1" style={{ color: "var(--text-muted)" }}>
                     +{myReviewTaskIds.size - 5} 更多

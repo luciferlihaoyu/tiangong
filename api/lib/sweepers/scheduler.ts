@@ -10,11 +10,13 @@ import { getDb } from "../../queries/connection";
 
 import { sweepAgentWatchdog } from "./agent-watchdog";
 import { sweepApprovalNag } from "./approval-nag";
+import { sweepBlockedRecovery } from "./blocked-recovery";
 import { sweepAlistCompensation } from "./alist-compensation";
 import { sweeperConfig } from "./config";
 import { sweepMemoryCompensation } from "./memory-compensation";
 import { sweepNewApiPatrol } from "./newapi-patrol";
 import { sweepTaskTimeouts } from "./task-lifecycle";
+import { sweepDispatchClaim } from "./task-dispatch-claim";
 
 type SweepFn = (db: ReturnType<typeof getDb>, now: Date, tick: number) => Promise<void>;
 
@@ -64,8 +66,10 @@ class SweeperScheduler {
 
       const sweepers: readonly SweepFn[] = [
         sweepTaskTimeouts,
+        sweepDispatchClaim,
         sweepAgentWatchdog,
         sweepApprovalNag,
+        sweepBlockedRecovery,
         sweepMemoryCompensation,
         sweepAlistCompensation,
         sweepNewApiPatrol,

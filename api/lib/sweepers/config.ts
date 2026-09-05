@@ -9,6 +9,8 @@
  *   TIANGONG_MEMORY_RETRY_LOOKBACK_MS    default 21600000 (6 hours)
  *   TIANGONG_ALIST_RETRY_LOOKBACK_MS     default 21600000 (6 hours)
  *   TIANGONG_NEWAPI_PATROL_EVERY_TICKS   default 10
+ *   TIANGONG_DISPATCH_CLAIM_STALE_MS     default 90000 (90s)
+ *   TIANGONG_BLOCKED_RECOVER_STALE_MS    default 86400000 (1 day)
  */
 import { z } from "zod";
 
@@ -54,6 +56,11 @@ export const sweeperConfigSchema = z.object({
   memoryRetryLookbackMs: integerFromEnv(60_000, 31_536_000_000, 21_600_000),
   alistRetryLookbackMs: integerFromEnv(60_000, 31_536_000_000, 21_600_000),
   newApiPatrolEveryTicks: integerFromEnv(1, 100_000, 10),
+  // dispatched 任务超过该时长仍 status=running（agent 未 ack）时，自动回 queued
+  // 让 claimNextTask / TaskRunner 可认领（自动认领兜底）。
+  dispatchClaimStaleMs: integerFromEnv(10_000, 3_600_000, 90_000),
+  // 非「审批停放」的 blocked 任务超过该时长自动恢复到阻塞前状态。
+  blockedRecoverStaleMs: integerFromEnv(300_000, 31_536_000_000, 86_400_000),
 });
 
 export type SweeperConfig = Readonly<z.infer<typeof sweeperConfigSchema>>;
@@ -69,6 +76,8 @@ export function loadSweeperConfig(env: SweeperEnv = process.env): SweeperConfig 
     memoryRetryLookbackMs: env.TIANGONG_MEMORY_RETRY_LOOKBACK_MS,
     alistRetryLookbackMs: env.TIANGONG_ALIST_RETRY_LOOKBACK_MS,
     newApiPatrolEveryTicks: env.TIANGONG_NEWAPI_PATROL_EVERY_TICKS,
+    dispatchClaimStaleMs: env.TIANGONG_DISPATCH_CLAIM_STALE_MS,
+    blockedRecoverStaleMs: env.TIANGONG_BLOCKED_RECOVER_STALE_MS,
   });
 }
 

@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { trpc } from '@/providers/trpc';
+import OfficeCanvas from './office/OfficeCanvas';
 
 function canCreateWebGLContext() {
   try {
@@ -98,6 +99,7 @@ export default function MatrixNodes() {
   // 球体数量绑定真实 Agent 数（装饰性拓扑，8~140 之间）
   const agentsQuery = trpc.agent.list.useQuery(undefined, { staleTime: 30000 });
   const nodeCount = Math.max(8, Math.min(140, agentsQuery.data?.length ?? 12));
+  const [view, setView] = useState<"office" | "topology">("office");
 
   useEffect(() => {
     setWebglAvailable(canCreateWebGLContext());
@@ -109,10 +111,28 @@ export default function MatrixNodes() {
         <div className="glass-panel p-4 overflow-hidden sci-border">
           <div className="flex items-center justify-between mb-3">
             <div className="section-label">ARCHITECTURE VISUALIZATION · 架构可视化</div>
-            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{webglAvailable ? `网络拓扑 · ${nodeCount} 个 Agent 节点` : 'static mode · WebGL 降级'}</span>
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1 text-[10px] font-mono">
+                <button
+                  onClick={() => setView("office")}
+                  className={`px-2 py-0.5 rounded transition-colors ${view === "office" ? "bg-[rgba(74,158,255,0.2)] text-[#4a9eff]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+                  🏢 办公室
+                </button>
+                <button
+                  onClick={() => setView("topology")}
+                  className={`px-2 py-0.5 rounded transition-colors ${view === "topology" ? "bg-[rgba(74,158,255,0.2)] text-[#4a9eff]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+                  🌐 拓扑
+                </button>
+              </div>
+              <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+                {view === "office" ? `${nodeCount} 个 Agent · 实时位置` : (webglAvailable ? `网络拓扑 · ${nodeCount} 个 Agent 节点` : 'static mode · WebGL 降级')}
+              </span>
+            </div>
           </div>
           <div className="w-full h-[280px] rounded overflow-hidden relative" style={{ background: 'rgba(0,0,0,0.3)' }}>
-            {webglAvailable ? (
+            {view === "office" ? (
+              <OfficeCanvas className="absolute inset-0" />
+            ) : webglAvailable ? (
               <Canvas
                 camera={{ position: [0, 0, 30], fov: 50 }}
                 gl={{ antialias: true, alpha: true }}

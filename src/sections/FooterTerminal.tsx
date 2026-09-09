@@ -244,10 +244,10 @@ export default function FooterTerminal() {
           onClick={() => setToast(null)}
           className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded text-xs font-mono cursor-pointer"
           style={{
-            background: 'rgba(10, 10, 18, 0.95)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--text-primary)',
-            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.5)',
+            background: '#ffffff',
+            border: '1px solid rgba(15, 23, 42, 0.15)',
+            color: '#1a1d29',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.12)',
           }}
         >
           {toast}

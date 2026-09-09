@@ -13,28 +13,28 @@ const AGENT_H = 24;
 const DESK_W = 56;
 const DESK_H = 36;
 
-/** 工位配色（暗色办公室 + 亮色点缀） */
+/** 工位配色（浅色办公室 + 像素风柔和色） */
 const COLORS = {
-  bg: "#0a0a12",
-  floor: "#16161f",
-  wall: "#0e0e18",
-  desk: "#2a2a3a",
-  deskEdge: "#3a3a4a",
-  monitor: "#1a1a2e",
-  monitorScreen: "#2a4a2a", // 暗绿屏幕（像素终端感）
-  monitorScreenActive: "#4aff4a", // 活跃绿色
-  chair: "#3a3a4a",
-  lounge: "#1f1520",
-  loungeEdge: "#4a2a3a",
-  aisle: "rgba(74, 158, 255, 0.08)",
-  textPrimary: "#e0e0e8",
-  textMuted: "#8888a0",
-  offline: "#3a3a4a",
+  bg: "#faf8f2", // 米白底
+  floor: "#ebe5d8", // 浅木地板
+  wall: "#e8e0d0", // 米灰墙（暂未用，预留）
+  desk: "#c8b896", // 木桌
+  deskEdge: "#a89878", // 桌边深色
+  monitor: "#3a3a4a", // 显示器外框（深色）
+  monitorScreen: "#7a9a7a", // 屏幕待机（浅绿）
+  monitorScreenActive: "#2a8a2a", // 屏幕活跃（深绿）
+  chair: "#8a7a68", // 椅子
+  lounge: "#f0e8dc", // 休闲区地板（更亮）
+  loungeEdge: "#c8b896", // 休闲区边线
+  aisle: "rgba(120, 100, 70, 0.18)", // 走道分隔线
+  textPrimary: "#2a2a3a", // 深色文字
+  textMuted: "#707080", // 次要文字
+  offline: "#c0c0c8", // 离线工位灰
   accent: "#c23a30",
-  gold: "#d8a04a",
-  ok: "#4aff4a",
-  warn: "#d8a04a",
-  err: "#c23a30",
+  gold: "#b8860b",
+  ok: "#2a8a2a", // 进度条绿
+  warn: "#b8860b", // 警告黄
+  err: "#c23a30", // 错误红
 };
 
 /** 画像素小人（方块组合，8-bit 风） */
@@ -49,7 +49,7 @@ function drawPixelAgent(
   ctx.save();
   ctx.translate(x, y);
   // 阴影
-  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
   ctx.fillRect(-AGENT_W / 2, AGENT_H / 2 - 2, AGENT_W, 3);
 
   // 身体（矩形）
@@ -57,7 +57,7 @@ function drawPixelAgent(
   ctx.fillRect(-AGENT_W / 2 + 2, -AGENT_H / 2 + 8, AGENT_W - 4, AGENT_H - 10);
 
   // 头（方块）
-  ctx.fillStyle = "#f0d0b0"; // 肤色
+  ctx.fillStyle = "#e8c8a8"; // 肤色（浅背景用稍深）
   ctx.fillRect(-AGENT_W / 2 + 4, -AGENT_H / 2, AGENT_W - 8, 10);
 
   // 眼睛（两个小方块）
@@ -86,7 +86,7 @@ function drawPixelAgent(
     const blinkFrame = Math.floor(frame / 240) % 2; // 4s 一次
     if (blinkFrame === 0 && Math.floor(frame / 4) % 4 === 0) {
       // 闭眼
-      ctx.fillStyle = "#f0d0b0";
+      ctx.fillStyle = "#e8c8a8";
       ctx.fillRect(-AGENT_W / 2 + 6, -AGENT_H / 2 + 4, 2, 2);
       ctx.fillRect(AGENT_W / 2 - 8, -AGENT_H / 2 + 4, 2, 2);
     }
@@ -222,10 +222,10 @@ function drawLounge(ctx: CanvasRenderingContext2D, width: number, height: number
   const midY = (aisleY + height) / 2;
 
   for (const s of spots) {
-    // 家具底座（40×20 矩形）
-    ctx.fillStyle = "#2a1a28";
+    // 家具底座（40×20 矩形，浅色木板）
+    ctx.fillStyle = "#c8b896";
     ctx.fillRect(s.x - 20, midY - 10, 40, 20);
-    ctx.fillStyle = "#3a2a38";
+    ctx.fillStyle = "#b0a078";
     ctx.fillRect(s.x - 20, midY - 10, 40, 2);
     // emoji 图标
     ctx.font = "14px sans-serif";
@@ -346,7 +346,7 @@ export default function OfficeCanvas({ className }: OfficeCanvasProps) {
         const barH = 3;
         const barX = p.seatX - barW / 2;
         const barY = p.seatY + DESK_H / 2 + 4;
-        ctx.fillStyle = "#1a1a2a";
+        ctx.fillStyle = "#d8d0c0";
         ctx.fillRect(barX, barY, barW, barH);
         ctx.fillStyle = COLORS.ok;
         ctx.fillRect(barX, barY, (barW * p.taskProgress) / 100, barH);

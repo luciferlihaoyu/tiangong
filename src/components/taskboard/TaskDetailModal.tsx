@@ -61,6 +61,7 @@ export function TaskDetailModal({
   const [blockReason, setBlockReason] = useState("");
   const [showBlockInput, setShowBlockInput] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
+  const [supplement, setSupplement] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [actingAgentId, setActingAgentId] = useState<number | null>(null);
 
@@ -218,6 +219,18 @@ export function TaskDetailModal({
       utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
       setActionError(null);
       toast.success(`任务已重新排队（第 ${data.retryCount}/${data.maxRetries} 次重试）`);
+    },
+    onError: (err) => setActionError(err.message),
+  });
+
+  // 追加评论：任何状态可用——任务 done 后其他助手仍可补充更准确/详细的内容
+  const commentMutation = trpc.taskboard.comment.useMutation({
+    onSuccess: () => {
+      utils.taskboard.list.invalidate();
+      utils.taskboard.get.invalidate({ id: task?.id ?? 0 });
+      setActionError(null);
+      setSupplement("");
+      toast.success("补充已追加到任务线程");
     },
     onError: (err) => setActionError(err.message),
   });
@@ -1003,6 +1016,51 @@ export function TaskDetailModal({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* 追加补充/评论：任何状态可用——任务完成后其他助手仍可补充更准确详细的内容 */}
+            {task && (
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageSquare size={12} style={{ color: "var(--text-muted)" }} />
+                  <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    追加补充{task.boardStatus === "done" ? "（任务已完成，仍可补充更准确/详细内容）" : ""}
+                  </span>
+                  <Separator className="flex-1" style={{ background: "var(--border-default)" }} />
+                </div>
+                <textarea
+                  value={supplement}
+                  onChange={(e) => setSupplement(e.target.value)}
+                  placeholder="补充更准确的细节、修正、参考链接…（追加到任务线程，不改变任务状态）"
+                  rows={3}
+                  className="w-full px-3 py-2 rounded text-xs resize-y"
+                  style={{
+                    background: "var(--bg-card)",
+                    border: "1px solid var(--border-default)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={() => {
+                      const agentId = getEffectiveAgentId();
+                      if (!agentId) {
+                        setActionError("无可用 Agent 身份，无法评论");
+                        return;
+                      }
+                      commentMutation.mutate({ taskId: task.id, agentId, content: supplement.trim() });
+                    }}
+                    disabled={!supplement.trim() || commentMutation.isPending}
+                    className="px-3 py-1.5 rounded text-xs font-bold transition-all disabled:opacity-50"
+                    style={{
+                      background: supplement.trim() ? "var(--accent-cyan)" : "rgba(255,255,255,0.05)",
+                      color: supplement.trim() ? "#fff" : "var(--text-muted)",
+                    }}
+                  >
+                    {commentMutation.isPending ? "提交中…" : "追加补充"}
+                  </button>
                 </div>
               </div>
             )}

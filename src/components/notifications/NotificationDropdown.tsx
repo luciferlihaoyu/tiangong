@@ -29,12 +29,22 @@ export function NotificationDropdown({ children }: { children: ReactNode }) {
         align="end"
         sideOffset={8}
         className="w-[360px] max-w-[calc(100vw-2rem)] p-0 overflow-hidden"
-        style={{
-          background: "rgba(8, 8, 12, 0.97)",
-          border: "1px solid var(--border-default)",
-          backdropFilter: "blur(20px) saturate(150%)",
-          color: "var(--text-primary)",
-        }}
+        style={
+          {
+            background: "rgba(255, 255, 255, 0.97)",
+            border: "1px solid rgba(15, 23, 42, 0.12)",
+            backdropFilter: "blur(20px) saturate(150%)",
+            color: "#1a1d29",
+            // 浅色作用域：弹窗内所有 var(--text-*) 等变量重定义为浅色版，
+            // 内部 NotificationItem 等组件无需逐个改色
+            "--text-primary": "#1a1d29",
+            "--text-secondary": "#4a4d5a",
+            "--text-muted": "#707080",
+            "--border-default": "rgba(15, 23, 42, 0.12)",
+            "--accent-cyan": "#0e7490",
+            "--bg-card": "#f5f5f2",
+          } as React.CSSProperties
+        }
       >
         {/* 标题栏 */}
         <div

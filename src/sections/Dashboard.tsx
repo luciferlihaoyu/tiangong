@@ -594,12 +594,38 @@ function MessagePanel({
   wsConnected: boolean;
 }) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  // 持久化选中的 agentId 到 localStorage —— 修复"刷新就没了"的体感
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem("tg_message_selected_agent");
+      return saved ? Number(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [sendContent, setSendContent] = useState("");
   const [conversationMsgs, setConversationMsgs] = useState<DisplayMessage[]>([]);
   const [loadingConv, setLoadingConv] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 当 selectedAgentId 变化时同步 localStorage
+  useEffect(() => {
+    try {
+      if (selectedAgentId === null) localStorage.removeItem("tg_message_selected_agent");
+      else localStorage.setItem("tg_message_selected_agent", String(selectedAgentId));
+    } catch { /* ignore */ }
+  }, [selectedAgentId]);
+
+  // 自动选中：如果 localStorage 里没有、或存的 id 不在 agents 里（已被删除），自动选第一个
+  useEffect(() => {
+    if (agents.length === 0) return;
+    if (selectedAgentId === null || !agents.some((a) => a.id === selectedAgentId)) {
+      // 优先选第一个在线的，否则第一个
+      const onlineFirst = agents.find((a) => a.status === "online" || a.status === "busy") ?? agents[0];
+      setSelectedAgentId(onlineFirst.id);
+    }
+  }, [agents, selectedAgentId]);
 
   const agentMap = useMemo(() => {
     const m = new Map<number, MockAgent>();
@@ -748,7 +774,15 @@ function MessagePanel({
   return (
     <div className="glass-panel p-4 sci-border flex flex-col" style={{ minHeight: "400px" }}>
       <div className="flex items-center justify-between mb-3">
-        <div className="section-label">消息面板 · MESSAGES</div>
+        <div className="flex items-center gap-2">
+          <div className="section-label">消息面板 · MESSAGES</div>
+          <span
+            className="text-[10px] font-mono"
+            style={{ color: "var(--text-muted)" }}
+            title="这是 Agent 之间的消息通道：消息发给 Agent 后，Agent 会通过 WebSocket 收到通知。Agent 不会自动回复（不是 AI 对话），需要 Agent 主动拉取或在你的下一轮交互中响应。要 AI 对话请用「会话」页（/sessions）。">
+            💬 Agent 消息（非 AI 对话）
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <span
             className="w-2 h-2 rounded-full"

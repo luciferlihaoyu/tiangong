@@ -757,8 +757,12 @@ function MessagePanel({
       const data = await res.json();
       if (data?.result?.data?.success || data?.success) {
         // Add optimistic message
+        // 用服务端返回的真实 messageId（而非 Date.now() 假 id）——
+        // WS 随后推来的同一条消息 id 相同，去重逻辑生效；
+        // 否则假 id + 真 id 两条并存，下次 fetch 假消息消失，体感"消息没保存/一直刷新"
+        const realId = data?.result?.data?.messageId ?? data?.messageId ?? Date.now();
         const newMsg: DisplayMessage = {
-          id: Date.now(),
+          id: realId,
           fromAgent: myId,
           toAgent: selectedAgentId,
           content: sendContent.trim(),

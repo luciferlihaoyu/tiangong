@@ -669,6 +669,9 @@ function MessagePanel({
       .catch(() => {});
   }, []);
 
+  // "我"的身份：列表第一个 agent（与发送/拉取对话共用同一值）
+  const myId = agents[0]?.id;
+
   // Listen for new messages from WebSocket
   useEffect(() => {
     if (!lastWsMessage) return;
@@ -701,21 +704,17 @@ function MessagePanel({
         )
       );
     }
-  }, [lastWsMessage, selectedAgentId, agents, assistantAgentId]);
+  }, [lastWsMessage, selectedAgentId, myId, assistantAgentId]);
 
   // Fetch conversation when selecting an agent
+  // 依赖收窄到 myId 值（而非整个 agents 数组）——否则 WS 每次状态推送都生成
+  // 新数组引用，导致对话反复重 fetch、loading 闪烁（"对话框一直刷新"根因）
   useEffect(() => {
-    if (selectedAgentId === null) {
-      setConversationMsgs([]);
+    if (selectedAgentId === null || !myId) {
+      if (selectedAgentId === null) setConversationMsgs([]);
       return;
     }
     setLoadingConv(true);
-    // Use the first agent as "me" (just pick the first agent in the list)
-    const myId = agents[0]?.id;
-    if (!myId) {
-      setLoadingConv(false);
-      return;
-    }
     fetch(
       `/api/trpc/message.conversation?input=${encodeURIComponent(JSON.stringify({ from: myId, to: selectedAgentId }))}`
     )
@@ -726,7 +725,7 @@ function MessagePanel({
       })
       .catch(() => {})
       .finally(() => setLoadingConv(false));
-  }, [selectedAgentId, agents]);
+  }, [selectedAgentId, myId]);
 
   // Auto-scroll to bottom
   useEffect(() => {

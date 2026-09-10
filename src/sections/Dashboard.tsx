@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
+import { toast } from "sonner";
+import { trpc } from "@/providers/trpc";
 import { useDataSource, type MockAgent, type MockOrg } from "@/hooks/useDataSource";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useAuth } from "@/hooks/useAuth";
@@ -607,7 +609,27 @@ function MessagePanel({
   const [conversationMsgs, setConversationMsgs] = useState<DisplayMessage[]>([]);
   const [loadingConv, setLoadingConv] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [aiThinking, setAiThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 「天宫助手」agent 的数字 id（通过 agentId 字符串 key 识别）
+  const assistantAgentId = useMemo(
+    () => agents.find((a) => a.agentId === "tianshu-assistant")?.id ?? null,
+    [agents]
+  );
+  const isAssistantConversation = selectedAgentId !== null && selectedAgentId === assistantAgentId;
+
+  // 助手模型：当前值 + 可用列表（天枢）
+  const utils = trpc.useUtils();
+  const assistantModelQuery = trpc.assistant.getModel.useQuery(undefined, { retry: 1 });
+  const tianshuModelsQuery = trpc.tianshu.listModels.useQuery(undefined, { retry: 1, staleTime: 60000 });
+  const setModelMutation = trpc.assistant.setModel.useMutation({
+    onSuccess: () => {
+      utils.assistant.getModel.invalidate();
+      toast.success("助手模型已切换");
+    },
+    onError: (err) => toast.error(`切换失败：${err.message}`),
+  });
 
   // 当 selectedAgentId 变化时同步 localStorage
   useEffect(() => {
@@ -657,6 +679,20 @@ function MessagePanel({
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg].slice(-100);
       });
+      // 关键：属于当前对话的消息（含助手回复）实时进对话区，不再等刷新
+      const myId = agents[0]?.id;
+      if (selectedAgentId !== null && myId) {
+        const inConversation =
+          (msg.fromAgent === myId && msg.toAgent === selectedAgentId) ||
+          (msg.fromAgent === selectedAgentId && msg.toAgent === myId);
+        if (inConversation) {
+          setConversationMsgs((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+        }
+      }
+      // 助手回复到达 → 清「AI 思考中」
+      if (assistantAgentId !== null && msg.fromAgent === assistantAgentId) {
+        setAiThinking(false);
+      }
     }
     if (lastWsMessage.type === "message_read" && lastWsMessage.messageId) {
       setMessages((prev) =>
@@ -665,7 +701,7 @@ function MessagePanel({
         )
       );
     }
-  }, [lastWsMessage]);
+  }, [lastWsMessage, selectedAgentId, agents, assistantAgentId]);
 
   // Fetch conversation when selecting an agent
   useEffect(() => {
@@ -695,7 +731,7 @@ function MessagePanel({
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversationMsgs]);
+  }, [conversationMsgs, aiThinking]);
 
   const handleSend = useCallback(async () => {
     if (!sendContent.trim() || selectedAgentId === null) return;
@@ -734,6 +770,10 @@ function MessagePanel({
         setConversationMsgs((prev) => [...prev, newMsg]);
         setSendContent("");
         setSendError(null);
+        // 发给天宫助手 → 显示「AI 思考中」（回复经 WS 到达后自动清除）
+        if (selectedAgentId === assistantAgentId) {
+          setAiThinking(true);
+        }
       } else {
         // tRPC 错误响应：{error:{message,...}}；把失败显式呈现，不再无声吞掉
         const reason = data?.error?.message || data?.message || `HTTP ${res.status}`;
@@ -743,7 +783,7 @@ function MessagePanel({
       console.warn("Failed to send message:", err);
       setSendError("发送失败：网络错误");
     }
-  }, [sendContent, selectedAgentId, agents]);
+  }, [sendContent, selectedAgentId, agents, assistantAgentId]);
 
   const statusLabel = (s: string) => {
     switch (s) {
@@ -818,12 +858,16 @@ function MessagePanel({
                 className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                 style={{
                   background:
-                    agent.status === "online" || agent.status === "busy"
+                    agent.agentId === "tianshu-assistant" ||
+                    agent.status === "online" ||
+                    agent.status === "busy"
                       ? "var(--success)"
                       : "var(--text-muted)",
                 }}
               />
-              <span className="truncate">{agent.name}</span>
+              <span className="truncate">
+                {agent.agentId === "tianshu-assistant" ? `🤖 ${agent.name}` : agent.name}
+              </span>
             </button>
           ))}
         </div>
@@ -853,6 +897,25 @@ function MessagePanel({
                 >
                   {agentMap.get(selectedAgentId)?.agentId || ""}
                 </span>
+                {/* 助手会话：模型切换（从天宫模型列表/天枢拉） */}
+                {isAssistantConversation && (
+                  <select
+                    className="ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded"
+                    style={{
+                      background: "var(--bg-card)",
+                      border: "1px solid var(--border-default)",
+                      color: "var(--accent-cyan)",
+                    }}
+                    value={assistantModelQuery.data?.model ?? "MiniMax-M3"}
+                    onChange={(e) => setModelMutation.mutate({ model: e.target.value })}
+                    disabled={setModelMutation.isPending}
+                    title="AI 助手使用的模型（立即生效）"
+                  >
+                    {(tianshuModelsQuery.data?.models ?? ["MiniMax-M3"]).map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* Messages */}
@@ -868,6 +931,7 @@ function MessagePanel({
                 ) : (
                   conversationMsgs.map((msg) => {
                     const isMe = msg.fromAgent === agents[0]?.id;
+                    const isAssistant = assistantAgentId !== null && msg.fromAgent === assistantAgentId;
                     return (
                       <div
                         key={msg.id}
@@ -878,12 +942,21 @@ function MessagePanel({
                           style={{
                             background: isMe
                               ? "var(--accent-glow-red)"
-                              : "rgba(255,255,255,0.05)",
+                              : isAssistant
+                                ? "rgba(167,139,250,0.10)"
+                                : "rgba(255,255,255,0.05)",
                             border: isMe
                               ? "1px solid rgba(194,58,48,0.2)"
-                              : "1px solid var(--border-default)",
+                              : isAssistant
+                                ? "1px solid rgba(167,139,250,0.4)"
+                                : "1px solid var(--border-default)",
                           }}
                         >
+                          {isAssistant && (
+                            <div className="text-[9px] font-mono mb-0.5" style={{ color: "#a78bfa" }}>
+                              🤖 天宫助手{assistantModelQuery.data?.model ? ` · ${assistantModelQuery.data.model}` : ""}
+                            </div>
+                          )}
                           <div style={{ color: "var(--text-primary)", wordBreak: "break-word" }}>
                             {msg.content}
                           </div>
@@ -904,6 +977,22 @@ function MessagePanel({
                       </div>
                     );
                   })
+                )}
+                {/* AI 思考中气泡 */}
+                {aiThinking && isAssistantConversation && (
+                  <div className="flex justify-start">
+                    <div
+                      className="px-3 py-2 rounded-lg text-xs"
+                      style={{
+                        background: "rgba(167,139,250,0.10)",
+                        border: "1px solid rgba(167,139,250,0.4)",
+                      }}
+                    >
+                      <span className="text-[10px] font-mono animate-pulse" style={{ color: "#a78bfa" }}>
+                        🤖 天宫助手思考中…
+                      </span>
+                    </div>
+                  </div>
                 )}
                 <div ref={messagesEndRef} />
               </div>

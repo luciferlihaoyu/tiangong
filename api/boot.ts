@@ -22,6 +22,7 @@ import { sweeperScheduler } from "./lib/sweepers/scheduler";
 import { taskOutboxDispatcher } from "./lib/task-outbox";
 import { ArtifactVolume } from "./lib/artifacts/artifact-volume";
 import { agents, messages } from "@db/schema";
+import { ensureAssistantAgent } from "./lib/ai-assistant";
 import { eq, and, asc, isNotNull, ne } from "drizzle-orm";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
@@ -506,6 +507,14 @@ try {
   console.log(`[Boot] Loaded ${_globalApiKeys.size} MCP tokens from DB`);
 } catch (e: unknown) {
   console.warn("[Boot] MCP token load from DB failed:", e instanceof Error ? e.message : String(e));
+}
+
+// 预创建「天宫助手」agent：保证消息面板左侧列表里可见（否则首次对话前用户选不到它）
+try {
+  const assistantId = await ensureAssistantAgent();
+  console.log(`[Boot] 天宫助手 ready (id=${assistantId})`);
+} catch (e: unknown) {
+  console.warn("[Boot] 天宫助手预创建失败（首次发消息时会重试）:", e instanceof Error ? e.message : String(e));
 }
 
 // P5: Start Task Runner

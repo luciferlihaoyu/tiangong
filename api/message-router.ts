@@ -161,6 +161,18 @@ export const messageRouter = createRouter({
           : defaultMessagePayload(input, insertId),
       });
 
+      // ── AI 助手自动回复：toAgent 是「天宫助手」时异步触发 LLM ──
+      // fire-and-forget，不阻塞 send 主流程；失败由 worker 内部兜底
+      if (insertId) {
+        void import("./lib/ai-assistant")
+          .then(async (m) => {
+            if (await m.isAssistantAgent(input.toAgent)) {
+              m.triggerAssistantReply(input.fromAgent, insertId);
+            }
+          })
+          .catch((e) => console.warn("[assistant] trigger check failed:", e));
+      }
+
       return {
         success: true,
         messageId: insertId,

@@ -164,6 +164,31 @@ export function createMcpApp(): Hono {
         }
       };
 
+      // 自愈（#MCP-session-failover）：dsh 客户端重启或天宫部署后，
+      // dsh 持有的旧 sessionId 在 sessions 表里查不到 → 落到 create-new 分支。
+      // 但新建 transport 默认未 initialize，SDK 会在 handleRequest 早期拒
+      // 绝（"Server not initialized"）。同时 validateSession 还会校验
+      // req.mcp-session-id 必须 === transport.sessionId，否则 404。
+      //
+      // 修法：仅对非 initialize 请求，将 transport 标记为已初始化且让
+      // sessionId 等于 client 传来的 sessionId（让 validateSession 通过）。
+      // 客户端不读 mcp-session-id 响应头也无所谓：下次仍走 create-new 路径，
+      // 每次都被自愈，永不挂死。
+      // 仅对非 initialize 请求安全（initialize 路径有"Server already
+      // initialized"保护，hack 会拒绝；本就被新 transport 接受，少见）。
+      let parsedBody: JsonObject = {};
+      try {
+        const cloned = c.req.raw.clone();
+        const parsed: unknown = await cloned.json();
+        if (isJsonObject(parsed)) parsedBody = parsed;
+      } catch { /* ignore */ }
+      const reqMethod = getStringProperty(parsedBody, "method");
+      if (reqMethod !== "initialize") {
+        const t = transport as unknown as { _initialized: boolean; sessionId: string | undefined; sessionIdGenerator?: () => string };
+        t.sessionId = incomingSessionId || t.sessionIdGenerator?.();
+        t._initialized = true;
+      }
+
       isNewSession = true;
     }
 

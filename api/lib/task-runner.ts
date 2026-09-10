@@ -45,6 +45,8 @@ import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel } from "../tianshu-router";
+import { ASSISTANT_AGENT_KEY, ASSISTANT_TASK_SYSTEM_PROMPT, getAssistantModel } from "./ai-assistant";
+import { triggerAutoReview } from "./auto-approve";
 import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
 import { microsToCents } from "./external-usage";
 
@@ -265,6 +267,7 @@ class TaskRunner {
           const gate = checkExecutionGate(task);
           if (gate.status === "blocked") {
             await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+            triggerAutoReview(task.id);
             console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
             continue;
           }
@@ -330,6 +333,7 @@ class TaskRunner {
         const gate = checkExecutionGate(task);
         if (gate.status === "blocked") {
           await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+          triggerAutoReview(task.id);
           console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
           continue;
         }
@@ -1083,8 +1087,11 @@ class TaskRunner {
       };
     }
 
-    // 模型解析优先级：智能体自带模型 > 设置页选择的默认模型 > TIANSHU_MODEL 环境变量
-    const model = agent?.model || (await resolveTianshuDefaultModel()) || "";
+    // 模型解析优先级：天宫助手（动态读 assistant 设置）> 智能体自带模型 > 设置页默认 > TIANSHU_MODEL 环境变量
+    const isAssistantTask = agent?.agentId === ASSISTANT_AGENT_KEY;
+    const model = isAssistantTask
+      ? await getAssistantModel()
+      : agent?.model || (await resolveTianshuDefaultModel()) || "";
     if (!model) {
       return {
         output: "",
@@ -1118,7 +1125,12 @@ class TaskRunner {
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: "user", content: prompt }],
+          messages: isAssistantTask
+            ? [
+                { role: "system", content: ASSISTANT_TASK_SYSTEM_PROMPT },
+                { role: "user", content: prompt },
+              ]
+            : [{ role: "user", content: prompt }],
           stream: false,
         }),
         signal: controller.signal,

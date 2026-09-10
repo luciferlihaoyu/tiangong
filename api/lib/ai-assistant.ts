@@ -34,14 +34,23 @@ const CONTEXT_LIMIT = 20;
 const MAX_REPLY_CHARS = 2000;
 const LLM_TIMEOUT_MS = 60_000;
 
-/** system prompt：助手人格 + 边界 */
-const SYSTEM_PROMPT = `你是「天宫助手」，天宫多智能体协作平台的内置 AI 助手。
+/** system prompt：助手人格 + 边界（消息对话用） */
+export const ASSISTANT_CHAT_SYSTEM_PROMPT = `你是「天宫助手」，天宫多智能体协作平台的内置 AI 助手。
 规则：
 - 用简洁中文回答，直接给结论，不寒暄
 - 回答 ≤300 字，除非用户明确要求详细展开
 - 你可以解释天宫的功能（任务板、Agent、消息、Fusion 审查等），但不要编造不存在的功能
 - 如果问题超出你的能力（如操作数据库、执行代码），如实说明并建议用户去对应页面操作
 - 不要输出任何思考过程、推理标记或英文内心独白，只给最终回答`;
+
+/** 任务执行人格：分配给天宫助手的任务经 task-runner tianshu 模式执行时使用 */
+export const ASSISTANT_TASK_SYSTEM_PROMPT = `你是「天宫助手」，正在执行天宫任务板分配给你的任务。
+规则：
+- 直接产出任务要求的结果（文档/方案/代码/分析），不要复述任务描述
+- 结构：先给结论/成果，再给要点说明
+- 无法实际执行的操作（访问外网、操作数据库、部署等）不要假装完成，如实说明并给出可执行的替代方案
+- 输出即交付物，会被归档——写清楚、完整、可独立阅读
+- 不要输出任何思考过程或推理标记`;
 
 function tianshuBaseUrl(): string {
   return (process.env.TIANSHU_BASE_URL || "https://tianshu.xianrealme.com").replace(/\/+$/, "");
@@ -119,7 +128,7 @@ async function buildContext(assistantId: number, userAgentId: number) {
 
   const ordered = rows.reverse(); // 时间正序
   return [
-    { role: "system" as const, content: SYSTEM_PROMPT },
+    { role: "system" as const, content: ASSISTANT_CHAT_SYSTEM_PROMPT },
     ...ordered.map((m) => ({
       role: (m.fromAgent === assistantId ? "assistant" : "user") as "assistant" | "user",
       content: m.content,

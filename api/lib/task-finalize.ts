@@ -18,7 +18,7 @@
 
 import { eq } from "drizzle-orm";
 import { tasks } from "@db/schema";
-import { syncTaskMemoryToXuanji, type CompletedTaskView, type Db } from "./xuanji-sync";
+import { syncTaskMemoryToXuanji, syncTaskLessonToXuanji, type CompletedTaskView, type Db } from "./xuanji-sync";
 import { syncTaskArtifactsToAlist } from "./alist-sync";
 import { autoSummarizeCollab } from "./task-validator";
 
@@ -53,6 +53,35 @@ export async function finalizeCompletedTask(db: Db, task: FinalizeTaskView): Pro
     await maybeSummarizeParent(db, task);
   } catch (error) {
     // 汇总失败绝不影响完成路径：任务本身已完成归档，汇总可由下次兄弟任务完成或人工重试补齐
+    console.warn(`[task-finalize] parent collab summary failed for task ${task.taskId}: ${describeError(error)}`);
+  }
+}
+
+/**
+ * 失败任务归档（与完成路径对称）：把失败教训写入璇玑 + 协作汇总。
+ * AList 失败时无产物可传，跳过。
+ * 调用点：task-runner 五个 failed 路径（取消/超时/执行失败/panicked/internal）。
+ */
+export async function finalizeFailedTask(db: Db, task: FinalizeTaskView): Promise<void> {
+  // 1) 璇玑记忆：失败教训入库（lesson kind，与成功记录走同一 writeTaskMemory
+  //    但用独立 type=xuanji_lesson 幂等键，不污染成功归档）
+  try {
+    await syncTaskLessonToXuanji(db, task);
+  } catch (error) {
+    console.warn(`[task-finalize] xuanji lesson sync failed for task ${task.taskId}: ${describeError(error)}`);
+  }
+
+  // 2) AList：失败任务通常无产物，但若用户在 taskArtifacts 留了"失败现场"附件仍归档
+  try {
+    await syncTaskArtifactsToAlist(db, task);
+  } catch (error) {
+    console.warn(`[task-finalize] alist artifact sync failed for task ${task.taskId}: ${describeError(error)}`);
+  }
+
+  // 3) 协作汇总（与完成路径同语义）
+  try {
+    await maybeSummarizeParent(db, task);
+  } catch (error) {
     console.warn(`[task-finalize] parent collab summary failed for task ${task.taskId}: ${describeError(error)}`);
   }
 }

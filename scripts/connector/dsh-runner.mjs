@@ -32,7 +32,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 
 const KEY = process.env.DSH_TIANGONG_KEY || process.env.TIANGONG_MCP_KEY || "";
 const BASE = (process.env.TIANGONG_HTTP_BASE || "https://tiangong.xianrealme.com").replace(/\/+$/, "");
@@ -41,6 +41,11 @@ const POLL_MS = Number(process.env.DSH_RUNNER_POLL_MS || 30_000);
 const TIMEOUT_MS = Number(process.env.DSH_RUNNER_TIMEOUT_MS || 1_800_000);
 const WORKDIR = process.env.DSH_RUNNER_WORKDIR || "/data/dsh/天宫";
 const MAX_OUTPUT_CHARS = 60_000;
+
+// 生图插件 overlay（2026-09-10 生图能力建设）：存在即挂载，给每个 headless 任务
+// 注入 generate_image 工具（走天枢网关，密钥在插件进程内自取，不进任务文本）。
+// 文件缺失/被移除时自动跳过，不影响任务主链路。
+const IMAGE_GEN_PATCH = process.env.DSH_IMAGE_GEN_PATCH || "/data/dsh/天宫/dsh-plugins/image-gen.patch.yml";
 
 if (!KEY) {
   console.error("[dsh-runner] ❌ 缺少 DSH_TIANGONG_KEY 环境变量");
@@ -133,7 +138,10 @@ async function fetchTaskPrompt(dbId) {
 /** headless 执行：一个任务一个 dsh 子进程，答案即 stdout。 */
 function runHeadless(prompt) {
   return new Promise((resolve) => {
-    const child = spawn("dsh", ["--profile", "headless", prompt], {
+    const args = ["--profile", "headless"];
+    if (existsSync(IMAGE_GEN_PATCH)) args.push("--patch", IMAGE_GEN_PATCH);
+    args.push(prompt);
+    const child = spawn("dsh", args, {
       cwd: WORKDIR,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],

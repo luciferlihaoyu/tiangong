@@ -2,13 +2,11 @@
  * AI 助手路由：模型查看/切换、消息/任务系统接口
  * - getModel / setModel：助手模型（admin）
  * - getAutoApprove / setAutoApprove：自动审批状态/开关（admin）
- * - setAutoApproveBySecret / archiveFailedTasksBySecret：用 X-Admin-Token 旁路
- *   鉴权的运维端点（不需登录 JWT），给 runner / 运维脚本用。secret
- *   默认 = TIANSHU_API_KEY（容器内可读）。
+ * - archiveFailedTasks：批量归档失败任务（admin）
  */
 import { z } from "zod";
-import { and, eq, isNotNull, ne } from "drizzle-orm";
-import { createRouter, publicQuery, publicProcedure, adminQuery } from "./middleware";
+import { and, eq, ne } from "drizzle-orm";
+import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getAssistantModel, ASSISTANT_MODEL_KEY, ASSISTANT_NAME } from "./lib/ai-assistant";
 import { getSetting, setSetting } from "./lib/settings";
 import { getDb } from "./queries/connection";
@@ -18,18 +16,45 @@ import { finalizeFailedTask } from "./lib/task-finalize";
 const AUTO_APPROVE_ENABLED_KEY = "auto_approve_enabled";
 const AUTO_APPROVE_LIMIT_KEY = "auto_approve_daily_limit";
 
-/** X-Admin-Token 共享秘钥：默认 TIANSHU_API_KEY（容器内可读到）。
- *  拿到这个 key 的人已能调 LLM，所以"再开放 admin 运维"不显著扩大攻击面。
- *  生产环境可显式设 TIANGONG_ADMIN_TOKEN 覆盖。 */
-function resolveAdminSecret(): string {
-  return (process.env.TIANGONG_ADMIN_TOKEN || process.env.TIANSHU_API_KEY || "").trim();
-}
-
-function checkAdminSecret(secret: string | null | undefined): boolean {
-  const expected = resolveAdminSecret();
-  if (!expected || !secret) return false;
-  // 长度匹配避免极短秘钥 false-positive；严格相等（短 secret 实际不会部署）
-  return secret.length === expected.length && secret === expected;
+/** 批量归档 failed 任务的实现：写璇玑 lesson + AList + 协作汇总（幂等由各 sync 自持） */
+async function runArchiveFailedTasks(
+  opts: { dryRun: boolean; limit: number; ids?: number[] }
+): Promise<{
+  dryRun: boolean;
+  candidateCount?: number;
+  ids?: number[];
+  archived?: number;
+  total?: number;
+  errors?: Array<{ id: number; err: string }>;
+}> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.status, "failed"),
+        ne(tasks.lifecycleStatus, "cancelled"),
+        // 看板已放弃（cancelled）的任务属于用户主动废弃，不归档
+        ne(tasks.boardStatus, "cancelled")
+      )
+    )
+    .limit(opts.limit);
+  const filtered = opts.ids && opts.ids.length > 0 ? rows.filter((r) => opts.ids!.includes(r.id)) : rows;
+  if (opts.dryRun) {
+    return { dryRun: true, candidateCount: filtered.length, ids: filtered.map((r) => r.id) };
+  }
+  let archived = 0;
+  const errors: Array<{ id: number; err: string }> = [];
+  for (const row of filtered) {
+    try {
+      await finalizeFailedTask(db, row);
+      archived++;
+    } catch (e) {
+      errors.push({ id: row.id, err: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { dryRun: false, archived, total: filtered.length, errors };
 }
 
 export const assistantRouter = createRouter({
@@ -72,62 +97,12 @@ export const assistantRouter = createRouter({
       return { success: true, enabled: input.enabled };
     }),
 
-  /**
-   * X-Admin-Token 旁路：开关自动审批（不需登录 JWT，给 dsh runner / 运维脚本用）
-   * header: X-Admin-Token: <TIANGSHU_API_KEY>
-   * 复用 setAutoApprove 的输入 schema。
-   */
-  setAutoApproveBySecret: publicProcedure
+  /** 批量归档失败任务（UI 用，admin 登录） */
+  archiveFailedTasks: adminQuery
     .input(z.object({
-      enabled: z.boolean(),
-      dailyLimit: z.number().int().min(1).max(100).optional(),
-      secret: z.string().min(1),
-    }))
-    .mutation(async ({ input }) => {
-      if (!checkAdminSecret(input.secret)) {
-        throw new Error("Unauthorized: X-Admin-Token mismatch");
-      }
-      await setSetting(AUTO_APPROVE_ENABLED_KEY, input.enabled ? "1" : "0", "auto_approve");
-      if (input.dailyLimit !== undefined) {
-        await setSetting(AUTO_APPROVE_LIMIT_KEY, String(input.dailyLimit), "auto_approve");
-      }
-      return { success: true, enabled: input.enabled };
-    }),
-
-  /**
-   * X-Admin-Token 旁路：批量归档历史 failed 任务（同步：璇玑 lesson + AList）
-   * 默认只处理 status=failed lifecycleStatus=failed 的任务（boardStatus 不限，
-   * 覆盖 triage/running/done/blocked 等）。带 dryRun 预演。
-   */
-  archiveFailedTasksBySecret: publicProcedure
-    .input(z.object({
-      secret: z.string().min(1),
       dryRun: z.boolean().optional().default(false),
-      limit: z.number().int().min(1).max(500).optional().default(50),
+      limit: z.number().int().min(1).max(500).optional().default(100),
+      ids: z.array(z.number().int()).optional(),
     }))
-    .mutation(async ({ input }) => {
-      if (!checkAdminSecret(input.secret)) {
-        throw new Error("Unauthorized: X-Admin-Token mismatch");
-      }
-      const db = getDb();
-      const rows = await db
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.status, "failed"), ne(tasks.lifecycleStatus, "cancelled")))
-        .limit(input.limit);
-      if (input.dryRun) {
-        return { dryRun: true, candidateCount: rows.length, ids: rows.map((r) => r.id) };
-      }
-      let archived = 0;
-      const errors: Array<{ id: number; err: string }> = [];
-      for (const row of rows) {
-        try {
-          await finalizeFailedTask(db, row);
-          archived++;
-        } catch (e) {
-          errors.push({ id: row.id, err: e instanceof Error ? e.message : String(e) });
-        }
-      }
-      return { dryRun: false, archived, total: rows.length, errors };
-    }),
+    .mutation(async ({ input }) => runArchiveFailedTasks(input)),
 });

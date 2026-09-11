@@ -7,17 +7,19 @@
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
-import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield, BarChart3 } from "lucide-react";
+import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield, BarChart3, Bot } from "lucide-react";
 import { toast } from "sonner";
 import { PricingSection } from "./models/PricingSection";
 import { GuardSection } from "./models/GuardSection";
+import { AssistantSection } from "./models/AssistantSection";
 
-type Tab = "models" | "pricing" | "guard";
+type Tab = "models" | "pricing" | "guard" | "assistant";
 
 const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
   { key: "models", label: "模型", icon: <Cpu size={13} /> },
   { key: "pricing", label: "定价", icon: <DollarSign size={13} /> },
   { key: "guard", label: "熔断", icon: <Shield size={13} /> },
+  { key: "assistant", label: "助手", icon: <Bot size={13} /> },
 ];
 
 export default function ModelsPanel() {
@@ -333,6 +335,7 @@ export default function ModelsPanel() {
         {tab === "pricing" && <PricingSection />}
 
         {tab === "guard" && <GuardSection />}
+        {tab === "assistant" && <AssistantSection />}
       </div>
     </div>
   );

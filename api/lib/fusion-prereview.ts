@@ -84,10 +84,11 @@ async function pickModels(n: number): Promise<string[]> {
     const data = (await resp.json()) as { data?: Array<{ id?: string }> };
     const ids = (data.data ?? []).map((m) => (m.id || "").trim()).filter(Boolean);
     const chatModels = [...new Set(ids)].filter((id) => !NON_CHAT_MODEL.test(id));
-    // 优先已知可用的助手模型，其余保持原顺序
+    // 助手模型专职 Judge；其他 chat 模型够 3 个时审查者全部避开 Judge 模型（多样性）
     const assistant = await getAssistantModel();
-    const ordered = assistant ? [assistant, ...chatModels.filter((m) => m !== assistant)] : chatModels;
-    return ordered.slice(0, n);
+    const others = chatModels.filter((m) => m !== assistant);
+    const reviewers = others.length >= n ? others.slice(0, n) : [assistant, ...others].slice(0, n);
+    return reviewers;
   } catch {
     return [];
   }
@@ -197,7 +198,13 @@ async function judgeReviews(reviews: ModelReview[], judgeModel: string): Promise
   };
 }
 
+/** 进程内去重：LLM 一轮要 2-4 分钟，期间 tick 每 30s 会重复触发，
+ *  DB 幂等标记要等第一条消息落库才生效，拦不住并发窗口 */
+const inFlight = new Set<number>();
+
 export function triggerFusionPreReview(taskId: number, riskTypes: readonly string[]): void {
+  if (inFlight.has(taskId)) return; // 并发窗口去重
+  inFlight.add(taskId);
   setImmediate(async () => {
     const tag = `[fusion-prereview] task=${taskId}`;
     try {
@@ -220,7 +227,10 @@ export function triggerFusionPreReview(taskId: number, riskTypes: readonly strin
         .from(taskMessages)
         .where(eq(taskMessages.taskId, taskId));
       if (existing.some((m) => {
-        try { return JSON.parse(m.metadata || "{}")?.action === "fusion_prereview"; } catch { return false; }
+        try {
+          const md = typeof m.metadata === "string" ? JSON.parse(m.metadata || "{}") : m.metadata;
+          return md?.action === "fusion_prereview";
+        } catch { return false; }
       })) {
         console.log(`${tag} already prereviewed, skip`);
         return;
@@ -296,6 +306,8 @@ export function triggerFusionPreReview(taskId: number, riskTypes: readonly strin
     } catch (e) {
       // fail-safe：预审失败绝不影响任务停放状态，人工照常审批
       console.warn(`${tag} error (task stays parked):`, e instanceof Error ? e.message : e);
+    } finally {
+      inFlight.delete(taskId);
     }
   });
 }

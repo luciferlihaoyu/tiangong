@@ -265,6 +265,9 @@ class TaskRunner {
           .orderBy(desc(tasks.priority), asc(tasks.createdAt))
           .limit(CONFIG.autoDispatchBatch);
         for (const task of fresh) {
+          // 已停放待审批的任务直接跳过：parkTaskForApproval 不改 status/lifecycle，
+          // 不跳过的话每个 tick 都会重复停放 + 重复触发审查（预审实测中 30s 一次连发 6 轮）
+          if (task.boardStatus === "blocked") continue;
           const gate = checkExecutionGate(task);
           if (gate.status === "blocked") {
             await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });

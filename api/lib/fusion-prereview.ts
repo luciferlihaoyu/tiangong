@@ -66,7 +66,12 @@ function tianshuBaseUrl(): string {
   return (process.env.TIANSHU_BASE_URL || "https://tianshu.xianrealme.com").replace(/\/+$/, "");
 }
 
-/** 从天枢拉可用模型列表，去重取前 n 个 */
+/** 非 chat 模型特征：embedding/rerank/语音/图像等不能做 chat completion */
+const NON_CHAT_MODEL = /(embed|bge|rerank|whisper|tts|speech|asr|ocr|clip|dall|stable-?diff|sdxl|flux|midjourney|guard|moderation)/i;
+
+/** 从天枢拉可用模型列表，过滤非 chat 模型后去重取前 n 个。
+ *  天枢 /v1/models 返回 140+ 条目，前段混着 BAAI/bge-* 等 embedding 模型，
+ *  不过滤会全部调用失败（实证：预审首测 3 个全命中 embedding）。 */
 async function pickModels(n: number): Promise<string[]> {
   const apiKey = (process.env.TIANSHU_API_KEY || "").trim();
   if (!apiKey) return [];
@@ -78,7 +83,11 @@ async function pickModels(n: number): Promise<string[]> {
     if (!resp.ok) return [];
     const data = (await resp.json()) as { data?: Array<{ id?: string }> };
     const ids = (data.data ?? []).map((m) => (m.id || "").trim()).filter(Boolean);
-    return [...new Set(ids)].slice(0, n);
+    const chatModels = [...new Set(ids)].filter((id) => !NON_CHAT_MODEL.test(id));
+    // 优先已知可用的助手模型，其余保持原顺序
+    const assistant = await getAssistantModel();
+    const ordered = assistant ? [assistant, ...chatModels.filter((m) => m !== assistant)] : chatModels;
+    return ordered.slice(0, n);
   } catch {
     return [];
   }

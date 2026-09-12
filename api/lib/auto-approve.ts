@@ -31,7 +31,7 @@ const DAILY_LIMIT_KEY = "auto_approve_daily_limit";
 const DEFAULT_DAILY_LIMIT = 10;
 
 /** 红线：这些风险类型永不自动批准，必须人工 */
-const RED_LINE_RISKS = new Set([
+export const RED_LINE_RISKS = new Set([
   "github_merge",
   "github_release",
   "zeabur_deploy",

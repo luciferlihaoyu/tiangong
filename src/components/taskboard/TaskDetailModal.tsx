@@ -1011,9 +1011,13 @@ export function TaskDetailModal({
                           {fmtTime(msg.createdAt)}
                         </span>
                       </div>
-                      <div className="whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
-                        {msg.content || "—"}
-                      </div>
+                      {(msg.metadata as Record<string, unknown> | null)?.action === "fusion_prereview" ? (
+                        <FusionPreReviewContent metadata={msg.metadata as Record<string, unknown>} />
+                      ) : (
+                        <div className="whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
+                          {msg.content || "—"}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1154,5 +1158,108 @@ export function TaskDetailModal({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/* ── Fusion 预审结果卡片（红线任务的多模型审查，供人工审批参考）── */
+
+interface PreReviewModelReview {
+  model: string;
+  consensus: string[];
+  conflicts: string[];
+  risks: string[];
+  suggestions: string[];
+  confidence: number;
+  summary: string;
+}
+
+interface PreReviewJudge {
+  riskAssessment: string;
+  finalVerdict: "approve" | "modify" | "reject";
+  recommendedActions: string[];
+  confidence: number;
+  degraded: boolean;
+}
+
+function FusionPreReviewContent({ metadata }: { metadata: Record<string, unknown> }) {
+  const reviews = (metadata.reviews as PreReviewModelReview[] | undefined) ?? [];
+  const judge = metadata.judge as PreReviewJudge | undefined;
+  const models = (metadata.models as string[] | undefined) ?? reviews.map((r) => r.model);
+  const redLine = (metadata.redLineRisks as string[] | undefined) ?? [];
+
+  const verdictStyle =
+    judge?.finalVerdict === "approve"
+      ? { bg: "rgba(52,211,153,0.12)", color: "var(--success)", text: "🟢 倾向可执行" }
+      : judge?.finalVerdict === "reject"
+        ? { bg: "rgba(248,113,113,0.12)", color: "var(--accent-red)", text: "🔴 建议拒绝" }
+        : { bg: "rgba(201,168,76,0.14)", color: "var(--accent-gold)", text: "🟡 建议修改后执行" };
+
+  return (
+    <div className="rounded p-2.5" style={{ background: "rgba(14,116,144,0.05)", border: "1px solid rgba(14,116,144,0.25)" }}>
+      <div className="flex items-center justify-between flex-wrap gap-1.5 mb-2">
+        <span className="text-[10px] font-mono font-bold" style={{ color: "var(--accent-cyan)" }}>
+          🔍 Fusion 预审 · {models.length} 模型{judge?.degraded ? "（Judge 降级）" : ""}
+        </span>
+        {judge && (
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded"
+            style={{ background: verdictStyle.bg, color: verdictStyle.color }}>
+            {verdictStyle.text}{judge.confidence ? ` · 置信 ${(judge.confidence * 100).toFixed(0)}%` : ""}
+          </span>
+        )}
+      </div>
+
+      {redLine.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {redLine.map((r) => (
+            <span key={r} className="text-[9px] font-mono px-1.5 py-0.5 rounded"
+              style={{ background: "rgba(248,113,113,0.1)", color: "var(--accent-red)" }}>
+              红线 {r}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {judge?.riskAssessment && (
+        <div className="text-[11px] leading-relaxed mb-2" style={{ color: "var(--text-primary)" }}>
+          {judge.riskAssessment}
+        </div>
+      )}
+
+      {judge && judge.recommendedActions.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[9px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>建议动作</div>
+          <ul className="list-disc pl-4 text-[10px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+            {judge.recommendedActions.map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {reviews.length > 1 && (
+        <details className="mt-1">
+          <summary className="text-[9px] font-mono cursor-pointer" style={{ color: "var(--text-muted)" }}>
+            各模型独立意见（{reviews.length}）
+          </summary>
+          <div className="mt-1.5 space-y-1.5">
+            {reviews.map((r) => (
+              <div key={r.model} className="rounded p-1.5" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)" }}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[9px] font-mono font-bold" style={{ color: "var(--text-primary)" }}>{r.model}</span>
+                  <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    置信 {(r.confidence * 100).toFixed(0)}% · 风险 {r.risks.length}
+                  </span>
+                </div>
+                {r.summary && <div className="text-[10px] mb-0.5" style={{ color: "var(--text-secondary)" }}>{r.summary}</div>}
+                {r.risks.length > 0 && (
+                  <div className="text-[9px] leading-relaxed" style={{ color: "var(--accent-red)" }}>
+                    {r.risks.map((k, i) => <div key={i}>• {k}</div>)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
   );
 }

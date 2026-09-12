@@ -47,6 +47,7 @@ import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel } from "../tianshu-router";
 import { ASSISTANT_AGENT_KEY, ASSISTANT_TASK_SYSTEM_PROMPT, getAssistantModel } from "./ai-assistant";
 import { triggerAutoReview } from "./auto-approve";
+import { triggerFusionPreReview } from "./fusion-prereview";
 import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./model-pricing";
 import { microsToCents } from "./external-usage";
 
@@ -268,6 +269,7 @@ class TaskRunner {
           if (gate.status === "blocked") {
             await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
             triggerAutoReview(task.id);
+            triggerFusionPreReview(task.id, gate.riskTypes);
             console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
             continue;
           }
@@ -334,6 +336,7 @@ class TaskRunner {
         if (gate.status === "blocked") {
           await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
           triggerAutoReview(task.id);
+          triggerFusionPreReview(task.id, gate.riskTypes);
           console.log(`[TaskRunner] Task ${task.taskId} (id=${task.id}) parked for human approval (${gate.reason})`);
           continue;
         }

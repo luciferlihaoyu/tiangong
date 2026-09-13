@@ -448,10 +448,10 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
                   background: "linear-gradient(180deg, var(--accent-gold), rgba(255,200,50,0.1))",
                   opacity: 0.7,
                 }}
-                title={`${d.date}: ${fmtMicros(microsOf(d))}, ${fmtTokens(d.totalTokens)} tok, ${d.callCount} 次`}
+                title={`${d.date ?? "未知日期"}: ${fmtMicros(microsOf(d))}, ${fmtTokens(d.totalTokens)} tok, ${d.callCount} 次`}
               />
               <div className="text-[7px] mt-1 font-mono truncate w-full text-center" style={{ color: "var(--text-muted)" }}>
-                {d.date.slice(5)}
+                {d.date?.slice(5) ?? "—"}
               </div>
             </div>
           );

@@ -424,7 +424,7 @@ function DailyTrend({ byDay, loading, currency, displayMode }: { byDay: UsageByD
                     }}
                   />
                   <div className="text-[8px] mt-1 font-mono truncate w-full text-center" style={{ color: "var(--text-muted)" }}>
-                    {d.date.slice(5)}
+                    {d.date?.slice(5) ?? "—"}
                   </div>
                 </div>
               );

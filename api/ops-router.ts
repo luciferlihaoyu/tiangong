@@ -12,6 +12,7 @@ import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { agents, tasks, tokenUsage } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
+import { sqlDayOf } from "./lib/day-sql";
 
 export const opsRouter = createRouter({
   /**
@@ -166,7 +167,7 @@ export const opsRouter = createRouter({
       // 按天 + 模型聚合
       const rows = await db
         .select({
-          date: sql<string>`DATE(${tokenUsage.createdAt})`,
+          date: sqlDayOf(tokenUsage.createdAt),
           model: tokenUsage.model,
           totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
           callCount: sql<number>`COALESCE(SUM(${tokenUsage.callCount}), 0)`,
@@ -175,8 +176,8 @@ export const opsRouter = createRouter({
         })
         .from(tokenUsage)
         .where(gte(tokenUsage.createdAt, since))
-        .groupBy(sql`DATE(${tokenUsage.createdAt})`, tokenUsage.model)
-        .orderBy(desc(sql`DATE(${tokenUsage.createdAt})`));
+        .groupBy(sqlDayOf(tokenUsage.createdAt), tokenUsage.model)
+        .orderBy(desc(sqlDayOf(tokenUsage.createdAt)));
 
       // 按日期分组
       const byDate: Record<

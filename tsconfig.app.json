@@ -17,7 +17,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@contracts/*": ["./contracts/*"],
-      "@db/*": ["./db/*"]
+      "@db/*": ["./db/*"],
+      "better-sqlite3": ["./vendor/better-sqlite3-shim"]
     }
   },
   "include": ["src"]

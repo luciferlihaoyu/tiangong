@@ -16,6 +16,9 @@ import { finalizeFailedTask } from "./lib/task-finalize";
 const AUTO_APPROVE_ENABLED_KEY = "auto_approve_enabled";
 const AUTO_APPROVE_LIMIT_KEY = "auto_approve_daily_limit";
 const OPEN_WEBUI_URL_KEY = "openwebui_url";
+/** 默认与首页 AppHub 外部应用卡片「Open Web UI」同地址（AppHub.tsx 硬编码，
+ *  改动时两处同步）；system_settings(openwebui_url) 可覆盖 */
+const DEFAULT_OPEN_WEBUI_URL = "https://oll199h.zeabur.app/";
 
 /** 批量归档 failed 任务的实现：写璇玑 lesson + AList + 协作汇总（幂等由各 sync 自持） */
 async function runArchiveFailedTasks(
@@ -100,7 +103,9 @@ export const assistantRouter = createRouter({
 
   /** Open WebUI 嵌入地址（公开读，首页消息面板 iframe 用；空 = 未配置） */
   getOpenWebUi: publicQuery.query(async () => ({
-    url: ((await getSetting(OPEN_WEBUI_URL_KEY).catch(() => null)) || "").trim(),
+    url:
+      ((await getSetting(OPEN_WEBUI_URL_KEY).catch(() => null)) || "").trim() ||
+      DEFAULT_OPEN_WEBUI_URL,
   })),
 
   /** 设置 Open WebUI 嵌入地址（admin；传空字符串清除） */

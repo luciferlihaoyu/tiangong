@@ -5,6 +5,7 @@ import { tokenUsage, agents } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
 import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./lib/model-pricing";
 import { recalcAllUsageCosts } from "./lib/usage-recalc";
+import { sqlDayOf } from "./lib/day-sql";
 
 export const usageRouter = createRouter({
   /**
@@ -192,7 +193,7 @@ export const usageRouter = createRouter({
 
       const rows = await db
         .select({
-          date: sql<string>`DATE(${tokenUsage.createdAt})`,
+          date: sqlDayOf(tokenUsage.createdAt),
           promptTokens: sql<number>`COALESCE(SUM(${tokenUsage.promptTokens}), 0)`,
           completionTokens: sql<number>`COALESCE(SUM(${tokenUsage.completionTokens}), 0)`,
           totalTokens: sql<number>`COALESCE(SUM(${tokenUsage.totalTokens}), 0)`,
@@ -204,8 +205,8 @@ export const usageRouter = createRouter({
         })
         .from(tokenUsage)
         .where(whereClause)
-        .groupBy(sql`DATE(${tokenUsage.createdAt})`)
-        .orderBy(desc(sql`DATE(${tokenUsage.createdAt})`))
+        .groupBy(sqlDayOf(tokenUsage.createdAt))
+        .orderBy(desc(sqlDayOf(tokenUsage.createdAt)))
         .limit(input?.limit ?? 30);
 
       return rows;

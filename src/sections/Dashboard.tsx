@@ -586,14 +586,17 @@ interface DisplayMessage {
   readAt?: string | null;
 }
 
-function MessagePanel({
+export function MessagePanel({
   agents,
   lastWsMessage,
   wsConnected,
+  fullHeight,
 }: {
   agents: MockAgent[];
   lastWsMessage: WSMessage | null;
   wsConnected: boolean;
+  /** 独立栏目页全高模式：面板铺满视口高度（首页沿用紧凑 minHeight） */
+  fullHeight?: boolean;
 }) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   // 对话面切换：天宫对话 | Open WebUI（固定会话）。持久化到 localStorage
@@ -833,7 +836,10 @@ function MessagePanel({
   };
 
   return (
-    <div className="glass-panel p-4 sci-border flex flex-col" style={{ minHeight: "400px" }}>
+    <div
+      className="glass-panel p-4 sci-border flex flex-col"
+      style={fullHeight ? { height: "calc(100vh - 130px)", minHeight: "560px" } : { minHeight: "400px" }}
+    >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="section-label">消息面板 · MESSAGES</div>
@@ -886,8 +892,9 @@ function MessagePanel({
             <iframe
               src={webuiQuery.data.url}
               className="w-full flex-1 rounded"
-              style={{ border: "1px solid var(--border-default)", minHeight: "480px", background: "#fff" }}
+              style={{ border: "1px solid var(--border-default)", minHeight: fullHeight ? "0" : "480px", background: "#fff" }}
               title="Open WebUI"
+              loading="eager"
               allow="microphone; clipboard-read; clipboard-write"
             />
           ) : (

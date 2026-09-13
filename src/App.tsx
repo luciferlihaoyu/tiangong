@@ -17,6 +17,7 @@ import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
+import ChatPanel from './pages/ChatPanel'
 import Tasks from './pages/Tasks'
 import TaskDetail from './pages/TaskDetail'
 import NotificationsPanel from './pages/NotificationsPanel'
@@ -96,6 +97,7 @@ export default function App() {
           <Route path="/notifications" element={<NotificationsPanel />} />
           <Route path="/tasks/:id" element={<TaskDetail />} />
           <Route path="/mailbox" element={<MailboxPanel />} />
+          <Route path="/chat" element={<ChatPanel />} />
           <Route path="/sessions" element={<SessionPanel />} />
           <Route path="/github" element={<GitHubPanel />} />
           <Route path="/console" element={<ConsolePanel />} />

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskMessages, taskArtifacts, agents } from "@db/schema";
+import { normalizeDbDate } from "./lib/normalize-date";
 import { eq, and, or, like, desc, asc, inArray } from "drizzle-orm";
 import { validateBoardTransition, isTerminalStatus } from "./lib/taskboard-validator";
 import { isAgentAllowedByRouting } from "./lib/task-claim";
@@ -101,6 +102,7 @@ export const taskboardRouter = createRouter({
         boardLabels: parseJson<string[]>(task.boardLabels),
         threadMessages: messages.map((m) => ({
           ...m,
+          createdAt: normalizeDbDate(m.createdAt),
           metadata: parseJson(m.metadata),
         })),
         artifacts: artifacts.map((a) => ({

@@ -9,9 +9,9 @@ export const users = sqliteTable("users", {
   name: text("name", { length: 255 }),
   email: text("email", { length: 320 }),
   role: text("role", { enum: ["user", "admin"] }).default("user").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
-  lastSignInAt: integer("last_sign_in_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
+  lastSignInAt: integer("last_sign_in_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type User = typeof users.$inferSelect;
@@ -50,8 +50,8 @@ export const agents = sqliteTable("agents", {
   canModifyTiangongCore: text("can_modify_tiangong_core", { enum: ["true", "false"] }).default("false"),
   canSendExternalMessage: text("can_send_external_message", { enum: ["true", "false"] }).default("false"),
   mcpToken: text("mcp_token", { length: 100 }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Agent = typeof agents.$inferSelect;
@@ -142,8 +142,8 @@ export const tasks = sqliteTable("tasks", {
   stateRevision: integer("state_revision", {mode: "number"}).default(1).notNull(),
   taskRetainUntil: integer("task_retain_until", { mode: "timestamp" }),
   idempotencyRetainUntil: integer("idempotency_retain_until", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
   externalRefIdx: uniqueIndex("uq_tasks_origin_external_ref").on(table.originSystem, table.externalRef),
   idempotencyKeyIdx: uniqueIndex("uq_tasks_origin_idempotency_key").on(table.originSystem, table.idempotencyKey),
@@ -157,7 +157,7 @@ export const tiangongTaskLimits = sqliteTable("tiangong_task_limits", {
   principalKey: text("principal_key", { length: 255 }).notNull(),
   workspaceSlug: text("workspace_slug", { length: 100 }).notNull(),
   maxConcurrentTasks: integer("max_concurrent_tasks", { mode: "number" }).default(8).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
   principalWorkspaceIdx: uniqueIndex("uq_tiangong_task_limits_principal_workspace").on(table.principalKey, table.workspaceSlug),
 }));
@@ -214,8 +214,8 @@ export const taskOutboxEvents = sqliteTable("task_outbox_events", {
   deliveredAt: integer("delivered_at", { mode: "timestamp" }),
   deadLetterAt: integer("dead_letter_at", { mode: "timestamp" }),
   lastErrorCode: text("last_error_code", { length: 64 }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
   taskRevisionIdx: uniqueIndex("uq_task_outbox_task_revision").on(table.taskId, table.stateRevision),
   dueIdx: index("idx_task_outbox_due").on(table.nextAttemptAt, table.deliveredAt, table.deadLetterAt),
@@ -225,7 +225,7 @@ export type TaskOutboxEvent = typeof taskOutboxEvents.$inferSelect;
 
 export const tiangongProviderIdentity = sqliteTable("tiangong_provider_identity", {
   providerInstanceId: text("provider_instance_id", { length: 64 }).primaryKey(),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export const tiangongArtifactLimits = sqliteTable("tiangong_artifact_limits", {
@@ -236,7 +236,7 @@ export const tiangongArtifactLimits = sqliteTable("tiangong_artifact_limits", {
   retentionSeconds: integer("retention_seconds", { mode: "number" }).notNull(),
   gcGraceSeconds: integer("gc_grace_seconds", { mode: "number" }).notNull(),
   gcReaperConcurrency: integer("gc_reaper_concurrency", { mode: "number" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
   scopeIdx: uniqueIndex("uq_tiangong_artifact_limits_scope").on(table.principalKey, table.workspaceSlug),
 }));
@@ -247,7 +247,7 @@ export const stagedObjects = sqliteTable("staged_objects", {
   expectedSize: integer("expected_size", {mode: "number"}).notNull(),
   expectedMime: text("expected_mime", { length: 255 }).notNull(),
   generationId: integer("generation_id", { mode: "number" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   ownerPrincipal: text("owner_principal", { length: 255 }).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   state: text("state", { enum: ["staging", "verified", "sealed", "abandoned"] }).default("staging").notNull(),
@@ -322,7 +322,7 @@ export const messages = sqliteTable(
     /** Priority (higher = more urgent). Default 0. */
     priority: integer("priority", { mode: "number" }).default(0).notNull(),
 
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   },
   (table) => ({
     // Idempotency: same fromAgent + idempotencyKey → same message
@@ -343,8 +343,8 @@ export const systems = sqliteTable("systems", {
   slug: text("slug", { length: 20 }).notNull().unique(),
   status: text("status", { enum: ["connected", "syncing", "disconnected"] }).default("disconnected").notNull(),
   config: text("config"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type System = typeof systems.$inferSelect;
@@ -357,8 +357,8 @@ export const organizations = sqliteTable("organizations", {
   description: text("description"),
   goals: text("goals"),
   budget: integer("budget_cents", { mode: "number" }).default(0),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Organization = typeof organizations.$inferSelect;
@@ -371,8 +371,8 @@ export const departments = sqliteTable("departments", {
   description: text("description"),
   orgId: integer("org_id", {mode: "number"}).notNull(),
   leadAgentId: integer("lead_agent_id", {mode: "number"}),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Department = typeof departments.$inferSelect;
@@ -398,7 +398,7 @@ export const mcpApiKeys = sqliteTable("mcp_api_keys", {
   rateLimit: integer("rate_limit", { mode: "number" }).default(10),
   active: text("active", { enum: ["true", "false"] }).default("true"),
   lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type McpApiKey = typeof mcpApiKeys.$inferSelect;
@@ -434,8 +434,8 @@ export const tiangongServiceKeys = sqliteTable(
     revokedAt: integer("revoked_at", { mode: "timestamp" }),
     revokedReason: text("revoked_reason", { length: 100 }),
     version: integer("version", { mode: "number" }).notNull().default(1),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     keyIdIdx: uniqueIndex("uq_tiangong_service_keys_key_id").on(table.keyId),
@@ -455,7 +455,7 @@ export const serviceKeyAuditLog = sqliteTable("service_key_audit_log", {
   tokenPrefix: text("token_prefix", { length: 12 }),
   decision: text("decision", { enum: ["authenticated", "denied"] }).notNull(),
   reason: text("reason", { length: 100 }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type ServiceKeyAuditEntry = typeof serviceKeyAuditLog.$inferSelect;
@@ -470,7 +470,7 @@ export const mcpAuditLog = sqliteTable("mcp_audit_log", {
   result: text("result", { length: 20 }),
   error: text("error"),
   durationMs: integer("duration_ms", { mode: "number" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type McpAuditLogEntry = typeof mcpAuditLog.$inferSelect;
@@ -485,7 +485,7 @@ export const modelPricing = sqliteTable("model_pricing", {
   cachedInputPrice: text("cached_input_price"),
   currency: text("currency", { length: 3 }).default("USD"),
   notes: text("notes"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type ModelPricing = typeof modelPricing.$inferSelect;
@@ -496,7 +496,7 @@ export const systemSettings = sqliteTable("system_settings", {
   key: text("key", { length: 100 }).primaryKey(),
   value: text("value"),
   category: text("category", { length: 50 }).default("general"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type SystemSetting = typeof systemSettings.$inferSelect;
@@ -530,7 +530,7 @@ export const tokenUsage = sqliteTable("token_usage", {
   startedAt: integer("started_at", { mode: "timestamp" }),
   // Phase 2: 高价模型标记
   highCostModel: text("high_cost_model", { enum: ["true", "false"] }).default("false"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type TokenUsage = typeof tokenUsage.$inferSelect;
@@ -543,7 +543,7 @@ export const modelAllowlist = sqliteTable("model_allowlist", {
   model: text("model", { length: 100 }).notNull(),
   reason: text("reason"),
   createdBy: text("created_by", { length: 50 }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type ModelAllowlist = typeof modelAllowlist.$inferSelect;
@@ -558,7 +558,7 @@ export const highCostModelAuth = sqliteTable("high_cost_model_auth", {
   authorizedBy: text("authorized_by", { length: 50 }).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }),
   active: text("active", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type HighCostModelAuth = typeof highCostModelAuth.$inferSelect;
@@ -571,8 +571,8 @@ export const githubIntegrations = sqliteTable("github_integrations", {
   installationId: text("installation_id", { length: 20 }),
   owner: text("owner", { length: 100 }),
   active: text("active", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type GithubIntegration = typeof githubIntegrations.$inferSelect;
@@ -586,8 +586,8 @@ export const githubRepos = sqliteTable("github_repos", {
   defaultBranch: text("default_branch", { length: 100 }).default("main"),
   installationId: integer("installation_id", {mode: "number"}),
   active: text("active", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type GithubRepo = typeof githubRepos.$inferSelect;
@@ -599,8 +599,8 @@ export const githubRepoPermissions = sqliteTable("github_repo_permissions", {
   repoId: integer("repo_id", {mode: "number"}).notNull(),
   permissionLevel: text("permission_level", { enum: ["read", "push", "admin"] }).default("read").notNull(),
   active: text("active", { enum: ["true", "false"] }).default("true"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type GithubRepoPermission = typeof githubRepoPermissions.$inferSelect;
@@ -620,8 +620,8 @@ export const githubPullRequests = sqliteTable("github_pull_requests", {
   approvedBy: integer("approved_by", {mode: "number"}),
   approvedAt: integer("approved_at", { mode: "timestamp" }),
   mergedAt: integer("merged_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type GithubPullRequest = typeof githubPullRequests.$inferSelect;
@@ -633,7 +633,7 @@ export const githubAuditLog = sqliteTable("github_audit_log", {
   action: text("action", { enum: ["approve", "reject", "merge", "register", "revoke"] }).notNull(),
   agentId: integer("agent_id", {mode: "number"}),
   reason: text("reason"),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type GithubAuditLogEntry = typeof githubAuditLog.$inferSelect;
@@ -649,8 +649,8 @@ export const conversations = sqliteTable("conversations", {
   summary: text("summary"),
   createdBy: integer("created_by", {mode: "number"}),
   archivedAt: integer("archived_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Conversation = typeof conversations.$inferSelect;
@@ -662,8 +662,8 @@ export const taskThreads = sqliteTable("task_threads", {
   taskId: integer("task_id", {mode: "number"}).notNull(),
   title: text("title", { length: 255 }),
   status: text("status", { enum: ["open", "closed", "archived"] }).default("open").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type TaskThread = typeof taskThreads.$inferSelect;
@@ -689,7 +689,9 @@ export const taskMessages = sqliteTable("task_messages", {
   ] }).default("system").notNull(),
   content: text("content"),
   metadata: text("metadata"), // JSON
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  // defaultNow() 在 drizzle sqlite 里写 epoch 毫秒但 timestamp 模式按秒读（×1000 → 58669 年 bug），
+    // 改 $defaultFn 由 JS 端写 Date，mapToDriverValue 正确落秒；历史毫秒脏行由读取侧归一化兜底
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type TaskMessage = typeof taskMessages.$inferSelect;
@@ -726,11 +728,11 @@ export const mailboxMessages = sqliteTable("mailbox_messages", {
   payloadJson: text("payload_json"),
   replyToMessageId: integer("reply_to_message_id", {mode: "number"}),
   artifactId: integer("artifact_id", {mode: "number"}),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   acknowledgedAt: integer("acknowledged_at", { mode: "timestamp" }),
   repliedAt: integer("replied_at", { mode: "timestamp" }),
   resolvedAt: integer("resolved_at", { mode: "timestamp" }),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type MailboxMessage = typeof mailboxMessages.$inferSelect;
@@ -746,7 +748,7 @@ export const taskArtifacts = sqliteTable("task_artifacts", {
   content: text("content"),
   jsonPayload: text("json_payload"),
   mimeType: text("mime_type", { length: 100 }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type TaskArtifact = typeof taskArtifacts.$inferSelect;
@@ -763,8 +765,8 @@ export const workspaces = sqliteTable("workspaces", {
   slug: text("slug", { length: 100 }).notNull().unique(),
   description: text("description"),
   ownerId: integer("owner_id", {mode: "number"}).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Workspace = typeof workspaces.$inferSelect;
@@ -780,8 +782,8 @@ export const projects = sqliteTable(
     slug: text("slug", { length: 100 }).notNull(),
     description: text("description"),
     createdBy: integer("created_by", {mode: "number"}).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     workspaceSlugIdx: uniqueIndex("uq_projects_workspace_slug").on(table.workspaceId, table.slug),
@@ -799,8 +801,8 @@ export const workspaceMemberships = sqliteTable(
     workspaceId: integer("workspace_id", {mode: "number"}).notNull(),
     userId: integer("user_id", {mode: "number"}).notNull(),
     role: text("role", { enum: ["owner", "admin", "member", "viewer"] }).default("member").notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     membershipIdx: uniqueIndex("uq_workspace_memberships").on(table.workspaceId, table.userId),
@@ -827,8 +829,8 @@ export const secretVaultItems = sqliteTable(
     ciphertext: text("ciphertext").notNull(),
     createdBy: integer("created_by", {mode: "number"}).notNull(),
     updatedBy: integer("updated_by", {mode: "number"}).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     projectNameIdx: uniqueIndex("uq_secret_vault_items_project_name").on(
@@ -858,7 +860,7 @@ export const auditEvents = sqliteTable(
     entityType: text("entity_type", { length: 50 }).notNull(),
     entityId: integer("entity_id", {mode: "number"}),
     metadata: text("metadata"),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
     // ── Audit hash chain (block-style hardening) ──
     // sha256 hex of the previous chained row; NULL for pre-chain legacy rows.
     prevHash: text("prev_hash", { length: 64 }),
@@ -894,8 +896,8 @@ export const connectorRegistry = sqliteTable(
     secretRefId: integer("secret_ref_id", {mode: "number"}),
     createdBy: integer("created_by", {mode: "number"}).notNull(),
     updatedBy: integer("updated_by", {mode: "number"}).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     workspaceProjectSlugIdx: uniqueIndex("uq_connector_registry_workspace_project_slug").on(
@@ -932,8 +934,8 @@ export const artifactRegistry = sqliteTable(
     metadata: text("metadata"), // JSON: safe, non-secret metadata only
     createdBy: integer("created_by", {mode: "number"}).notNull(),
     updatedBy: integer("updated_by", {mode: "number"}).notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
     workspaceProjectSlugIdx: uniqueIndex("uq_artifact_registry_workspace_project_slug").on(
@@ -962,8 +964,8 @@ export const sharedSessions = sqliteTable("shared_sessions", {
   summary: text("summary"), // 会话摘要
   context: text("context"), // 上下文快照（JSON）
   createdBy: integer("created_by", {mode: "number"}),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type SharedSession = typeof sharedSessions.$inferSelect;
@@ -978,7 +980,7 @@ export const sessionMessages = sqliteTable("session_messages", {
   role: text("role", { enum: ["user", "assistant", "system"] }).default("assistant").notNull(),
   content: text("content").notNull(),
   metadata: text("metadata"), // JSON
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
 export type SessionMessage = typeof sessionMessages.$inferSelect;
@@ -992,8 +994,8 @@ export const agentMemories = sqliteTable("agent_memories", {
   value: text("value").notNull(),
   type: text("type", { enum: ["personal", "shared", "company"] }).default("personal").notNull(),
   tags: text("tags", { length: 500 }), // 逗号分隔
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
   agentKeyIdx: uniqueIndex("uq_agent_memories_key").on(table.agentId, table.key),
 }));
@@ -1013,8 +1015,8 @@ export const externalAgents = sqliteTable("external_agents", {
   capabilities: text("capabilities"), // JSON
   config: text("config"), // JSON: 平台特定配置
   lastHeartbeat: integer("last_heartbeat", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type ExternalAgent = typeof externalAgents.$inferSelect;
@@ -1040,7 +1042,7 @@ export const notifications = sqliteTable("notifications", {
   body: text("body").notNull(),
   metadata: text("metadata", { mode: "json" }),  // 可选：额外上下文（审批人/理由/错误摘要等）
   readAt: integer("read_at", { mode: "timestamp" }),  // null = 未读
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => ({
   // 索引：list API 高效分页 + 防抖查询
   agentReadIdx: index("idx_notifications_agent_read").on(table.agentId, table.readAt),
@@ -1059,8 +1061,8 @@ export const plugins = sqliteTable("plugins", {
   url: text("url").notNull(),
   tokenEnvKey: text("token_env_key"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at", { mode: "timestamp" }).defaultNow().notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 });
 
 export type Plugin = typeof plugins.$inferSelect;

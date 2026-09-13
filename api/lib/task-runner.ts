@@ -37,8 +37,7 @@ import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { parseTaskMetadata } from "./task-metadata";
-import { finalizeCompletedTask } from "./task-finalize";
-import { syncTaskLessonToXuanji } from "./xuanji-sync";
+import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
 import { notifyLessonRecorded } from "./notification-hooks";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -619,7 +618,7 @@ class TaskRunner {
         // （幂等标记 xuanji_lesson 亦兜底去重）。落库后尽力而为，失败不影响回写主流程。
         if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
           try {
-            await syncTaskLessonToXuanji(db, {
+            await finalizeFailedTask(db, {
               id: task.id,
               taskId: task.taskId,
               name: task.name,
@@ -632,7 +631,7 @@ class TaskRunner {
               error: errorText ?? "Task execution failed",
             });
           } catch (error) {
-            // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
+            // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
           }
           // 失败教训通知（NC-3）：与璇玑教训同终态失败闸门，落库后记一条 lesson_recorded
@@ -699,7 +698,7 @@ class TaskRunner {
         // error 取本兜底写入的错误文案（Runner internal error，已按 resultMaxChars 截断）。
         if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
           try {
-            await syncTaskLessonToXuanji(db, {
+            await finalizeFailedTask(db, {
               id: task.id,
               taskId: task.taskId,
               name: task.name,
@@ -712,7 +711,7 @@ class TaskRunner {
               error: internalError ?? "Task execution failed",
             });
           } catch (error) {
-            // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
+            // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
           }
           // 失败教训通知（NC-3）：catch 兜底路径同样记一条 lesson_recorded（channel 区分来源）。

@@ -11,6 +11,7 @@ import {
   BarChart3,
   Radio,
   Bot,
+  MessagesSquare,
   Users,
   Zap,
   Github,
@@ -91,9 +92,9 @@ const navGroups: NavGroup[] = [
   {
     title: '工具',
     items: [
+      { path: '/chat', label: '对话', icon: <MessagesSquare size={15} /> },
       { path: '/mailbox', label: '消息', icon: <Mail size={15} /> },
       { path: '/sessions', label: '会话', icon: <MessageSquare size={15} /> },
-      { path: '/fusion', label: '审查', icon: <Scale size={15} /> },
       { path: '/account', label: '账户', icon: <User size={15} /> },
     ],
   },

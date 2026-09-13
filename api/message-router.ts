@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { messages, agents, type InsertMessage, type Message } from "@db/schema";
+import { normalizeDbDate } from "./lib/normalize-date";
 import { eq, desc, asc, sql, and, or, isNull, lt, gte, type SQL } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 
@@ -463,7 +464,8 @@ export const messageRouter = createRouter({
           )
         )
         .orderBy(asc(messages.createdAt))
-        .limit(200);
+        .limit(200)
+        .then((rows) => rows.map((m) => ({ ...m, createdAt: normalizeDbDate(m.createdAt) })));
     }),
 
   /**

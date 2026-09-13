@@ -650,6 +650,52 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
     }
   );
 
+  // Tool 7.5: 任务详情（含线程消息 + 审批状态）——dsh 排查任务不再绕 curl
+  server.tool(
+    "get_task",
+    "[天宫] 单个任务详情：任务行 + 线程消息 + 审批状态（预审结论在 metadata.action=fusion_prereview 的消息里）",
+    {
+      taskId: z.number().describe("任务 ID（数字，不是 T-XXX 字符串）"),
+      threadLimit: z.number().min(1).max(100).optional().default(30).describe("线程消息返回数量"),
+    },
+    async (params) => {
+      const db = getDb();
+      const task = await db.select().from(tasks).where(eq(tasks.id, params.taskId)).limit(1);
+      if (task.length === 0) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: `task #${params.taskId} not found` }) }] };
+      }
+      const t = task[0];
+      const thread = await db
+        .select()
+        .from(taskMessages)
+        .where(eq(taskMessages.taskId, t.id))
+        .orderBy(desc(taskMessages.createdAt))
+        .limit(params.threadLimit);
+      const { getApprovalState } = await import("../lib/execution-gate");
+      const { normalizeDbDate } = await import("../lib/normalize-date");
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...t,
+                createdAt: normalizeDbDate(t.createdAt),
+                updatedAt: normalizeDbDate(t.updatedAt),
+                approval: getApprovalState(t.input),
+                thread: thread
+                  .map((m) => ({ ...m, createdAt: normalizeDbDate(m.createdAt) }))
+                  .reverse(),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
   // Tool 8: 列出消息
   server.tool(
     "list_messages",

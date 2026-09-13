@@ -596,6 +596,19 @@ function MessagePanel({
   wsConnected: boolean;
 }) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  // 对话面切换：天宫对话 | Open WebUI（固定会话）。持久化到 localStorage
+  const [chatMode, setChatMode] = useState<"tg" | "webui">(() => {
+    return localStorage.getItem("tg_message_chat_mode") === "webui" ? "webui" : "tg";
+  });
+  const [webuiUrlDraft, setWebuiUrlDraft] = useState("");
+  const webuiQuery = trpc.assistant.getOpenWebUi.useQuery(undefined, { retry: 1 });
+  const setWebuiUrlMutation = trpc.assistant.setOpenWebUiUrl.useMutation({
+    onSuccess: (d) => {
+      utils.assistant.getOpenWebUi.invalidate();
+      toast.success(d.url ? "Open WebUI 地址已保存" : "已清除 Open WebUI 地址");
+    },
+    onError: (e) => toast.error(`保存失败：${e.message}`),
+  });
   // 持久化选中的 agentId 到 localStorage —— 修复"刷新就没了"的体感
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(() => {
     try {
@@ -638,6 +651,11 @@ function MessagePanel({
       else localStorage.setItem("tg_message_selected_agent", String(selectedAgentId));
     } catch { /* ignore */ }
   }, [selectedAgentId]);
+
+  // Open WebUI / 天宫对话 切换持久化
+  useEffect(() => {
+    localStorage.setItem("tg_message_chat_mode", chatMode);
+  }, [chatMode]);
 
   // 自动选中：如果 localStorage 里没有、或存的 id 不在 agents 里（已被删除），自动选第一个
   useEffect(() => {
@@ -819,6 +837,31 @@ function MessagePanel({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="section-label">消息面板 · MESSAGES</div>
+          <div className="flex items-center gap-1 ml-2">
+            <button
+              onClick={() => setChatMode("tg")}
+              className="text-[10px] font-mono px-2 py-0.5 rounded transition-colors"
+              style={{
+                background: chatMode === "tg" ? "var(--accent-glow-red)" : "transparent",
+                color: chatMode === "tg" ? "var(--accent-red-bright)" : "var(--text-muted)",
+                border: "1px solid var(--border-default)",
+              }}
+            >
+              天宫对话
+            </button>
+            <button
+              onClick={() => setChatMode("webui")}
+              className="text-[10px] font-mono px-2 py-0.5 rounded transition-colors"
+              style={{
+                background: chatMode === "webui" ? "rgba(14,116,144,0.15)" : "transparent",
+                color: chatMode === "webui" ? "var(--accent-cyan)" : "var(--text-muted)",
+                border: "1px solid var(--border-default)",
+              }}
+              title="嵌入 Open WebUI，会话固定不丢"
+            >
+              Open WebUI
+            </button>
+          </div>
           <span
             className="text-[10px] font-mono"
             style={{ color: "var(--text-muted)" }}
@@ -837,7 +880,47 @@ function MessagePanel({
         </div>
       </div>
 
-      <div className="flex gap-3 flex-1 min-h-0">
+      {chatMode === "webui" && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          {webuiQuery.data?.url ? (
+            <iframe
+              src={webuiQuery.data.url}
+              className="w-full flex-1 rounded"
+              style={{ border: "1px solid var(--border-default)", minHeight: "480px", background: "#fff" }}
+              title="Open WebUI"
+              allow="microphone; clipboard-read; clipboard-write"
+            />
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 rounded"
+              style={{ border: "1px dashed var(--border-default)", minHeight: "480px" }}>
+              <div className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+                还没配置 Open WebUI 地址
+              </div>
+              <div className="flex items-center gap-2 w-full max-w-md">
+                <input
+                  value={webuiUrlDraft}
+                  onChange={(e) => setWebuiUrlDraft(e.target.value)}
+                  placeholder="https://你的-openwebui-地址"
+                  className="flex-1 px-3 py-2 rounded text-xs font-mono"
+                  style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)", color: "var(--text-primary)" }}
+                />
+                <button
+                  onClick={() => setWebuiUrlMutation.mutate({ url: webuiUrlDraft })}
+                  disabled={!webuiUrlDraft.trim() || setWebuiUrlMutation.isPending}
+                  className="px-3 py-2 rounded text-xs font-bold disabled:opacity-50"
+                  style={{ background: "rgba(14,116,144,0.12)", color: "var(--accent-cyan)", border: "1px solid rgba(14,116,144,0.3)" }}
+                >
+                  保存
+                </button>
+              </div>
+              <div className="text-[10px] font-mono text-center" style={{ color: "var(--text-muted)" }}>
+                填你的 Open WebUI 网址（http/https），保存后内嵌在这里，会话固定不丢
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div className="flex gap-3 flex-1 min-h-0" style={{ display: chatMode === "webui" ? "none" : undefined }}>
         {/* Agent list sidebar */}
         <div className="w-40 flex-shrink-0 border-r overflow-y-auto custom-scrollbar" style={{ borderColor: "var(--border-default)" }}>
           <div className="text-[10px] font-mono mb-2 px-1" style={{ color: "var(--text-muted)" }}>

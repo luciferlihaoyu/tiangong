@@ -1122,7 +1122,7 @@ class TaskRunner {
       `[TaskRunner] tianshu mode: host=${safeTianshuHost()}, model=${model}, task=${task.taskId}, timeout=${effectiveTimeout}ms`
     );
 
-    try {
+    const attempt = async (useModel: string): Promise<{ output: string; error: string | null; success: boolean; raw?: string; permanentModelDead?: boolean }> => {
       const resp = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -1130,7 +1130,7 @@ class TaskRunner {
           authorization: `Bearer ${CONFIG.tianshuApiKey}`,
         },
         body: JSON.stringify({
-          model,
+          model: useModel,
           messages: isAssistantTask
             ? [
                 { role: "system", content: ASSISTANT_TASK_SYSTEM_PROMPT },
@@ -1144,26 +1144,62 @@ class TaskRunner {
 
       const raw = await resp.text();
       if (!resp.ok) {
+        const summarized = this.summarizeGatewayError(raw);
+        // 永久性模型不可用（频道下线/模型不存在）：换模型才有救，重试同模型纯属烧时间
+        const permanentModelDead =
+          /No available channel|model_not_found|does not exist|Invalid model/i.test(summarized) ||
+          resp.status === 503 ||
+          resp.status === 404;
         return {
           output: "",
-          error: `Tianshu HTTP ${resp.status}: ${this.summarizeGatewayError(raw)}`,
+          error: `Tianshu HTTP ${resp.status}: ${summarized}`,
           success: false,
+          raw,
+          permanentModelDead,
         };
       }
 
       const text = this.extractChatCompletionText(raw);
       if (!text.trim()) {
-        return {
-          output: "",
-          error: "Tianshu returned empty chat completion text",
-          success: false,
-        };
+        return { output: "", error: "Tianshu returned empty chat completion text", success: false };
+      }
+      return { output: text, error: null, success: true, raw };
+    };
+
+    try {
+      const first = await attempt(model);
+      let result = first;
+
+      // 死模型兜底：配置的默认模型频道下线时（实证 deepseek-v4-flash 503 烧完 3 轮重试），
+      // 直接换助手模型（用户配置、确认可用）再试一次，并在错误信息里说明换模原因
+      if (!first.success && first.permanentModelDead) {
+        const fallbackModel = await getAssistantModel();
+        if (fallbackModel && fallbackModel !== model) {
+          console.warn(
+            `[TaskRunner] tianshu model "${model}" unavailable (channel dead) — falling back to assistant model "${fallbackModel}", task=${task.taskId}`
+          );
+          const second = await attempt(fallbackModel);
+          if (second.success) {
+            result = { ...second, output: second.output };
+            // 用量记到实际使用的兜底模型上
+            if (second.raw) await recordTianshuUsageForTask(second.raw, fallbackModel, task);
+            return { output: result.output, error: null, success: true };
+          }
+          result = {
+            ...second,
+            error: `${first.error}（已尝试兜底模型 ${fallbackModel} 仍失败）${second.error ? `: ${second.error}` : ""}`,
+          };
+        }
+      }
+
+      if (!result.success) {
+        return { output: "", error: result.error, success: false };
       }
 
       // 尽力而为地记录 token 用量（定价/用量页面按任务与智能体归因成本；失败不影响任务结果）
-      await recordTianshuUsageForTask(raw, model, task);
+      if (result.raw) await recordTianshuUsageForTask(result.raw, model, task);
 
-      return { output: text, error: null, success: true };
+      return { output: result.output, error: null, success: true };
     } catch (e: unknown) {
       const isAbort = typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AbortError";
       if (isAbort) {

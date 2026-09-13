@@ -15,6 +15,7 @@ import { finalizeFailedTask } from "./lib/task-finalize";
 
 const AUTO_APPROVE_ENABLED_KEY = "auto_approve_enabled";
 const AUTO_APPROVE_LIMIT_KEY = "auto_approve_daily_limit";
+const OPEN_WEBUI_URL_KEY = "openwebui_url";
 
 /** 批量归档 failed 任务的实现：写璇玑 lesson + AList + 协作汇总（幂等由各 sync 自持） */
 async function runArchiveFailedTasks(
@@ -95,6 +96,23 @@ export const assistantRouter = createRouter({
         await setSetting(AUTO_APPROVE_LIMIT_KEY, String(input.dailyLimit), "auto_approve");
       }
       return { success: true, enabled: input.enabled };
+    }),
+
+  /** Open WebUI 嵌入地址（公开读，首页消息面板 iframe 用；空 = 未配置） */
+  getOpenWebUi: publicQuery.query(async () => ({
+    url: ((await getSetting(OPEN_WEBUI_URL_KEY).catch(() => null)) || "").trim(),
+  })),
+
+  /** 设置 Open WebUI 嵌入地址（admin；传空字符串清除） */
+  setOpenWebUiUrl: adminQuery
+    .input(z.object({ url: z.string().max(500) }))
+    .mutation(async ({ input }) => {
+      const url = input.url.trim();
+      if (url && !/^https?:\/\//.test(url)) {
+        throw new Error("URL 必须以 http(s):// 开头");
+      }
+      await setSetting(OPEN_WEBUI_URL_KEY, url, "assistant");
+      return { success: true, url };
     }),
 
   /** 批量归档失败任务（UI 用，admin 登录） */

@@ -259,5 +259,39 @@ export async function reportTaskProgress(
     await emitCollabSummaryForTask(input.id);
   }
 
+  // 协作会话镜像（会话中心战况室）：子任务的进度汇报 / 完成 / 失败自动广播到
+  // 父任务对应的共享会话。尽力而为（catch 在内），失败不影响回写主流程。
+  if (taskRow.parentTaskId) {
+    try {
+      const { postCollabSessionMessage, agentDisplayName } = await import("./collab-session");
+      const agentName = await agentDisplayName(db, taskRow.agentId);
+      const who = agentName ? agentName : `Agent#${taskRow.agentId ?? "?"}`;
+      if (input.status === "done") {
+        await postCollabSessionMessage(db, taskRow.parentTaskId, {
+          fromAgentId: taskRow.agentId,
+          role: "assistant",
+          content: `✅ ${who} 完成「${taskRow.name}」${input.output ? `\n${input.output.slice(0, 800)}` : ""}`,
+          metadata: { childTaskId: taskRow.id, childTaskKey: taskRow.taskId, progress: 100, status: "done" },
+        });
+      } else if (input.status === "failed") {
+        await postCollabSessionMessage(db, taskRow.parentTaskId, {
+          fromAgentId: taskRow.agentId,
+          role: "assistant",
+          content: `❌ ${who} 失败「${taskRow.name}」：${(input.error ?? taskRow.error ?? "").slice(0, 300)}`,
+          metadata: { childTaskId: taskRow.id, childTaskKey: taskRow.taskId, status: "failed" },
+        });
+      } else if (input.output) {
+        await postCollabSessionMessage(db, taskRow.parentTaskId, {
+          fromAgentId: taskRow.agentId,
+          role: "assistant",
+          content: `📝 ${who} 汇报「${taskRow.name}」(${input.progress ?? 0}%)\n${input.output.slice(0, 800)}`,
+          metadata: { childTaskId: taskRow.id, childTaskKey: taskRow.taskId, progress: input.progress ?? 0 },
+        });
+      }
+    } catch (error) {
+      console.warn(`[task-writeback] collab session mirror failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   return { success: true };
 }

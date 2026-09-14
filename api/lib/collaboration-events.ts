@@ -160,5 +160,29 @@ export async function emitCollabSummaryForTask(taskId: number) {
     timestamp: new Date().toISOString(),
   });
 
+  // 协作会话镜像：把汇总贴一份到父任务的会话（会话中心战况室）。summary 收齐
+  // 子任务名/状态/成功错误，是给人和给会话里后续 agent 看的最佳快照。尽力而为。
+  if (summary) {
+    try {
+      const { postCollabSessionMessage } = await import("./collab-session");
+      const parts: string[] = [];
+      parts.push(`📊 协作汇总（${summary.parentTaskKey ?? "task#" + summary.parentTaskId}）：${summary.completed}/${summary.total} 完成`);
+      if (summary.errors && summary.errors.length > 0) {
+        parts.push(`失败 ${summary.errors.length} 条：`);
+        for (const e of summary.errors.slice(0, 5)) {
+          parts.push(`- ${e.taskKey}${e.agent ? " (" + e.agent + ")" : ""}：${(e.error ?? "").slice(0, 120)}`);
+        }
+      }
+      await postCollabSessionMessage(db, task.parentTaskId, {
+        fromAgentId: null,
+        role: "system",
+        content: parts.join("\n"),
+        metadata: { summary, trigger: task.taskId },
+      });
+    } catch (error) {
+      console.warn(`[collaboration-events] collab session summary post failed for task ${task.parentTaskId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   return summary;
 }

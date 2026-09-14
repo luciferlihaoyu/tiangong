@@ -271,6 +271,32 @@ export const collaborationRouter = createRouter({
         });
       }
 
+      // 协作会话镜像：建档 + 启动 + 逐条派发（会话中心战况室）
+      try {
+        const { postCollabSessionMessage, agentDisplayName } = await import("./lib/collab-session");
+        const db2 = getDb();
+        await postCollabSessionMessage(db2, parent.id, {
+          fromAgentId: input.coordinatorAgentId,
+          role: "system",
+          content: `🚀 协作任务启动：「${parent.name}」，共 ${results.length} 个子任务`,
+          metadata: { parentTaskId: parent.id, subtaskCount: results.length, correlationId },
+        });
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i];
+          const sub = input.subtasks[i];
+          const childRow = await db2.select({ name: tasks.name }).from(tasks).where(eq(tasks.id, r.taskId)).then(rows => rows[0]);
+          const target = await agentDisplayName(db2, sub.assigneeAgentId);
+          await postCollabSessionMessage(db2, parent.id, {
+            fromAgentId: input.coordinatorAgentId,
+            role: "system",
+            content: `📋 派发「${sub.title}」${childRow ? ` (${childRow.name})` : ""} → ${target ?? "Agent#" + sub.assigneeAgentId}（${r.status}）`,
+            metadata: { childTaskId: r.taskId, status: r.status, assigneeAgentId: sub.assigneeAgentId },
+          });
+        }
+      } catch (error) {
+        console.warn(`[collaboration] collab session mirror failed for parent task ${parent.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
       return { success: true, parentTaskId: parent.id, correlationId, subtasks: results };
     }),
 

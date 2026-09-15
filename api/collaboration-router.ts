@@ -287,10 +287,12 @@ export const collaborationRouter = createRouter({
           const sub = input.subtasks[i];
           const childRow = await db2.select({ name: tasks.name }).from(tasks).where(eq(tasks.id, r.taskId)).then(rows => rows[0]);
           const target = await agentDisplayName(db2, sub.assigneeAgentId);
+          // 幂等重派时任务行名可能还是首次创建的旧名 —— 与本次标题不同才附注，免得看着像派错了任务
+          const nameNote = childRow && childRow.name !== sub.title ? ` (任务行：${childRow.name})` : "";
           await postCollabSessionMessage(db2, parent.id, {
             fromAgentId: input.coordinatorAgentId,
             role: "system",
-            content: `📋 派发「${sub.title}」${childRow ? ` (${childRow.name})` : ""} → ${target ?? "Agent#" + sub.assigneeAgentId}（${r.status}）`,
+            content: `📋 派发「${sub.title}」${nameNote} → ${target ?? "Agent#" + sub.assigneeAgentId}（${r.status}）`,
             metadata: { childTaskId: r.taskId, status: r.status, assigneeAgentId: sub.assigneeAgentId },
           });
         }

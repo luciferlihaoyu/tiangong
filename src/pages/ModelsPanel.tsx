@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
-import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield, BarChart3, Bot } from "lucide-react";
+import { Cpu, RefreshCw, Star, Check, Users, CloudDownload, DollarSign, Shield, BarChart3, Bot, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { PricingSection } from "./models/PricingSection";
 import { GuardSection } from "./models/GuardSection";
@@ -28,6 +28,21 @@ export default function ModelsPanel() {
   const listQuery = trpc.tianshu.listModels.useQuery(undefined, { retry: 1, staleTime: 30_000 });
   const agentsQuery = trpc.tianshu.listAgents.useQuery(undefined, { retry: 1, staleTime: 30_000 });
   const pricingStatusQuery = trpc.pricing.officialStatus.useQuery(undefined, { retry: 1, staleTime: 30_000 });
+  // 模型可用性探测（#8）：避免选到网关已下线的死模型（如 deepseek-v4-flash 曾整批任务失败）
+  const probeQuery = trpc.tianshu.getModelProbe.useQuery(undefined, { retry: 1, staleTime: 60_000 });
+  const probeMutation = trpc.tianshu.probeModels.useMutation({
+    onSuccess: (d) => {
+      utils.tianshu.getModelProbe.invalidate();
+      const list = Object.entries(d.results ?? {});
+      const dead = list.filter(([, r]) => !r.ok).length;
+      if (list.length === 0) toast.info("没有可探测的模型（默认/助手/兜底都未设置）");
+      else if (dead === 0) toast.success(`探测完成：${list.length} 个模型全部可用`);
+      else toast.warning(`探测完成：${list.length} 个中 ${dead} 个不可用`, {
+        description: list.filter(([, r]) => !r.ok).map(([m]) => m).join("、").slice(0, 120),
+      });
+    },
+    onError: (e) => toast.error(`探测失败：${e.message}`),
+  });
 
   const syncPricingMutation = trpc.pricing.syncOfficial.useMutation({
     onSuccess: (data) => {
@@ -205,9 +220,30 @@ export default function ModelsPanel() {
           <>
             {/* 模型列表 */}
             <div className="glass-panel p-4 sci-border mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Cpu size={14} style={{ color: "var(--accent-cyan)" }} />
-                <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>可用模型</span>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Cpu size={14} style={{ color: "var(--accent-cyan)" }} />
+                  <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>可用模型</span>
+                  {probeQuery.data?.ts && (
+                    <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                      最近探测 {new Date(probeQuery.data.ts).toLocaleString("zh-CN", { hour12: false })}
+                    </span>
+                  )}
+                </div>
+                <AdminGate fallback={
+                  <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>仅管理员可探测</span>
+                }>
+                  <button
+                    onClick={() => probeMutation.mutate({})}
+                    disabled={probeMutation.isPending}
+                    className="flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded disabled:opacity-50"
+                    style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
+                    title="对默认模型 / 助手模型 / 兜底模型各发一个最小请求，确认网关真的可用"
+                  >
+                    <Activity size={11} className={probeMutation.isPending ? "animate-pulse" : ""} />
+                    {probeMutation.isPending ? "探测中…" : "检测关键模型"}
+                  </button>
+                </AdminGate>
               </div>
               {listQuery.isLoading ? (
                 <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>
@@ -234,6 +270,23 @@ export default function ModelsPanel() {
                           <tr key={m} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                             <td className="py-2 px-3" style={{ color: isDefault ? "var(--accent-gold)" : "var(--text-primary)", fontWeight: isDefault ? 700 : 400 }}>
                               {m}
+                              {(() => {
+                                const probe = probeQuery.data?.results?.[m];
+                                if (!probe) return null;
+                                return (
+                                  <span
+                                    className="ml-1.5 text-[9px] px-1 py-0.5 rounded align-middle"
+                                    style={{
+                                      background: probe.ok ? "rgba(52,211,153,0.10)" : "rgba(248,113,113,0.10)",
+                                      color: probe.ok ? "var(--success)" : "var(--accent-red)",
+                                      border: `1px solid ${probe.ok ? "rgba(52,211,153,0.3)" : "rgba(248,113,113,0.3)"}`,
+                                    }}
+                                    title={probe.ok ? `实测可用（${probe.ms}ms）` : `实测不可用：${probe.error ?? "未知错误"}`}
+                                  >
+                                    {probe.ok ? `✓ ${probe.ms}ms` : "✗ 不可用"}
+                                  </span>
+                                );
+                              })()}
                               {pricing[m]?.tiered && (
                                 <span
                                   className="ml-1.5 text-[9px] px-1 py-0.5 rounded align-middle"

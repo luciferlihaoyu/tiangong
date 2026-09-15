@@ -5,7 +5,8 @@
  * 任务执行器 (task-runner) 的模型解析优先级：agent.model > 默认模型(设置) > TIANSHU_MODEL 环境变量。
  */
 import { z } from "zod";
-import { createRouter, userQuery, adminQuery } from "./middleware";
+import { createRouter, userQuery, adminQuery, publicQuery } from "./middleware";
+import { getAssistantModel } from "./lib/ai-assistant";
 import { getDb } from "./queries/connection";
 import { agents, modelPricing } from "@db/schema";
 import { eq } from "drizzle-orm";
@@ -14,6 +15,10 @@ import { parseTieredPricing } from "./lib/model-pricing";
 
 const DEFAULT_BASE_URL = "https://woppis1.zeabur.app";
 export const TIANSHU_DEFAULT_MODEL_KEY = "tianshu_default_model";
+/** 死模型兜底候选（默认模型频道下线时换这个再试一次）；空 = 回退助手模型 */
+export const TIANSHU_FALLBACK_MODEL_KEY = "tianshu_fallback_model";
+/** 模型可用性探测结果缓存（JSON：{ ts, results: { model: { ok, ms, error } } }） */
+export const MODEL_PROBE_CACHE_KEY = "tianshu_model_probe_cache";
 
 type PricingInfo = Record<string, {
   inputPrice: string;
@@ -43,6 +48,21 @@ function safeHost(): string {
 export async function resolveTianshuDefaultModel(): Promise<string> {
   const fromSettings = await getSetting(TIANSHU_DEFAULT_MODEL_KEY).catch(() => null);
   return (fromSettings || "").trim() || (process.env.TIANSHU_MODEL || "").trim();
+}
+
+/**
+ * 解析死模型兜底候选：system_settings(tianshu_fallback_model) → 环境变量
+ * TIANSHU_FALLBACK_MODEL → 空串（调用方自行回退助手模型）。
+ */
+export async function resolveTianshuFallbackModel(): Promise<string> {
+  const fromSettings = await getSetting(TIANSHU_FALLBACK_MODEL_KEY).catch(() => null);
+  return (fromSettings || "").trim() || (process.env.TIANSHU_FALLBACK_MODEL || "").trim();
+}
+
+export interface ProbeResult {
+  ok: boolean;
+  ms: number;
+  error?: string;
 }
 
 interface TianshuModelsPayload {
@@ -108,6 +128,103 @@ export const tianshuRouter = createRouter({
     .mutation(async ({ input }) => {
       await setSetting(TIANSHU_DEFAULT_MODEL_KEY, input.model, "tianshu");
       return { success: true as const, defaultModel: input.model };
+    }),
+
+  /** 死模型兜底候选（公开读：助手页展示用） */
+  getFallbackModel: publicQuery.query(async () => ({
+    model: await resolveTianshuFallbackModel(),
+    /** 空 = 未配置时实际使用助手模型兜底 */
+    effectiveFromAssistant: !(await resolveTianshuFallbackModel()),
+  })),
+
+  /** 设置死模型兜底候选（admin）；空字符串 = 清除，回退用助手模型 */
+  setFallbackModel: adminQuery
+    .input(z.object({ model: z.string().max(100) }))
+    .mutation(async ({ input }) => {
+      await setSetting(TIANSHU_FALLBACK_MODEL_KEY, input.model.trim(), "tianshu");
+      return { success: true as const, model: input.model.trim() };
+    }),
+
+  /** 模型可用性探测结果缓存（公开读，模型表展示徽标用） */
+  getModelProbe: publicQuery.query(async () => {
+    const raw = await getSetting(MODEL_PROBE_CACHE_KEY).catch(() => null);
+    if (!raw) return { ts: null as string | null, results: {} as Record<string, ProbeResult> };
+    try {
+      const parsed = JSON.parse(raw) as { ts?: string; results?: Record<string, ProbeResult> };
+      return { ts: parsed.ts ?? null, results: parsed.results ?? {} };
+    } catch {
+      return { ts: null as string | null, results: {} as Record<string, ProbeResult> };
+    }
+  }),
+
+  /**
+   * 探测模型可用性（admin）：发一个最小 chat 请求，把结果并入缓存。
+   * 不传 models 时探测「关键模型」：默认模型 + 助手模型 + 兜底模型。
+   */
+  probeModels: adminQuery
+    .input(z.object({ models: z.array(z.string().min(1).max(100)).max(20).optional() }))
+    .mutation(async ({ input }) => {
+      const targets = input.models?.length
+        ? Array.from(new Set(input.models))
+        : Array.from(
+            new Set(
+              [
+                await resolveTianshuDefaultModel(),
+                await resolveTianshuFallbackModel(),
+                await getAssistantModel(),
+              ].filter((m): m is string => Boolean(m && m.trim()))
+            )
+          );
+      if (targets.length === 0) return { results: {} as Record<string, ProbeResult>, probed: 0 };
+
+      const results: Record<string, ProbeResult> = {};
+      for (const model of targets) {
+        const startedAt = Date.now();
+        try {
+          const resp = await fetch(`${tianshuBaseUrl()}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${tianshuApiKey()}` },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: "user", content: "hi" }],
+              max_tokens: 1,
+              stream: false,
+            }),
+            signal: AbortSignal.timeout(12000),
+          });
+          const body = await resp.text();
+          if (resp.ok) {
+            results[model] = { ok: true, ms: Date.now() - startedAt };
+          } else {
+            results[model] = {
+              ok: false,
+              ms: Date.now() - startedAt,
+              error: body.slice(0, 160) || `HTTP ${resp.status}`,
+            };
+          }
+        } catch (e) {
+          results[model] = {
+            ok: false,
+            ms: Date.now() - startedAt,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+      }
+
+      // 并入历史缓存（保留旧条目，只更新本次探测的模型）
+      const prevRaw = await getSetting(MODEL_PROBE_CACHE_KEY).catch(() => null);
+      let prev: Record<string, ProbeResult> = {};
+      if (prevRaw) {
+        try {
+          prev = (JSON.parse(prevRaw) as { results?: Record<string, ProbeResult> }).results ?? {};
+        } catch {
+          prev = {};
+        }
+      }
+      const merged = { ...prev, ...results };
+      await setSetting(MODEL_PROBE_CACHE_KEY, JSON.stringify({ ts: new Date().toISOString(), results: merged }), "tianshu");
+
+      return { results, probed: targets.length };
     }),
 
   /** 清除默认模型（回退到 TIANSHU_MODEL 环境变量 / 智能体自带模型） */

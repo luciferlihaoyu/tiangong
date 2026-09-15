@@ -9,6 +9,7 @@ import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { toast } from "sonner";
 import { fmtDateShort } from "@/lib/format";
+import { useNavigate } from "react-router";
 import {
   MessageSquare,
   RefreshCw,
@@ -47,6 +48,16 @@ interface SharedSession {
   createdBy: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 协作任务镜像消息的 metadata（collab-session 写入） */
+interface SessionMessageMeta {
+  childTaskId?: number;
+  parentTaskId?: number;
+  childTaskKey?: string;
+  progress?: number;
+  status?: string;
+  subtaskCount?: number;
 }
 
 interface SessionMessage {
@@ -164,11 +175,23 @@ function MessageBubble({
   msg: SessionMessage;
   agents: Agent[];
 }) {
+  const navigate = useNavigate();
   const rc = ROLE_CONFIG[msg.role] || ROLE_CONFIG.assistant;
   const sender = msg.fromAgentId
     ? agents.find((a) => a.id === msg.fromAgentId)
     : null;
   const senderName = sender?.name || (msg.role === "user" ? "用户" : msg.role === "system" ? "系统" : "未知");
+
+  // 协作任务镜像消息带 metadata（childTaskId / parentTaskId）→ 给一个回跳任务的入口
+  let meta: SessionMessageMeta | null = null;
+  if (msg.metadata) {
+    try {
+      meta = JSON.parse(msg.metadata) as SessionMessageMeta;
+    } catch {
+      meta = null;
+    }
+  }
+  const jumpTaskId = meta?.childTaskId ?? meta?.parentTaskId ?? null;
 
   return (
     <div className="mb-4">
@@ -192,6 +215,20 @@ function MessageBubble({
       >
         {msg.content}
       </div>
+      {jumpTaskId !== null && (
+        <button
+          onClick={() => navigate(`/tasks?task=${jumpTaskId}`)}
+          className="mt-1.5 text-[10px] font-mono px-2 py-0.5 rounded"
+          style={{
+            background: "rgba(14,116,144,0.10)",
+            color: "var(--accent-cyan)",
+            border: "1px solid rgba(14,116,144,0.25)",
+          }}
+          title="跳转到任务工作台并打开详情"
+        >
+          查看{meta?.childTaskId ? "子" : "父"}任务 {meta?.childTaskKey ?? `#${jumpTaskId}`} ↗
+        </button>
+      )}
     </div>
   );
 }

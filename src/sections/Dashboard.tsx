@@ -889,14 +889,28 @@ export function MessagePanel({
       {chatMode === "webui" && (
         <div className="flex-1 min-h-0 flex flex-col">
           {webuiQuery.data?.url ? (
-            <iframe
-              src={webuiQuery.data.url}
-              className="w-full flex-1 rounded"
-              style={{ border: "1px solid var(--border-default)", minHeight: fullHeight ? "0" : "480px", background: "#fff" }}
-              title="Open WebUI"
-              loading="eager"
-              allow="microphone; clipboard-read; clipboard-write"
-            />
+            <div className="flex flex-col flex-1 min-h-0 gap-1">
+              <iframe
+                src={webuiQuery.data.url}
+                className="w-full flex-1 rounded"
+                style={{ border: "1px solid var(--border-default)", minHeight: fullHeight ? "0" : "480px", background: "#fff" }}
+                title="Open WebUI"
+                loading="eager"
+                allow="microphone; clipboard-read; clipboard-write"
+              />
+              <div className="flex items-center justify-between text-[10px] font-mono flex-shrink-0" style={{ color: "var(--text-muted)" }}>
+                <span>会话固定保存在 Open WebUI 侧，切换页面不丢</span>
+                <a
+                  href={webuiQuery.data.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                  style={{ color: "var(--accent-cyan)" }}
+                >
+                  加载不出来？新窗口打开 ↗
+                </a>
+              </div>
+            </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6 rounded"
               style={{ border: "1px dashed var(--border-default)", minHeight: "480px" }}>

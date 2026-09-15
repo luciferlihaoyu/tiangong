@@ -8,14 +8,17 @@ import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
 import { toast } from "sonner";
-import { Bot, ShieldCheck, Archive, RefreshCw, AlertTriangle } from "lucide-react";
+import { Bot, ShieldCheck, Archive, RefreshCw, AlertTriangle, Wrench, Clock } from "lucide-react";
 
 export function AssistantSection() {
   const utils = trpc.useUtils();
   const [limitDraft, setLimitDraft] = useState<string>("");
   const [archivePreview, setArchivePreview] = useState<{ count: number; ids: number[] } | null>(null);
 
+  const [repairResult, setRepairResult] = useState<{ rows: Array<{ table: string; column: string; dirty: number }>; totalDirty: number } | null>(null);
   const modelQuery = trpc.assistant.getModel.useQuery(undefined, { retry: 1 });
+  const fallbackQuery = trpc.tianshu.getFallbackModel.useQuery(undefined, { retry: 1 });
+  const repairScanQuery = trpc.assistant.timestampRepairScan.useQuery(undefined, { retry: 0, enabled: false });
   const modelsQuery = trpc.tianshu.listModels.useQuery(undefined, { retry: 1, staleTime: 60_000 });
   const autoQuery = trpc.assistant.getAutoApprove.useQuery(undefined, { retry: 1 });
 
@@ -49,7 +52,25 @@ export function AssistantSection() {
     onError: (e) => toast.error(`归档失败：${e.message}`),
   });
 
+  const setFallbackMutation = trpc.tianshu.setFallbackModel.useMutation({
+    onSuccess: (d) => {
+      utils.tianshu.getFallbackModel.invalidate();
+      toast.success(d.model ? `兜底模型已设为 ${d.model}` : "已清除兜底模型（回退助手模型）");
+    },
+    onError: (e) => toast.error(`设置失败：${e.message}`),
+  });
+
+  const repairApplyMutation = trpc.assistant.timestampRepairApply.useMutation({
+    onSuccess: (d) => {
+      toast.success(`已修复 ${d.totalUpdated} 行时间戳`);
+      setRepairResult(null);
+      repairScanQuery.refetch();
+    },
+    onError: (e) => toast.error(`修复失败：${e.message}`),
+  });
+
   const auto = autoQuery.data;
+  const fallbackModel = fallbackQuery.data?.model ?? "";
   const models = modelsQuery.data?.models ?? [];
   const currentModel = modelQuery.data?.model ?? "";
 
@@ -92,6 +113,50 @@ export function AssistantSection() {
             </select>
             {setModelMutation.isPending && (
               <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>切换中…</span>
+            )}
+          </div>
+        </AdminGate>
+      </div>
+
+      {/* ── 死模型兜底 ── */}
+      <div className="glass-panel p-4 sci-border">
+        <div className="flex items-center gap-2 mb-3">
+          <Wrench size={14} style={{ color: "var(--accent-gold)" }} />
+          <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>
+            任务执行 · 死模型兜底
+          </span>
+        </div>
+        <p className="text-[10px] font-mono mb-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+          任务执行时若配置的模型在网关**频道已下线**（永久性错误，重试也没用），
+          自动换到此模型再试一次，不再烧完 3 轮退避重试才失败。留空 = 回退助手模型。
+        </p>
+        <AdminGate fallback={
+          <div className="text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>
+            当前兜底：<span style={{ color: "var(--accent-gold)" }}>{fallbackModel || "（助手模型）"}</span>
+          </div>
+        }>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={fallbackModel}
+              onChange={(e) => setFallbackMutation.mutate({ model: e.target.value })}
+              disabled={setFallbackMutation.isPending || models.length === 0}
+              className="text-xs font-mono px-2 py-1.5 rounded"
+              style={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-default)",
+                color: "var(--accent-gold)",
+                minWidth: "220px",
+              }}
+            >
+              <option value="">（回退助手模型）</option>
+              {models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {fallbackQuery.data?.effectiveFromAssistant && (
+              <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                未配置，当前实际用助手模型兜底
+              </span>
             )}
           </div>
         </AdminGate>
@@ -235,6 +300,70 @@ export function AssistantSection() {
               </span>
             )}
           </div>
+        </AdminGate>
+      </div>
+
+      {/* ── 时间戳修复（58669 年存量脏数据） ── */}
+      <div className="glass-panel p-4 sci-border">
+        <div className="flex items-center gap-2 mb-3">
+          <Clock size={14} style={{ color: "#f472b6" }} />
+          <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>
+            时间戳存量修复
+          </span>
+        </div>
+        <p className="text-[10px] font-mono mb-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+          历史数据侧收尾：早期 `defaultNow()` 写入的是毫秒但按秒读，导致线程/消息时间
+          显示成 +58669 年（新写入已修）。这里一次性把库里 &gt;5138 年的秒值 ÷1000 修回。
+          **幂等**，重复执行不会二次除；只读扫描先行，确认后再修。
+        </p>
+        <AdminGate fallback={
+          <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>仅管理员可执行</div>
+        }>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={async () => {
+                const res = await repairScanQuery.refetch();
+                const d = res.data;
+                if (d) {
+                  setRepairResult({ rows: d.rows, totalDirty: d.totalDirty });
+                  toast.info(d.totalDirty === 0 ? "没有需要修复的时间戳" : `发现 ${d.totalDirty} 行待修复`);
+                }
+              }}
+              className="flex items-center gap-1.5 text-[11px] font-mono px-3 py-1.5 rounded"
+              style={{ color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
+            >
+              <RefreshCw size={12} /> 扫描（只读）
+            </button>
+            <button
+              onClick={() => repairApplyMutation.mutate()}
+              disabled={repairApplyMutation.isPending}
+              className="flex items-center gap-1.5 text-[11px] font-mono px-3 py-1.5 rounded font-bold disabled:opacity-50"
+              style={{
+                background: "rgba(244,114,182,0.12)",
+                color: "#f472b6",
+                border: "1px solid rgba(244,114,182,0.3)",
+              }}
+            >
+              <Wrench size={12} />
+              {repairApplyMutation.isPending ? "修复中…" : "修复时间戳"}
+            </button>
+          </div>
+          {repairResult && (
+            <div className="mt-2 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+              {repairResult.totalDirty === 0 ? (
+                "全部干净，无需修复"
+              ) : (
+                <>
+                  <div>待修复 {repairResult.totalDirty} 行：</div>
+                  {repairResult.rows.map((r) => (
+                    <div key={`${r.table}.${r.column}`} className="ml-2">
+                      {r.table}.{r.column} — {r.dirty} 行
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </AdminGate>
       </div>
     </div>

@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { sharedSessions, sessionMessages, tasks, agents } from "@db/schema";
 import type { Db } from "./xuanji-sync";
 import { wsManager } from "../ws-manager";
+import { getInsertId } from "./insert-id";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -62,16 +63,15 @@ export async function ensureCollabSession(
       )
     );
 
-    const result = (await db.insert(sharedSessions).values({
+    const result = await db.insert(sharedSessions).values({
       title: `协作：${parent.name}`.slice(0, 255),
       sessionKey: key,
       type: "collaboration",
       participants: participants.length > 0 ? JSON.stringify(participants) : null,
       context: JSON.stringify({ parentTaskId }),
       createdBy: opts?.coordinatorAgentId ?? parent.agentId ?? null,
-    })) as unknown as { lastInsertRowid?: number | bigint; insertId?: number };
-    const rawId = result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : result.insertId;
-    const id = rawId && rawId > 0 ? rawId : null;
+    });
+    const id = getInsertId(result) || null;
     if (id) {
       wsManager.broadcastToDashboard({
         type: "session_created",
@@ -107,16 +107,15 @@ export async function postCollabSessionMessage(
     if (!sessionId) return false;
 
     const content = msg.content.slice(0, 5000);
-    const result = (await db.insert(sessionMessages).values({
+    const result = await db.insert(sessionMessages).values({
       sessionId,
       fromAgentId: msg.fromAgentId ?? null,
       toAgentId: null,
       role: msg.role,
       content,
       metadata: msg.metadata ? JSON.stringify(msg.metadata) : null,
-    })) as unknown as { lastInsertRowid?: number | bigint; insertId?: number };
-    const rawId = result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : result.insertId;
-    const msgId = rawId && rawId > 0 ? rawId : null;
+    });
+    const msgId = getInsertId(result) || null;
 
     await db.update(sharedSessions).set({ updatedAt: new Date() }).where(eq(sharedSessions.id, sessionId));
 

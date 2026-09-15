@@ -43,7 +43,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
-import { resolveTianshuDefaultModel } from "../tianshu-router";
+import { resolveTianshuDefaultModel, resolveTianshuFallbackModel } from "../tianshu-router";
 import { ASSISTANT_AGENT_KEY, ASSISTANT_TASK_SYSTEM_PROMPT, getAssistantModel } from "./ai-assistant";
 import { triggerAutoReview } from "./auto-approve";
 import { triggerFusionPreReview } from "./fusion-prereview";
@@ -1172,10 +1172,12 @@ class TaskRunner {
       // 死模型兜底：配置的默认模型频道下线时（实证 deepseek-v4-flash 503 烧完 3 轮重试），
       // 直接换助手模型（用户配置、确认可用）再试一次，并在错误信息里说明换模原因
       if (!first.success && first.permanentModelDead) {
-        const fallbackModel = await getAssistantModel();
+        // 兜底候选优先级：设置里的兜底模型 → 助手模型（用户配置、通常可用）
+        const configuredFallback = await resolveTianshuFallbackModel();
+        const fallbackModel = configuredFallback || (await getAssistantModel());
         if (fallbackModel && fallbackModel !== model) {
           console.warn(
-            `[TaskRunner] tianshu model "${model}" unavailable (channel dead) — falling back to assistant model "${fallbackModel}", task=${task.taskId}`
+            `[TaskRunner] tianshu model "${model}" unavailable (channel dead) — falling back to "${fallbackModel}"${configuredFallback ? " (configured fallback)" : " (assistant model)"}, task=${task.taskId}`
           );
           const second = await attempt(fallbackModel);
           if (second.success) {

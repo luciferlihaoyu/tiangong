@@ -8,6 +8,7 @@ import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getAssistantModel, ASSISTANT_MODEL_KEY, ASSISTANT_NAME } from "./lib/ai-assistant";
+import { scanTimestampRepair, applyTimestampRepair } from "./lib/timestamp-repair";
 import { getSetting, setSetting } from "./lib/settings";
 import { getDb } from "./queries/connection";
 import { tasks} from "@db/schema";
@@ -100,6 +101,18 @@ export const assistantRouter = createRouter({
       }
       return { success: true, enabled: input.enabled };
     }),
+
+  /** 时间戳存量脏数据扫描（只读）：毫秒被当秒读历史的行数统计 */
+  timestampRepairScan: adminQuery.query(async () => {
+    const db = getDb();
+    return scanTimestampRepair(db as unknown as Parameters<typeof scanTimestampRepair>[0]);
+  }),
+
+  /** 时间戳存量脏数据修复（admin，破坏性一次性数据修复，幂等） */
+  timestampRepairApply: adminQuery.mutation(async () => {
+    const db = getDb();
+    return applyTimestampRepair(db as unknown as Parameters<typeof applyTimestampRepair>[0]);
+  }),
 
   /** Open WebUI 嵌入地址（公开读，首页消息面板 iframe 用；空 = 未配置） */
   getOpenWebUi: publicQuery.query(async () => ({

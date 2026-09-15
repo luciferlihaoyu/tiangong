@@ -8,6 +8,7 @@ import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask } from "./lib/task-finalize";
 import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 import { notifyLessonRecorded } from "./lib/notification-hooks";
+import { getInsertId } from "./lib/insert-id";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
 // 核心语义：
@@ -78,7 +79,7 @@ async function recordArtifact(
     jsonPayload: input.jsonPayload ? JSON.stringify(input.jsonPayload) : null,
     mimeType: input.mimeType ?? null,
   });
-  return { artifactId: (result as any).insertId as number };
+  return { artifactId: getInsertId(result) };
 }
 
 /** 安全地更新 lifecycleStatus（严格向前流转，禁止非法回退和跳跃） */

@@ -16,6 +16,7 @@ import { getDb } from "./queries/connection";
 import { agents, tasks, messages } from "@db/schema";
 import { eq, and, inArray, desc, sql, type SQL } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { getInsertId } from "./lib/insert-id";
 
 /* ═══════════════════════════════════════════
    类型定义
@@ -287,7 +288,7 @@ export const fusionRouter = createRouter({
           taskId: input.taskId ?? null,
           priority: 10, // 审查任务较高优先级
         });
-        const messageId = (result as any).insertId as number | undefined;
+        const messageId = getInsertId(result) || undefined;
 
         // 如果审查者在线，实时推送
         if (messageId && wsManager.isOnline(reviewer.id)) {

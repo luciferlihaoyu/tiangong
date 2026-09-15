@@ -13,7 +13,6 @@ import UsagePanel from './pages/UsagePanel'
 import ModelsPanel from './pages/ModelsPanel'
 import AlistPanel from './pages/AlistPanel'
 import OpsPanel from './pages/OpsPanel'
-import FusionPanel from './pages/FusionPanel'
 import EventStream from './pages/EventStream'
 import GitHubPanel from './pages/GitHubPanel'
 import MailboxPanel from './pages/MailboxPanel'
@@ -88,7 +87,6 @@ export default function App() {
           <Route path="/models" element={<ModelsPanel />} />
           <Route path="/alist" element={<AlistPanel />} />
           <Route path="/ops" element={<OpsPanel />} />
-          <Route path="/fusion" element={<FusionPanel />} />
           <Route path="/agents" element={<AgentList />} />
           <Route path="/agents/:agentId" element={<AgentDetail />} />
           <Route path="/events" element={<EventStream />} />

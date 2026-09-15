@@ -14,6 +14,7 @@ import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
 import { notifyLessonRecorded } from "./lib/notification-hooks";
 import { recordNotification } from "./lib/notification";
 import { reportTaskProgress } from "./lib/task-writeback";
+import { getInsertId } from "./lib/insert-id";
 
 function parseJson<T = unknown>(raw: string | null): T | null {
   if (!raw) return null;
@@ -1051,7 +1052,7 @@ export const taskboardRouter = createRouter({
         lifecycleStatus: "created",
       });
 
-      const insertId = (result as any).insertId as number;
+      const insertId = getInsertId(result);
 
       wsManager.broadcastToDashboard({
         type: "task_update",

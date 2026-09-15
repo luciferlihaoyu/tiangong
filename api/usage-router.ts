@@ -6,6 +6,7 @@ import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
 import { resolveModelPricing, calculateCost, buildTokenUsageValues } from "./lib/model-pricing";
 import { recalcAllUsageCosts } from "./lib/usage-recalc";
 import { sqlDayOf } from "./lib/day-sql";
+import { getInsertId } from "./lib/insert-id";
 
 export const usageRouter = createRouter({
   /**
@@ -72,7 +73,7 @@ export const usageRouter = createRouter({
       );
 
       const result = await db.insert(tokenUsage).values(values as any);
-      const insertId = (result as any).insertId;
+      const insertId = getInsertId(result);
 
       return { id: insertId, totalTokens: total, costCents: finalCostCents, costMicros: finalCostMicros };
     }),

@@ -2,8 +2,9 @@ import { z } from "zod";
 import { createRouter, publicQuery, authedQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { sharedSessions, sessionMessages, agents } from "@db/schema";
-import { eq, desc, and, asc } from "drizzle-orm";
+import { eq, desc, and, asc, lt } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { getInsertId } from "./lib/insert-id";
 
 export const sessionRouter = createRouter({
   // ─── 会话 CRUD ───
@@ -40,7 +41,7 @@ export const sessionRouter = createRouter({
         context: input.context ? JSON.stringify(input.context) : null,
         createdBy: ctx.apiKeyAgentId && ctx.apiKeyAgentId > 0 ? ctx.apiKeyAgentId : null,
       });
-      const id = (result as any).insertId as number;
+      const id = getInsertId(result);
 
       wsManager.broadcastToDashboard({
         type: "session_created",
@@ -76,7 +77,7 @@ export const sessionRouter = createRouter({
         content: input.content,
         metadata: input.metadata ? JSON.stringify(input.metadata) : null,
       });
-      const msgId = (result as any).insertId as number;
+      const msgId = getInsertId(result);
 
       // Update session updatedAt
       await db.update(sharedSessions).set({ updatedAt: new Date() }).where(eq(sharedSessions.id, input.sessionId));
@@ -99,7 +100,8 @@ export const sessionRouter = createRouter({
     .query(async ({ input }) => {
       const db = getDb();
       const conditions = [eq(sessionMessages.sessionId, input.sessionId)];
-      if (input.before) conditions.push(eq(sessionMessages.id, input.before));
+      // 分页游标：取 before 之前（不含）的消息；此前用 eq 导致翻页重复返回同一行
+      if (input.before) conditions.push(lt(sessionMessages.id, input.before));
       return db.select().from(sessionMessages)
         .where(and(...conditions))
         .orderBy(desc(sessionMessages.createdAt))

@@ -5,6 +5,7 @@ import { agents, messages, taskDependencies, tasks } from "@db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { buildCollabSummary, unblockReadyCollabTasks } from "./lib/collaboration-events";
+import { getInsertId } from "./lib/insert-id";
 
 const taskStatusEnum = z.enum(["pending", "queued", "running", "done", "failed"]);
 
@@ -96,7 +97,7 @@ async function sendDelegationMessage(input: {
     taskId: input.childTask.id,
     priority: input.priority,
   });
-  const messageId = (result as any).insertId as number | undefined;
+  const messageId = getInsertId(result) || undefined;
 
   if (messageId && wsManager.isOnline(input.toAgent)) {
     const pushed = await db.select().from(messages).where(eq(messages.id, messageId)).then((rows) => rows[0]);

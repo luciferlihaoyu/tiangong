@@ -14,7 +14,16 @@ import { Plus, RefreshCw, Search, Layout, Shield, Gavel } from "lucide-react";
 export default function TaskBoard() {
   const navigate = useNavigate();
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
-  const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
+  // 支持 ?task=<id> 直达详情（会话中心战况室等外部入口跳转用）
+  const [detailTaskId, setDetailTaskId] = useState<number | null>(() => {
+    try {
+      const raw = new URLSearchParams(window.location.search).get("task");
+      const n = raw ? Number(raw) : NaN;
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [dropError, setDropError] = useState<string | null>(null);

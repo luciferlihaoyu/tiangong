@@ -13,6 +13,10 @@ const APP_META: Record<string, { description: string }> = {
   tianshu: { description: "模型网关" },
   alist: { description: "文件存储" },
   dsh: { description: "编程 · 部署执行" },
+  // 外部应用入口（无 SSO，点击直开新窗口）
+  openclaw: { description: "OpenClaw 网页控制台" },
+  "4sapi": { description: "API 聚合中转站" },
+  opencode: { description: "OpenCode 网页终端" },
 };
 
 /** 仅这些平台有 SSO /sso/launch 接收端：点击先调 launch 签票，成功后再开窗免登进入 */

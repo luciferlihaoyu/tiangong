@@ -1,9 +1,11 @@
 /**
  * 平台注册 + 健康聚合路由（P1-1：天宫升级为统一主平台的地基）
  *
- * - registry: 返回全平台服务注册清单（天宫自身 + 北斗 + 璇玑 + 天枢 + AList），
+ * - registry: 返回全平台服务注册清单（天宫自身 + 北斗 + 璇玑 + 天枢 + AList + DSH
+ *   + 外部应用卡 OpenClaw / 4sapi / OpenCode），
  *   各服务 base url 从环境变量读取（BEIDOU_BASE_URL / XUANJI_BASE_URL /
- *   TIANSHU_BASE_URL / ALIST_BASE_URL），未配置则留空字符串。
+ *   TIANSHU_BASE_URL / ALIST_BASE_URL），未配置则留空字符串；
+ *   外部应用卡（kind=external）的 url 另有内置默认值，未配环境变量也直接可用。
  * - health.all: 并发探活全平台；单个服务失败只影响自身结果，不拖垮整体。
  *   外部请求一律 fetch + AbortSignal.timeout，异常全部捕获转成结构化
  *   { ok: false, reason }，绝不向上抛崩。
@@ -29,7 +31,7 @@ export interface PlatformService {
   label: string;
   url: string;
   healthPath?: string;
-  kind: "self" | "app" | "gateway" | "storage";
+  kind: "self" | "app" | "gateway" | "storage" | "external";
 }
 
 /** 单个服务的健康探测结果 */
@@ -63,6 +65,12 @@ export function getPlatformServices(): PlatformService[] {
     { key: "tianshu", label: "天枢", url: stripTrailingSlash(process.env.TIANSHU_BASE_URL || ""), kind: "gateway" },
     { key: "alist", label: "AList", url: stripTrailingSlash(process.env.ALIST_BASE_URL || ""), kind: "storage" },
     { key: "dsh", label: "DSH", url: stripTrailingSlash(process.env.DSH_BASE_URL || ""), kind: "gateway" },
+    // 外部应用入口（首页卡片）：这些站点没有自建 /health，探活退化为「base 地址可达即健康」。
+    // url 支持环境变量覆盖，未配置时用内置网址 —— 改卡片文案/地址不改代码，
+    // 且无需在 Zeabur 侧补环境变量即可上线。
+    { key: "openclaw", label: "OpenClaw", url: stripTrailingSlash(process.env.OPENCLAW_BASE_URL || "https://ttrssa.xianrealme.com"), kind: "external" },
+    { key: "4sapi", label: "4sapi", url: stripTrailingSlash(process.env.S4API_BASE_URL || "https://4sapi.org"), kind: "external" },
+    { key: "opencode", label: "OpenCode", url: stripTrailingSlash(process.env.OPENCODE_BASE_URL || "https://ccood.dpdns.org"), kind: "external" },
   ];
 }
 
@@ -89,9 +97,9 @@ async function probeHealth(service: PlatformService): Promise<ServiceHealth> {
   try {
     const resp = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
     const latencyMs = Date.now() - start;
-    // gateway / storage（如 dsh-web）：401/403 表示服务在响应、只是要求登录，
-    // 视为可达（ok），避免健康灯误报 down
-    if (service.kind === "gateway" || service.kind === "storage") {
+    // gateway / storage / external（如 dsh-web、OpenClaw 控制台）：401/403 表示服务在响应、
+    // 只是要求登录，视为可达（ok），避免健康灯误报 down
+    if (service.kind === "gateway" || service.kind === "storage" || service.kind === "external") {
       if (resp.ok || resp.status === 401 || resp.status === 403) {
         return { ok: true, latencyMs };
       }

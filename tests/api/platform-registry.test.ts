@@ -54,6 +54,15 @@ describe("首页外部应用卡注册表", () => {
     expect(byKey("opencode").url).toBe("https://oc2.example.com");
   });
 
+  it("env 显式设为空串时回退内置默认（运维清空变量不会让卡片失去地址）", () => {
+    process.env.OPENCLAW_BASE_URL = "";
+    process.env.S4API_BASE_URL = "";
+    process.env.OPENCODE_BASE_URL = "";
+    expect(byKey("openclaw").url).toBe("https://ttrssa.xianrealme.com");
+    expect(byKey("4sapi").url).toBe("https://4sapi.org");
+    expect(byKey("opencode").url).toBe("https://ccood.dpdns.org");
+  });
+
   it("既有平台项未被破坏", () => {
     const services = getPlatformServices();
     const tiangong = services.find((s) => s.key === "tiangong");

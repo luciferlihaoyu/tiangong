@@ -464,26 +464,37 @@ function ApiKeyRow({
       </div>
 
       <div className="flex flex-wrap gap-2 text-[10px] items-center">
-        <span className="font-mono" style={{ color: showFullKey ? "var(--accent-red-bright)" : "var(--text-muted)" }}>
-          {showFullKey ? fullKey : item.keyPreview}
-        </span>
-        <button
-          onClick={handleReveal}
-          disabled={loadingKey}
-          className="font-mono py-0.5 px-1.5 rounded transition-all hover:brightness-110"
-          style={{ background: showFullKey ? "rgba(194,58,48,0.15)" : "rgba(100,181,246,0.08)", color: showFullKey ? "var(--accent-red)" : "var(--accent-cyan)", border: `1px solid ${showFullKey ? "rgba(194,58,48,0.2)" : "rgba(100,181,246,0.15)"}` }}
+        {/* 后端 revealKey 已收紧为 adminQuery：非管理员调用必然 403，
+            因此完整明文与查看/复制按钮只在管理员下渲染，避免露出必然失败的按钮；
+            非管理员经 fallback 仍能看到掩码 keyPreview。 */}
+        <AdminGate
+          fallback={
+            <span className="font-mono" style={{ color: "var(--text-muted)" }}>
+              {item.keyPreview}
+            </span>
+          }
         >
-          {loadingKey ? "..." : showFullKey ? "👁️ 隐藏" : "👁️ 查看"}
-        </button>
-        {showFullKey && (
+          <span className="font-mono" style={{ color: showFullKey ? "var(--accent-red-bright)" : "var(--text-muted)" }}>
+            {showFullKey ? fullKey : item.keyPreview}
+          </span>
           <button
-            onClick={handleCopy}
+            onClick={handleReveal}
+            disabled={loadingKey}
             className="font-mono py-0.5 px-1.5 rounded transition-all hover:brightness-110"
-            style={{ background: copied ? "rgba(0,200,100,0.15)" : "rgba(194,168,50,0.08)", color: copied ? "var(--success)" : "var(--accent-gold)", border: `1px solid ${copied ? "rgba(0,200,100,0.2)" : "rgba(194,168,50,0.15)"}` }}
+            style={{ background: showFullKey ? "rgba(194,58,48,0.15)" : "rgba(100,181,246,0.08)", color: showFullKey ? "var(--accent-red)" : "var(--accent-cyan)", border: `1px solid ${showFullKey ? "rgba(194,58,48,0.2)" : "rgba(100,181,246,0.15)"}` }}
           >
-            {copied ? "✅ 已复制" : "📋 复制"}
+            {loadingKey ? "..." : showFullKey ? "👁️ 隐藏" : "👁️ 查看"}
           </button>
-        )}
+          {showFullKey && (
+            <button
+              onClick={handleCopy}
+              className="font-mono py-0.5 px-1.5 rounded transition-all hover:brightness-110"
+              style={{ background: copied ? "rgba(0,200,100,0.15)" : "rgba(194,168,50,0.08)", color: copied ? "var(--success)" : "var(--accent-gold)", border: `1px solid ${copied ? "rgba(0,200,100,0.2)" : "rgba(194,168,50,0.15)"}` }}
+            >
+              {copied ? "✅ 已复制" : "📋 复制"}
+            </button>
+          )}
+        </AdminGate>
         <span
           className="font-mono py-0.5 px-1 rounded"
           style={{ background: "rgba(100,181,246,0.08)", color: "var(--accent-cyan)" }}

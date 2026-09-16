@@ -61,7 +61,9 @@ export const mcpRouter = createRouter({
     }),
 
   // ─── Reveal full key (requires confirmation) ───
-  revealKey: authedQuery
+  // 安全收紧（PR1）：mcp_api_keys 表没有 owner 字段，无法按归属授权，
+  // 只能按角色收紧——完整明文 Key 仅管理员可见，与同路由 createKey 一致。
+  revealKey: adminQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();

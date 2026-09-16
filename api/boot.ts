@@ -16,6 +16,7 @@ import { bootstrapMysqlImport } from "./lib/bootstrap-mysql-import";
 import { serveStaticFiles } from "./lib/vite";
 import { wsManager } from "./ws-manager";
 import { verifyMcpKey } from "./mcp/auth";
+import { wsTicketStore, isAllowedWsOrigin, WS_TICKET_TTL_MS } from "./lib/ws-ticket";
 import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { sweeperScheduler } from "./lib/sweepers/scheduler";
@@ -247,6 +248,24 @@ app.get("/api/ws/status", async (c) => {
   });
 });
 
+// 用 JWT 换一次性 WS ticket。浏览器原生 WebSocket 不能设自定义头，
+// dashboard 握手只能把凭据放 query，所以先发短期 ticket 再带上连接。
+// 只认 JWT 不认 Agent Key：dashboard 广播面向登录用户，不给 agent 身份。
+app.get("/api/ws-ticket", async (c) => {
+  const authHeader = c.req.header("authorization");
+  const payload = authHeader?.startsWith("Bearer ")
+    ? await verifyToken(authHeader.slice(7))
+    : null;
+  if (!payload) {
+    return c.json({ error: "请先登录" }, 401);
+  }
+  const ticket = wsTicketStore.issue({
+    userId: parseInt(payload.sub, 10),
+    role: payload.role,
+  });
+  return c.json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 // ═══════════════════════════════════════════════════════════════
@@ -422,14 +441,44 @@ app.get("/ws", async (c) => {
 
 /**
  * Dashboard 实时推送端点
- * GET /ws/dashboard
- * 无需认证，注册为 Dashboard 客户端，接收实时事件推送。
+ * GET /ws/dashboard?ticket=***
+ * 与 /ws（Agent 端点）同形态：先鉴权再 upgrade——校验 Origin（防 CSWSH）
+ * 和一次性 ticket（由 GET /api/ws-ticket 用 JWT 换取），拒绝在 upgrade 前完成。
  */
 app.get("/ws/dashboard", async (c) => {
+  // 先校验 Origin：跨站握手直接拒绝，允许清单来自环境变量（逗号分隔）。
+  // 本站位于 Cloudflare/Zeabur 代理之后，Host 可能被改写，所以把两个可能承载
+  // 公网域名的头都作为候选——任一命中即放行，避免把正常浏览器挡在 403 外。
+  const origin = c.req.header("origin") ?? null;
+  const allowList = (process.env.TIANGONG_ALLOWED_WS_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const hostCandidates = [c.req.header("host"), c.req.header("x-forwarded-host")]
+    .map((value) => value?.split(",")[0]?.trim() ?? null)
+    .filter((value): value is string => !!value);
+  const originAllowed =
+    hostCandidates.length === 0
+      ? isAllowedWsOrigin(origin, null, allowList)
+      : hostCandidates.some((host) => isAllowedWsOrigin(origin, host, allowList));
+  if (!originAllowed) {
+    console.warn("[WS] dashboard handshake rejected: bad_origin");
+    return c.json({ error: "来源不被允许" }, 403);
+  }
+
+  // 再消费一次性 ticket：缺失/过期/重放一律拒绝（日志不含凭据本身）
+  const ticket = c.req.query("ticket");
+  const ticketPayload = ticket ? wsTicketStore.consume(ticket) : null;
+  if (!ticketPayload) {
+    console.warn("[WS] dashboard handshake rejected: no_ticket");
+    return c.json({ error: "缺少或失效的 WS 凭据" }, 401);
+  }
+
   return upgradeWebSocket(c, {
     onOpen: (_evt, ws) => {
       wsManager.registerDashboard(ws);
-      console.log("[WS] Dashboard client connected");
+      // 只记用户 id，不记 ticket/凭据本身
+      console.log(`[WS] Dashboard client connected (user ${ticketPayload.userId})`);
 
       // 发送当前在线 Agent 列表
       ws.send(

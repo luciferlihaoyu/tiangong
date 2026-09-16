@@ -329,3 +329,124 @@
   .ring-container { animation: none; }
   html { scroll-behavior: auto; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   移动端适配层（≤767px）
+   ───────────────────────────────────────────────────────────
+   本项目是「密集仪表盘」风格：桌面端大量使用 text-[9px]/text-[10px]/
+   text-xs 小字号与内联固定宽度，桌面可读，但手机上 <11px 基本看不清，
+   且 <16px 的输入框会被 iOS 聚焦时强制放大整页。
+   这里在移动端做一层统一兜底，尽量不改各页面的桌面端样式。
+   位置必须在 utilities 之后（同为 class 选择器，靠源码顺序取胜）。
+   ═══════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  /* ── 1. 小字号放大到可读（桌面端不变） ── */
+  .text-\[9px\]  { font-size: 10.5px; line-height: 1.5; }
+  .text-\[10px\] { font-size: 11.5px; line-height: 1.5; }
+  .text-\[11px\] { font-size: 12.5px; line-height: 1.5; }
+  .text-xs       { font-size: 13px;   line-height: 1.6; }
+
+  /* ── 2. 触控目标：手指点得准（.tg-compact 可豁免） ── */
+  button:not(.tg-compact),
+  [role="button"],
+  select {
+    min-height: 34px;
+    touch-action: manipulation;
+  }
+  button, a, [role="button"], label, summary {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── 3. 阻止 iOS 聚焦输入框时整页放大 ── */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* ── 4. 横向滚动容器：惯性滚动 + 不因子元素撑破布局 ── */
+  .overflow-x-auto,
+  .custom-scrollbar {
+    -webkit-overflow-scrolling: touch;
+  }
+  .overflow-x-auto > table {
+    /* 列多的表格改为横向滚动，而不是把每列压成一条竖线 */
+    min-width: 480px;
+  }
+
+  /* ── 5. 弹窗：窄屏占满可用宽度、限制高度避免超出视口 ── */
+  [role="dialog"] {
+    max-width: calc(100vw - 16px) !important;
+    max-height: 88dvh !important;
+  }
+
+  /* ── 6. 刘海屏/灵动岛安全区（配合 viewport-fit=cover） ── */
+  .tg-topbar {
+    height: calc(48px + env(safe-area-inset-top)) !important;
+    padding-top: env(safe-area-inset-top);
+  }
+  .tg-content {
+    padding-top: calc(48px + env(safe-area-inset-top)) !important;
+  }
+  .tg-sidebar {
+    top: calc(48px + env(safe-area-inset-top)) !important;
+  }
+  .tg-sidebar nav {
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  }
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* ── 7. 长文本/长 ID 不撑破卡片 ── */
+  .glass-panel {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* 触屏设备（含平板）也统一惯性滚动 */
+@media (pointer: coarse) {
+  .custom-scrollbar,
+  .overflow-x-auto,
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ── 消息面板高度：桌面按视口算；移动端用 dvh（避开 iOS 地址栏吞高度） ── */
+.tg-chat-fullheight { height: calc(100vh - 130px); min-height: 560px; }
+.tg-chat-inline { min-height: 400px; }
+@supports (height: 100dvh) {
+  .tg-chat-fullheight { height: calc(100dvh - 130px); }
+}
+@media (max-width: 767px) {
+  /* 窄屏：不锁死高度，交给内容撑，至少占满剩余视口以便输入框贴底 */
+  .tg-chat-fullheight { height: auto; min-height: calc(100dvh - 160px); }
+  .tg-chat-inline { min-height: 360px; }
+}
+
+@media (max-width: 767px) {
+  /* 对话消息列表：窄屏不再锁 300px，改用可用高度（输入框贴底） */
+  .tg-msg-list { max-height: none !important; min-height: 40dvh; }
+}
+
+@media (max-width: 767px) {
+  /* 触屏没有 hover：桌面端「悬停才出现」的操作按钮在手机上必须常显，
+     否则撤回/归档/删除这类操作在手机上完全点不到 */
+  .tg-hover-actions {
+    opacity: 1 !important;
+  }
+}
+
+/* ── 工具栏行窄屏换行兜底 ──
+   body 是 overflow-x:hidden，桌面端一行排得下的按钮组在手机上会溢出，
+   溢出的部分被裁掉且完全点不到（比换行难看得多）。这里只对「直接含
+   按钮/链接的行」生效，且仅在真的放不下时才换行（放得下时行为不变）。
+   :has() 不支持的老浏览器会忽略本规则，不影响正常渲染。 */
+@media (max-width: 767px) {
+  main .flex:has(> button):not(.tg-nowrap),
+  main .flex:has(> a):not(.tg-nowrap),
+  [role="dialog"] .flex:has(> button):not(.tg-nowrap) {
+    flex-wrap: wrap;
+  }
+}

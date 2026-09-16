@@ -113,7 +113,7 @@ function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
 
   return (
     <header
-      className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4"
+      className="tg-topbar fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4"
       style={{
         height: TOPBAR_HEIGHT,
         background: theme === 'dark' ? 'rgba(5, 5, 8, 0.95)' : 'rgba(236, 238, 243, 0.95)',
@@ -242,7 +242,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
       )}
       <aside
         className={[
-          'fixed left-0 z-40 flex flex-col transition-transform duration-300 ease-in-out',
+          'tg-sidebar fixed left-0 z-40 flex flex-col transition-transform duration-300 ease-in-out',
           isMobile
             ? isOpen
               ? 'translate-x-0'
@@ -337,7 +337,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <TopBar onMenuClick={toggleMenu} />
       <Sidebar isOpen={mobileMenuOpen} onClose={closeMenu} />
       <main
-        className="relative"
+        className="tg-content relative"
         style={{
           marginLeft: isMobile ? 0 : SIDEBAR_WIDTH,
           paddingTop: TOPBAR_HEIGHT,

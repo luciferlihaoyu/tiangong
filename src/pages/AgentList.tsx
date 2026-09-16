@@ -79,7 +79,7 @@ function AgentCard({ agent }: { agent: Agent }) {
           </span>
           <ArrowRight
             size={14}
-            className="opacity-0 group-hover:opacity-100 transition-opacity"
+            className="tg-hover-actions opacity-0 group-hover:opacity-100 transition-opacity"
             style={{ color: "var(--accent-cyan)" }}
           />
         </div>

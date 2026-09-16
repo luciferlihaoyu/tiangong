@@ -107,7 +107,7 @@ function MessageCard({
   return (
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
       {/* Hover actions */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+      <div className="absolute top-2 right-2 flex gap-1 tg-hover-actions opacity-0 group-hover:opacity-100 transition-opacity z-10">
         {msg.status === "unread" && (
           <button
             onClick={(e) => { e.stopPropagation(); onAck(); }}

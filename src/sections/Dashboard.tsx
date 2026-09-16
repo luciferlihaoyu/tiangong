@@ -493,7 +493,7 @@ function AgentForm({ agent, onSubmit, onCancel }: { agent?: MockAgent; onSubmit:
       <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>名称 · NAME</Label>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder="如: 美智子" required
           style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }} /></div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <div><Label className="text-[10px] font-mono mb-1 block" style={{ color: 'var(--text-muted)' }}>来源 · SOURCE</Label>
           <select value={source} onChange={e => setSource(e.target.value)} className="w-full px-2 py-1.5 rounded text-xs"
             style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-default)', color: 'var(--text-primary)' }}>
@@ -837,10 +837,9 @@ export function MessagePanel({
 
   return (
     <div
-      className="glass-panel p-4 sci-border flex flex-col"
-      style={fullHeight ? { height: "calc(100vh - 130px)", minHeight: "560px" } : { minHeight: "400px" }}
+      className={`glass-panel p-4 sci-border flex flex-col ${fullHeight ? "tg-chat-fullheight" : "tg-chat-inline"}`}
     >
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <div className="section-label">消息面板 · MESSAGES</div>
           <div className="flex items-center gap-1 ml-2">
@@ -941,17 +940,23 @@ export function MessagePanel({
           )}
         </div>
       )}
-      <div className="flex gap-3 flex-1 min-h-0" style={{ display: chatMode === "webui" ? "none" : undefined }}>
-        {/* Agent list sidebar */}
-        <div className="w-40 flex-shrink-0 border-r overflow-y-auto custom-scrollbar" style={{ borderColor: "var(--border-default)" }}>
-          <div className="text-[10px] font-mono mb-2 px-1" style={{ color: "var(--text-muted)" }}>
+      <div
+        className="flex flex-col md:flex-row gap-2 md:gap-3 flex-1 min-h-0 min-w-0"
+        style={{ display: chatMode === "webui" ? "none" : undefined }}
+      >
+        {/* Agent 列表：桌面端左侧竖栏；窄屏改成顶部横向 chips 条（省高度、可横滑） */}
+        <div
+          className="tg-nowrap w-full md:w-40 md:flex-shrink-0 flex flex-row md:flex-col gap-1.5 md:gap-0 overflow-x-auto md:overflow-x-visible md:overflow-y-auto custom-scrollbar border-b md:border-b-0 md:border-r pb-2 md:pb-0 md:pr-0 md:pl-0 flex-shrink-0"
+          style={{ borderColor: "var(--border-default)" }}
+        >
+          <div className="hidden md:block text-[10px] font-mono mb-2 px-1 flex-shrink-0" style={{ color: "var(--text-muted)" }}>
             选择 Agent
           </div>
           {agents.map((agent) => (
             <button
               key={agent.id}
               onClick={() => setSelectedAgentId(agent.id)}
-              className="w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-1.5"
+              className="w-auto md:w-full flex-shrink-0 whitespace-nowrap text-left px-2.5 md:px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-1.5"
               style={{
                 background:
                   selectedAgentId === agent.id ? "var(--accent-glow-red)" : "transparent",
@@ -980,7 +985,7 @@ export function MessagePanel({
         </div>
 
         {/* Conversation / message area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {selectedAgentId === null ? (
             <div
               className="flex-1 flex items-center justify-center text-xs font-mono"
@@ -1026,7 +1031,7 @@ export function MessagePanel({
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar mb-2 space-y-2" style={{ maxHeight: "300px" }}>
+              <div className="tg-msg-list flex-1 overflow-y-auto custom-scrollbar mb-2 space-y-2" style={{ maxHeight: "300px" }}>
                 {loadingConv ? (
                   <div className="text-center text-xs font-mono py-4" style={{ color: "var(--text-muted)" }}>
                     加载中...

@@ -147,7 +147,7 @@ function ConversationCard({
   return (
     <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-cyan)]/20">
       {/* Hover actions */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+      <div className="absolute top-2 right-2 flex gap-1 tg-hover-actions opacity-0 group-hover:opacity-100 transition-opacity z-10">
         <button
           onClick={onView}
           className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)] flex items-center gap-1"

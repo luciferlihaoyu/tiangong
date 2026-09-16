@@ -19,9 +19,9 @@ export default function ChatPanel() {
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-6">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-16 md:pt-24 pb-4 md:pb-6">
         <div className="mb-4">
-          <h1 className="text-2xl font-black tracking-wider" style={{ color: "var(--text-primary)" }}>
+          <h1 className="text-xl md:text-2xl font-black tracking-wider" style={{ color: "var(--text-primary)" }}>
             对话
           </h1>
           <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>

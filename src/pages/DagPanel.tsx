@@ -175,7 +175,7 @@ function DagView({ dag }: { dag: DagData }) {
   }, [dag]);
 
   return (
-    <div className="flex gap-4">
+    <div className="flex flex-col md:flex-row gap-4">
       {/* DAG 图 */}
       <div className="flex-1 overflow-x-auto custom-scrollbar">
         <div className="space-y-3 min-w-[400px]">
@@ -230,7 +230,7 @@ function DagView({ dag }: { dag: DagData }) {
 
       {/* 选中节点详情 */}
       {selectedNode && (
-        <div className="w-64 flex-shrink-0">
+        <div className="w-full md:w-64 md:flex-shrink-0">
           <div className="glass-panel p-3 sci-border text-[10px] font-mono">
             <div className="text-[10px] font-bold mb-2" style={{ color: STATUS_COLORS[selectedNode.status] || "var(--text-muted)" }}>
               {STATUS_ICONS[selectedNode.status]} {selectedNode.name}

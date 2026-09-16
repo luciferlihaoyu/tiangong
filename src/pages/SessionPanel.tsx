@@ -495,14 +495,15 @@ export default function SessionPanel() {
 
   return (
     <div
-      className="min-h-screen pt-16 flex"
+      className="min-h-screen pt-16 flex flex-col md:flex-row md:h-[100dvh]"
       style={{ backgroundColor: "var(--bg-primary)" }}
     >
-      {/* ─── Left Panel: Session List ─── */}
+      {/* ─── Left Panel: Session List ───
+          桌面端固定 300px；窄屏纵向堆叠在顶部，限高 40dvh 让消息区仍可读
+          （此前硬编码 width:300，375px 手机上消息区只剩 75px 宽） */}
       <div
-        className="flex-shrink-0 flex flex-col border-r"
+        className="flex flex-col border-b md:border-b-0 md:border-r w-full md:w-[300px] md:flex-shrink-0 max-h-[40dvh] md:max-h-none overflow-y-auto md:overflow-visible custom-scrollbar"
         style={{
-          width: 300,
           borderColor: "var(--border-default)",
           background: "var(--bg-secondary)",
         }}
@@ -587,7 +588,7 @@ export default function SessionPanel() {
       </div>
 
       {/* ─── Right Panel: Messages ─── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-[60dvh] md:min-h-0">
         {selectedSession ? (
           <>
             {/* Message Header */}

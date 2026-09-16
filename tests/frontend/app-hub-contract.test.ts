@@ -17,26 +17,32 @@ import { describe, expect, it } from "vitest";
 const APP_HUB_PATH = path.resolve(import.meta.dirname, "../../src/sections/AppHub.tsx");
 const source = readFileSync(APP_HUB_PATH, "utf-8");
 
-/** 首页新增的三张外部应用卡 */
-const NEW_KEYS = ["openclaw", "4sapi", "opencode"] as const;
+/** 首页外部/新接入卡片：这些站点没有 /sso/launch 接收端，必须直开外链 */
+const DIRECT_OPEN_KEYS = ["openclaw", "4sapi", "opencode", "fusheng"] as const;
 
 describe("首页卡片前端契约（AppHub.tsx）", () => {
-  it("三张新卡都有专属中文描述（缺失会回退 label 造成标题/描述重复）", () => {
-    for (const description of ["OpenClaw 网页控制台", "API 聚合中转站", "OpenCode 网页终端"]) {
+  it("新卡都有专属中文描述（缺失会回退 label 造成标题/描述重复）", () => {
+    for (const description of [
+      "OpenClaw 网页控制台",
+      "API 聚合中转站",
+      "OpenCode 网页终端",
+      "AI 影视创作工作台",
+    ]) {
       expect(source).toContain(description);
     }
   });
 
-  it("APP_META 覆盖三个新 key", () => {
+  it("APP_META 覆盖所有新 key", () => {
     expect(source).toMatch(/^\s*openclaw:\s*\{/m);
     expect(source).toMatch(/^\s*"4sapi":\s*\{/m);
     expect(source).toMatch(/^\s*opencode:\s*\{/m);
+    expect(source).toMatch(/^\s*fusheng:\s*\{/m);
   });
 
   it("新 key 不在 SSO_KEYS 白名单里（应直开外链，不误走 platform.launch 签票）", () => {
     const ssoLine = source.split("\n").find((line) => line.includes("const SSO_KEYS"));
     expect(ssoLine, "未找到 SSO_KEYS 定义").toBeDefined();
-    for (const key of NEW_KEYS) {
+    for (const key of DIRECT_OPEN_KEYS) {
       expect(ssoLine!).not.toContain(key);
     }
   });

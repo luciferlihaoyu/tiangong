@@ -12,7 +12,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getPlatformServices } from "../../api/platform-router";
 
-const ENV_KEYS = ["OPENCLAW_BASE_URL", "S4API_BASE_URL", "OPENCODE_BASE_URL"] as const;
+const ENV_KEYS = [
+  "OPENCLAW_BASE_URL",
+  "S4API_BASE_URL",
+  "OPENCODE_BASE_URL",
+  "FUSHENG_BASE_URL",
+] as const;
 
 /** 按 key 取注册项；缺失直接断言失败，避免后续 undefined 取值噪音 */
 function byKey(key: string) {
@@ -79,5 +84,34 @@ describe("首页外部应用卡注册表", () => {
   it("key 唯一（避免前端 React key 冲突与 pluginByKey 覆盖）", () => {
     const keys = getPlatformServices().map((s) => s.key);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+/**
+ * 浮生若梦（AI 影视创作工作台）自带 /api/health（返回 {"ok":true,...}），
+ * 因此按 beidou/xuanji 同款 kind="app" 注册：健康灯探的是真实健康端点，
+ * 而不是退化成 external 的「base 可达即健康」。
+ */
+describe("浮生若梦卡片", () => {
+  it("注册为 app 类型并指向自带健康端点 /api/health", () => {
+    const svc = byKey("fusheng");
+    expect(svc.kind).toBe("app");
+    expect(svc.healthPath).toBe("/api/health");
+    expect(svc.label).toBe("浮生若梦");
+  });
+
+  it("未配置 env 时用内置默认网址（尾斜杠已 strip）", () => {
+    delete process.env.FUSHENG_BASE_URL;
+    expect(byKey("fusheng").url).toBe("https://fusheng-ruomeng.xianrealme.com");
+  });
+
+  it("env 覆盖生效且尾斜杠仍被 strip", () => {
+    process.env.FUSHENG_BASE_URL = "https://fs.example.com/";
+    expect(byKey("fusheng").url).toBe("https://fs.example.com");
+  });
+
+  it("排在既有平台卡之后（首页网格顺序稳定）", () => {
+    const keys = getPlatformServices().map((s) => s.key);
+    expect(keys.indexOf("fusheng")).toBeGreaterThan(keys.indexOf("xuanji"));
   });
 });

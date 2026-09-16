@@ -13,6 +13,8 @@ const APP_META: Record<string, { description: string }> = {
   tianshu: { description: "模型网关" },
   alist: { description: "文件存储" },
   dsh: { description: "编程 · 部署执行" },
+  // 平台应用（自带 /api/health，纳入探活；无 SSO 接收端，直开外链）
+  fusheng: { description: "AI 影视创作工作台" },
   // 外部应用入口（无 SSO，点击直开新窗口）
   openclaw: { description: "OpenClaw 网页控制台" },
   "4sapi": { description: "API 聚合中转站" },

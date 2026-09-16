@@ -1,8 +1,8 @@
 /**
  * 平台注册 + 健康聚合路由（P1-1：天宫升级为统一主平台的地基）
  *
- * - registry: 返回全平台服务注册清单（天宫自身 + 北斗 + 璇玑 + 天枢 + AList + DSH
- *   + 外部应用卡 OpenClaw / 4sapi / OpenCode），
+ * - registry: 返回全平台服务注册清单（天宫自身 + 北斗 + 璇玑 + 浮生若梦 + 天枢 +
+ *   AList + DSH + 外部应用卡 OpenClaw / 4sapi / OpenCode），
  *   各服务 base url 从环境变量读取（BEIDOU_BASE_URL / XUANJI_BASE_URL /
  *   TIANSHU_BASE_URL / ALIST_BASE_URL），未配置则留空字符串；
  *   外部应用卡（kind=external）的 url 另有内置默认值，未配环境变量也直接可用。
@@ -62,6 +62,10 @@ export function getPlatformServices(): PlatformService[] {
     { key: "tiangong", label: "天宫", url: "", healthPath: "/health", kind: "self" },
     { key: "beidou", label: "北斗", url: stripTrailingSlash(process.env.BEIDOU_BASE_URL || ""), healthPath: "/health", kind: "app" },
     { key: "xuanji", label: "璇玑", url: stripTrailingSlash(process.env.XUANJI_BASE_URL || ""), healthPath: "/health", kind: "app" },
+    // 浮生若梦（AI 影视创作工作台）：自带 /api/health 返回 {"ok":true,...}，
+    // 与北斗/璇玑同为 app 类型 —— 健康灯探真实健康端点，不是「可达即健康」。
+    // 无 /sso/launch 接收端，故不进前端 SSO_KEYS，点击直开新窗口。
+    { key: "fusheng", label: "浮生若梦", url: stripTrailingSlash(process.env.FUSHENG_BASE_URL || "https://fusheng-ruomeng.xianrealme.com"), healthPath: "/api/health", kind: "app" },
     { key: "tianshu", label: "天枢", url: stripTrailingSlash(process.env.TIANSHU_BASE_URL || ""), kind: "gateway" },
     { key: "alist", label: "AList", url: stripTrailingSlash(process.env.ALIST_BASE_URL || ""), kind: "storage" },
     { key: "dsh", label: "DSH", url: stripTrailingSlash(process.env.DSH_BASE_URL || ""), kind: "gateway" },

@@ -127,7 +127,7 @@ flowchart LR
 
 ### 具体操作断点
 
-- **会话任务深链**：SessionPanel.tsx:220发/tasks?task=N，Tasks.tsx:29-31缺省center、:80-83仅board挂TaskBoard；TaskBoard.tsx:20用window.location.search，在标准#/tasks?...下读不到hash后参数。优先复用/tasks/:id（App.tsx:96），兼容旧?task=。标签以路由为状态源，覆盖刷新/前进/后退。
+- ~~**会话任务深链**~~ **✅ 本轮已修复**：原 SessionPanel.tsx:220 发 `/tasks?task=N` 有两处失效——(a) Tasks.tsx 缺省 center 使 TaskBoard 根本不挂载；(b) TaskBoard.tsx:20 读 `window.location.search`，而 HashRouter 下该值恒为空字符串（已用 URL 解析实证：search=`""`、hash=`#/tasks?task=5`），故深链从未生效。修法：SessionPanel 直接跳 `/tasks/:id` 详情页（与通知中心 NotificationItem.tsx:146 的既有可用路径一致）；旧式 `?task=` 契约（docs/APPROVAL_AND_PREREVIEW.md:74）不废弃，改为 TaskBoard 用 useSearchParams 正确读取，且 Tasks.tsx 在「带 task 无 tab」时缺省落 board，用户显式切 Tab 时清掉 task 以免刷新被拉回。
 - Tasks.tsx:16称切回保持状态，但条件卸载会丢local state；选择性保存草稿/筛选/滚动，明确范围，不无故加全局状态库。拆:47,78-83嵌套整页壳，减少重复顶部留白。
 - **Fusion分清两链**：旧页面无路由不等于预审无UI，预审在TaskDetailModal.tsx:1014-1015,1185渲染。旧#/fusion兼容到审查上下文或只读历史；未接消费端的审查链禁启动并解释，不复活永久pending按钮，不再加重复主面板。
 - **OWUI独立边界**：Dashboard.tsx:889-899跨域iframe，天宫CSS不能修改内部界面，不自动共享任务/归档/登录。保留聊天与新窗口；未来对话转任务必须明确提交确认，不能默认导入全部聊天。

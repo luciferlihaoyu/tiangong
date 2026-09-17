@@ -27,12 +27,18 @@ const TAB_DEFS: { key: TaskTab; label: string; icon: React.ReactNode; hint: stri
 export default function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams();
   const raw = searchParams.get("tab") as TaskTab | null;
-  const initial = raw && TAB_DEFS.some((t) => t.key === raw) ? raw : "center";
+  // 旧式深链 ?task=<id> 的详情弹窗由任务板承载（契约见 docs/APPROVAL_AND_PREREVIEW.md），
+  // 所以带 task 且未显式指定 tab 时要落在「任务板」——否则 TaskBoard 不挂载，弹窗永远打不开。
+  const hasTaskParam = searchParams.get("task") !== null;
+  const initial = raw && TAB_DEFS.some((t) => t.key === raw) ? raw : hasTaskParam ? "board" : "center";
   const [tab, setTab] = useState<TaskTab>(initial);
 
   const switchTab = (key: TaskTab) => {
     setTab(key);
     const next = new URLSearchParams(searchParams);
+    // 用户显式切 Tab = 已离开那条任务深链的上下文，顺手清掉 task，
+    // 否则刷新后会因 hasTaskParam 又被拉回任务板，把用户的选择覆盖掉。
+    next.delete("task");
     if (key === "center") {
       next.delete("tab");
     } else {

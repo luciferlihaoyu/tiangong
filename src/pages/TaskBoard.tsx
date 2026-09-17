@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,16 +14,22 @@ import { Plus, RefreshCw, Search, Layout, Shield, Gavel } from "lucide-react";
 export default function TaskBoard() {
   const navigate = useNavigate();
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
-  // 支持 ?task=<id> 直达详情（会话中心战况室等外部入口跳转用）
+  // 旧式深链 ?task=<id>（对外契约见 docs/APPROVAL_AND_PREREVIEW.md）。
+  // 必须用 useSearchParams 读：本项目是 HashRouter，查询串在 hash 里，
+  // window.location.search 恒为空字符串——历史实现正是这么读的，所以该深链从未生效。
+  // 新的「查看任务」入口统一走 /tasks/:id 详情页，这里保留旧式链接兼容。
+  const [searchParams] = useSearchParams();
+  const taskParam = searchParams.get("task");
   const [detailTaskId, setDetailTaskId] = useState<number | null>(() => {
-    try {
-      const raw = new URLSearchParams(window.location.search).get("task");
-      const n = raw ? Number(raw) : NaN;
-      return Number.isFinite(n) && n > 0 ? n : null;
-    } catch {
-      return null;
-    }
+    const n = taskParam ? Number(taskParam) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
   });
+  // 已在看板上时参数变化（同页跳转不重挂载）也要打开对应详情
+  useEffect(() => {
+    if (taskParam === null) return;
+    const n = Number(taskParam);
+    if (Number.isFinite(n) && n > 0) setDetailTaskId(n);
+  }, [taskParam]);
   const [showCreate, setShowCreate] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [dropError, setDropError] = useState<string | null>(null);

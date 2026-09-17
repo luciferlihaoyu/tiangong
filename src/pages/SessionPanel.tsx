@@ -217,14 +217,14 @@ function MessageBubble({
       </div>
       {jumpTaskId !== null && (
         <button
-          onClick={() => navigate(`/tasks?task=${jumpTaskId}`)}
+          onClick={() => navigate(`/tasks/${jumpTaskId}`)}
           className="mt-1.5 text-[10px] font-mono px-2 py-0.5 rounded"
           style={{
             background: "rgba(14,116,144,0.10)",
             color: "var(--accent-cyan)",
             border: "1px solid rgba(14,116,144,0.25)",
           }}
-          title="跳转到任务工作台并打开详情"
+          title="打开该任务详情页"
         >
           查看{meta?.childTaskId ? "子" : "父"}任务 {meta?.childTaskKey ?? `#${jumpTaskId}`} ↗
         </button>

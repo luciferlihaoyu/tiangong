@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lte } from "drizzle-orm";
 import { taskOutboxEvents, type TaskOutboxEvent } from "@db/schema";
 import { getDb } from "../queries/connection";
 import { signRawBody } from "./raw-body-signature";
@@ -186,10 +186,32 @@ export async function enqueueTaskOutboxEvent(db: Database | Transaction, input: 
   return eventId;
 }
 
+/**
+ * 选出待投递的事件：未投递、未死信、已到投递时间。
+ *
+ * WHERE 必须下推到 SQL——历史上这里先 `SELECT … LIMIT 100` 再在 JS 侧 filter，
+ * 一旦表头堆满已投递/死信行，待投递事件会被挤到 LIMIT 之外**永久饿死**
+ * （真 SQL 回归见 tests/api/task-outbox-starvation.test.ts）。
+ * idx_task_outbox_due(next_attempt_at, delivered_at, dead_letter_at) 覆盖本查询。
+ * @testable
+ */
+export async function selectDue(db: Database, now: Date): Promise<OutboxEventView[]> {
+  return db
+    .select()
+    .from(taskOutboxEvents)
+    .where(
+      and(
+        isNull(taskOutboxEvents.deliveredAt),
+        isNull(taskOutboxEvents.deadLetterAt),
+        lte(taskOutboxEvents.nextAttemptAt, now),
+      ),
+    )
+    .limit(100);
+}
+
 export async function dispatchDueOutboxEvents(now: Date = new Date()): Promise<number> {
   const db = getDb();
-  const rows = await db.select().from(taskOutboxEvents).limit(100);
-  const due = rows.filter((event) => event.deliveredAt === null && event.deadLetterAt === null && event.nextAttemptAt <= now);
+  const due = await selectDue(db, now);
   for (const event of due) {
     const binding = bindingFor(event);
     const result = await dispatchOutboxEvent(event, binding, { now, send: sendCallback, log: console.warn });

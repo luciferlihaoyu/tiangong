@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getTableConfig } from "drizzle-orm/mysql-core";
+import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { taskOutboxEvents, tasks } from "@db/schema";
 
 const shared = vi.hoisted(() => ({ db: null as unknown as import("./helpers/fake-db").FakeDb }));

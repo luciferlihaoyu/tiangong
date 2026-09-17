@@ -115,12 +115,22 @@ class NodeSqliteStatement {
   }
 }
 
+/** 值是否为 thenable（用于区分同步/异步事务回调，不引入实例化开销）。 */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === "object" && value !== null) || typeof value === "function"
+  ) && typeof (value as { then?: unknown }).then === "function";
+}
+
 /**
  * Transaction wrapper that emulates better-sqlite3's `Transaction` shape.
- * It does not use SQLite's native SAVEPOINT/BEGIN machinery itself; instead
- * it sits on top of a fresh `DatabaseSync` opened in `BEGIN IMMEDIATE`
- * mode for the duration of the callback. This is sufficient for drizzle's
- * transaction call site, which is the only consumer in the runtime path.
+ *
+ * 事务边界必须包住回调的全部语句，而 node:sqlite 是**同步**驱动：
+ * async 回调只同步执行到第一个 await，其余语句落在微任务里执行。
+ * 因此这里等回调 settle 之后再 COMMIT/ROLLBACK。
+ * 历史实现在 `fn()` 返回后立刻 COMMIT——而 async 回调返回到的是一个未完成的
+ * Promise，于是「事务」实际只覆盖到第一个 await 之前的语句：后段失败回滚不了，
+ * 已执行的写入留在库里（tests/api/node-sqlite-transaction.test.ts 有回归断言）。
  */
 function makeTransaction<F extends (...args: unknown[]) => unknown>(
   fn: F,
@@ -131,20 +141,45 @@ function makeTransaction<F extends (...args: unknown[]) => unknown>(
   immediate(...args: Parameters<F>): ReturnType<F>;
   exclusive(...args: Parameters<F>): ReturnType<F>;
 } {
-  const run = (mode: "BEGIN" | "BEGIN IMMEDIATE" | "BEGIN EXCLUSIVE") => (...args: Parameters<F>): ReturnType<F> => {
-    db.exec(mode);
+  // 次级错误（回滚本身失败）不得掩盖原始原因
+  const rollbackQuietly = () => {
     try {
-      const result = fn(...args) as ReturnType<F>;
+      db.exec("ROLLBACK");
+    } catch {
+      // swallow secondary rollback errors so the original cause is thrown
+    }
+  };
+
+  const commitOrRollback = <T>(value: T): T => {
+    try {
       db.exec("COMMIT");
-      return result;
+      return value;
     } catch (err) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {
-        // swallow secondary rollback errors so the original cause is thrown
-      }
+      rollbackQuietly();
       throw err;
     }
+  };
+
+  const run = (mode: "BEGIN" | "BEGIN IMMEDIATE" | "BEGIN EXCLUSIVE") => (...args: Parameters<F>): ReturnType<F> => {
+    db.exec(mode);
+    let result: ReturnType<F>;
+    try {
+      result = fn(...args) as ReturnType<F>;
+    } catch (err) {
+      rollbackQuietly();
+      throw err;
+    }
+    // 异步回调：等 Promise settle 之后再决定提交还是回滚
+    if (isThenable(result)) {
+      return Promise.resolve(result).then(
+        (value) => commitOrRollback(value),
+        (error: unknown) => {
+          rollbackQuietly();
+          throw error;
+        },
+      ) as ReturnType<F>;
+    }
+    return commitOrRollback(result);
   };
   const deferred = run("BEGIN");
   const immediate = run("BEGIN IMMEDIATE");
@@ -179,6 +214,20 @@ class NodeSqliteDatabase {
   readonly inTransaction = false;
   readonly readonly = false;
 
+  // ── 事务独占门 ──
+  // 一条 SQLite 连接上不能有两个并发事务（第二个 BEGIN 会报
+  // "cannot start a transaction within a transaction"）。
+  // 同步事务在一个 tick 内跑完、不可能重叠，保持原有同步语义直接执行；
+  // 异步事务跨 await 占用连接，因此直到回调 settle 之前，后来者按 FIFO 排队。
+  //
+  // ⚠️ 约束：不要在事务回调里（await 之后）再调用根 db.transaction() 并 await 它——
+  // 内层会排队等外层结束，而外层正等内层，形成死锁。已核实当前 4 处调用点
+  // （task-concurrency / beidou-external-router ×2 / artifact-sealer）都只用传入的
+  // tx 操作，不存在该模式。需要嵌套时请用 drizzle 的 `tx.transaction()`
+  // （它走 SAVEPOINT，不经过本门）。
+  private txTail: Promise<void> = Promise.resolve();
+  private txBusy = false;
+
   constructor(private readonly db: DatabaseSync) {
     // node:sqlite DatabaseSync's `name()` is part of the experimental
     // surface and not currently typed in @types/node. Probe it defensively
@@ -194,8 +243,59 @@ class NodeSqliteDatabase {
     return new NodeSqliteStatement(stmt, source, this);
   }
 
+  /**
+   * 事务独占门：串行化同一连接上的事务。
+   * 空闲时直接执行——同步事务因此仍同步返回，调用方行为不变；
+   * 已有异步事务在跑时排队（FIFO），返回 Promise。
+   */
+  private runGated<T>(invoke: () => T): T | Promise<unknown> {
+    if (!this.txBusy) return this.executeTracked(invoke);
+    const queued = this.txTail.then(() => this.executeTracked(invoke));
+    this.txTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+
+  private executeTracked<T>(invoke: () => T): T | Promise<unknown> {
+    const result = invoke();
+    // 同步事务：一个 tick 内已跑完，不占用连接
+    if (!isThenable(result)) return result;
+    this.txBusy = true;
+    const settled = Promise.resolve(result).then(
+      (value) => {
+        this.txBusy = false;
+        return value;
+      },
+      (error) => {
+        this.txBusy = false;
+        throw error;
+      },
+    );
+    // 追加到链尾而非覆盖：此刻可能已有事务排在这条链上
+    this.txTail = this.txTail.then(() => settled.then(() => undefined, () => undefined));
+    return settled;
+  }
+
   transaction<F extends (...args: unknown[]) => unknown>(fn: F) {
-    return makeTransaction(fn, this.db);
+    const txn = makeTransaction(fn, this.db);
+    const gate = (target: (...args: Parameters<F>) => ReturnType<F>) => (...args: Parameters<F>): ReturnType<F> =>
+      // 排队时返回 Promise（即已有异步事务在跑），与 makeTransaction 内部
+      // 同样的断言：调用方一律 await，运行时形状由事务回调自身决定。
+      this.runGated(() => target(...args)) as ReturnType<F>;
+
+    const deferred = gate(txn.deferred);
+    const immediate = gate(txn.immediate);
+    const exclusive = gate(txn.exclusive);
+    const tx = ((...args: Parameters<F>) => deferred(...args)) as F & {
+      default(...args: Parameters<F>): ReturnType<F>;
+      deferred(...args: Parameters<F>): ReturnType<F>;
+      immediate(...args: Parameters<F>): ReturnType<F>;
+      exclusive(...args: Parameters<F>): ReturnType<F>;
+    };
+    tx.default = deferred;
+    tx.deferred = deferred;
+    tx.immediate = immediate;
+    tx.exclusive = exclusive;
+    return tx;
   }
 
   exec(source: string): this {

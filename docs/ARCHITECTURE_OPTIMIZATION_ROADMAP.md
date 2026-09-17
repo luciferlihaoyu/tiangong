@@ -59,7 +59,7 @@ flowchart TB
 
 ### 1. 事务与数据库契约（第一批）
 
-- **同步事务接async回调**：node-sqlite-adapter.ts:134-147调用fn后立即COMMIT；task-concurrency.ts:23-49等传async。第一次await前可能执行部分SQL，但Promise未完成便提交，后续异常无法回滚原事务。改真实同步事务与显式执行方法，远程I/O移到事务外；不能只删async却留下未执行的query builder。验收：注入中途失败，任务/执行槽/outbox同生共死。
+- ~~**同步事务接async回调**~~ **✅ 本轮已修复**：原 node-sqlite-adapter.ts:134-147 在 `fn()` 返回后立即 COMMIT，而 async 回调此刻只返回了一个未完成的 Promise → 事务实际只覆盖到第一个 await 之前的语句，后段失败既回滚不掉、写入也已落库。**实际修法与本文初稿不同**：保留异步回调，改为等回调 settle 之后再 COMMIT/ROLLBACK，并新增「事务独占门」串行化并发事务（异步事务跨 await 后，第二个 BEGIN 会直接报 `cannot start a transaction within a transaction`）。之所以没按初稿改成全同步回调 + `.run()/.all()/.get()`：beidou-external-router.ts:370 在事务内调用了 async 的 `enqueueTaskOutboxEvent`，改同步会牵连该 helper，在高风险区域扩大爆炸半径。**实测证据**（真实 node:sqlite 适配器）：旧实现下「写入后抛错」残留 1 行已提交数据、并发事务回滚会连带抹掉他人写入、且 `maxConcurrentTasks=2` 时 5 个并发取槽全部成功；修复后 tests/api/node-sqlite-transaction.test.ts 与 tests/api/task-slot-concurrency-real.test.ts 全绿（7 文件 34 例）。**遗留（非阻塞）**：事务在 await 期间仍对同连接开放，同一 tick 内无关的微任务写入理论上会并入该事务；彻底消除需按初稿把调用方改为同步回调，可作为后续加固。
 - **外部认领无CAS**：task-claim.ts:144-159先查后按id更新。单进程async也可能交错双认领。WHERE带预期状态/版本，检查真实affected rows，胜者才返回任务及触发副作用。
 - **MySQL返回值遗留**：beidou-external-router.ts:185-192只读insertId/affectedRows；node SQLite对应lastInsertRowid/changes；external-agent-router.ts:53仍读insertId。统一主键与受影响行数契约，校验有效安全整数，使用真实SQLite测试注册/创建/认领/回写。
 - **幂等错误码**：beidou-external-router.ts:387-394仍判断ER_DUP_ENTRY。先采集当前驱动真实error shape，精确识别目标唯一约束并回查请求摘要，不能把所有constraint错误都当幂等成功。

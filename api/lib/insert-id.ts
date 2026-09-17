@@ -28,3 +28,24 @@ export function getInsertId(result: unknown): number {
   }
   return 0;
 }
+
+/**
+ * 统一读取 UPDATE/DELETE 的受影响行数（单一事实源）。
+ *
+ * 同一个迁移坑的另一半：node:sqlite 返回 `changes`，历史代码读 `affectedRows`。
+ * 更阴险的是它的失败方式——`Number((r as any).affectedRows)` 得到 **NaN**，
+ * 而 `NaN !== 1` 恒为真，于是「受影响行数必须等于 1」这类 CAS 守卫
+ * **永远抛错**：制品封存恒报 stale_state、beidou 状态变更恒报 CONFLICT。
+ *
+ * 所以本函数**绝不返回 NaN**：无法识别形状时返回 0，让守卫走到
+ * 「0 !== 1 → 抛错」这条明确、可诊断的分支。
+ */
+export function getAffectedRows(result: unknown): number {
+  if (result === null || result === undefined) return 0;
+  const r = result as { readonly changes?: unknown; readonly affectedRows?: unknown };
+  // changes 优先：真实驱动是 node:sqlite，affectedRows 只是 mysql2 兼容兜底
+  if (typeof r.changes === "number" && Number.isFinite(r.changes)) return r.changes;
+  if (typeof r.changes === "bigint") return Number(r.changes);
+  if (typeof r.affectedRows === "number" && Number.isFinite(r.affectedRows)) return r.affectedRows;
+  return 0;
+}

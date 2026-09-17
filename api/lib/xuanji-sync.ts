@@ -33,6 +33,7 @@ import { createXuanjiClient } from "../connectors/xuanji/service";
 import type { WriteTaskMemoryRequest, WriteTaskMemoryResponse } from "../connectors/xuanji/types";
 import { getDb } from "../queries/connection";
 import { createTraceId, parseTaskMetadata } from "./task-metadata";
+import { getInsertId } from "./insert-id";
 import type { TaskMetadata } from "../contracts/platform";
 
 export type Db = ReturnType<typeof getDb>;
@@ -468,11 +469,14 @@ async function tryLinkArtifact(
   return true;
 }
 
+/**
+ * 自增主键；无有效值时返回 undefined（保持调用方契约）。
+ * 取值委托共享契约——node:sqlite 返回 `{ changes, lastInsertRowid }`，
+ * 只读 insertId 会恒为 undefined，导致写入成功但拿不到产物 id。
+ */
 function extractInsertId(result: unknown): number | undefined {
-  const value = Array.isArray(result) ? result[0] : result;
-  if (value === null || typeof value !== "object") return undefined;
-  const insertId = (value as { insertId?: number | bigint | null }).insertId;
-  return insertId === undefined || insertId === null ? undefined : Number(insertId);
+  const id = getInsertId(result);
+  return id > 0 ? id : undefined;
 }
 
 function describeError(error: unknown): string {

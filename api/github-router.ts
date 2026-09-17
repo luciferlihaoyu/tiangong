@@ -27,24 +27,8 @@ import { env } from "./lib/env";
 
 const GITHUB_API_BASE = "https://api.github.com";
 
-/**
- * S2 (PLAN_SQLITE_MIGRATION): SQLite (via drizzle/better-sqlite3) returns the
- * insert result as a plain RunResult object — `{ lastInsertRowid, changes }`.
- * The legacy MySQL `MySqlRawQueryResult` tuple shape is no longer in the
- * pipeline, so the union collapses to a single SQLite-compatible object.
- */
-type InsertResult = {
-  readonly insertId?: number;
-  readonly lastInsertRowid?: number | bigint;
-  readonly changes?: number;
-};
-
-function getInsertId(result: InsertResult): number {
-  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
-    return Number(result.lastInsertRowid);
-  }
-  return result.insertId ?? 0;
-}
+// 写入返回值统一走共享契约（api/lib/insert-id.ts），不再各写一份
+import { getInsertId } from "./lib/insert-id";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

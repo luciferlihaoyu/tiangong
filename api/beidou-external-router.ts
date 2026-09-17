@@ -33,6 +33,10 @@ import { createTaskMetadata } from "./lib/task-metadata";
 import { enqueueTaskOutboxEvent } from "./lib/task-outbox";
 import { externalStateOf, canExternalTransition } from "./lib/external-task-lifecycle";
 import { requestExecutorCancellation } from "./lib/executor-cancellation";
+// 写入返回值契约：node:sqlite 返回 { changes, lastInsertRowid }，
+// 读 insertId/affectedRows 会得到 NaN——曾使本文件的外部建单与状态变更必然失败
+import { getAffectedRows, getInsertId } from "./lib/insert-id";
+import { isUniqueConstraintViolation } from "./lib/db-error";
 
 // ─── Input schemas ───
 
@@ -180,16 +184,6 @@ function tryParseJson(raw: string): unknown {
   } catch {
     return null;
   }
-}
-
-function insertIdOf(result: unknown): number {
-  if (Array.isArray(result)) return Number((result[0] as { insertId?: unknown } | undefined)?.insertId);
-  return Number((result as { insertId?: unknown }).insertId);
-}
-
-function affectedRowsOf(result: unknown): number {
-  if (Array.isArray(result)) return Number((result[0] as { affectedRows?: unknown } | undefined)?.affectedRows);
-  return Number((result as { affectedRows?: unknown }).affectedRows);
 }
 
 async function findTaskByExternalRef(db: ReturnType<typeof getDb>, externalRef: string): Promise<ExternalEnvelope & { id: number; taskId: string } | null> {
@@ -366,7 +360,7 @@ export const beidouExternalRouter = createRouter({
             taskRetainUntil,
             idempotencyRetainUntil,
           });
-          const insertedId = insertIdOf(inserted);
+          const insertedId = getInsertId(inserted);
           await enqueueTaskOutboxEvent(tx, {
             taskId: insertedId,
             taskPublicId: taskId,
@@ -385,7 +379,13 @@ export const beidouExternalRouter = createRouter({
           });
         });
       } catch (error) {
-        if (!(error instanceof Error) || !("code" in error) || error.code !== "ER_DUP_ENTRY") throw error;
+        // 并发竞态：前置查重之后、插入提交之前，另一请求已建同一 external_ref。
+        // 判定必须基于真实驱动错误形状（node:sqlite: code=ERR_SQLITE_ERROR,
+        // errcode=2067），并精确到 tasks.external_ref / tasks.idempotency_key 两列，
+        // 否则既认不出真实冲突，又可能把无关约束错误误当幂等成功。
+        if (!isUniqueConstraintViolation(error, { table: "tasks", columns: ["external_ref", "idempotency_key"] })) {
+          throw error;
+        }
         const raced = await db.select().from(tasks).where(and(
           eq(tasks.originSystem, ORIGIN_SYSTEM_BEIDOU),
           or(eq(tasks.externalRef, input.external_ref), eq(tasks.idempotencyKey, input.idempotency_key)),
@@ -485,7 +485,7 @@ export const beidouExternalRouter = createRouter({
               stateRevision: row.stateRevision + 1,
             })
             .where(and(eq(tasks.id, found.id), eq(tasks.stateRevision, row.stateRevision)));
-          if (affectedRowsOf(update) !== 1) throw new TRPCError({ code: "CONFLICT", message: "state_revision 已过期" });
+          if (getAffectedRows(update) !== 1) throw new TRPCError({ code: "CONFLICT", message: "state_revision 已过期" });
           await enqueueTaskOutboxEvent(tx, {
             taskId: found.id,
             taskPublicId: found.taskId,

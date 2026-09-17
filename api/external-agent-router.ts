@@ -22,9 +22,9 @@ function extractChatText(data: unknown): unknown {
   return data;
 }
 
-interface InsertResult {
-  insertId: number;
-}
+// 写入返回值统一走共享契约（api/lib/insert-id.ts）：
+// node:sqlite 返回 { changes, lastInsertRowid }，读 insertId 会得到 undefined
+import { getInsertId } from "./lib/insert-id";
 
 export const externalAgentRouter = createRouter({
   // ─── 外部 Agent 注册 ───
@@ -50,7 +50,7 @@ export const externalAgentRouter = createRouter({
         config: input.config ? JSON.stringify(input.config) : null,
         status: "offline",
       });
-      return { success: true, id: (result as unknown as InsertResult).insertId as number };
+      return { success: true, id: getInsertId(result) };
     }),
 
   list: publicQuery.query(async () => {

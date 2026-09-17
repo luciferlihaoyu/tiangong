@@ -22,6 +22,7 @@ import { and, desc, eq, or } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { agents, messages } from "../../db/schema";
 import { getSetting } from "./settings";
+import { getInsertId } from "./insert-id";
 import { wsManager } from "../ws-manager";
 
 /** 「天宫助手」固定标识 */
@@ -199,9 +200,8 @@ export function triggerAssistantReply(userAgentId: number, userMessageId: number
       deliveredAt: new Date(),
       parentMessageId: userMessageId,
     });
-    // better-sqlite3 返回 lastInsertRowid；兼容 mysql2 的 insertId
-    const rawResult = result as unknown as { lastInsertRowid?: number | bigint; insertId?: number };
-    const insertId = rawResult.lastInsertRowid !== undefined ? Number(rawResult.lastInsertRowid) : (rawResult.insertId ?? 0);
+    // 写入返回值统一走共享契约（node:sqlite 返回 lastInsertRowid，无 insertId）
+    const insertId = getInsertId(result);
 
     // 拉完整行广播给 dashboard
     const full = insertId

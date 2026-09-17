@@ -9,6 +9,7 @@ import {
 } from "@db/schema";
 import { getDb } from "../../queries/connection";
 import { enqueueTaskOutboxEvent } from "../task-outbox";
+import { getAffectedRows } from "../insert-id";
 import { externalStateOf, isExternalTerminalState } from "../external-task-lifecycle";
 import { ArtifactStorageError, ArtifactVolume, computeSealedManifest } from "./artifact-volume";
 import { ARTIFACT_MANIFEST_VERSION } from "./artifact-types";
@@ -112,7 +113,9 @@ export class ArtifactSealer {
         sealedAt: request.now,
       });
       const update = await tx.update(tasks).set({ status: "done", lifecycleStatus: "completed", progress: 100, completedAt: request.now, stateRevision: taskRevision }).where(and(eq(tasks.id, request.taskDatabaseId), eq(tasks.stateRevision, request.expectedRevision)));
-      if (Number((update as { affectedRows?: unknown }).affectedRows) !== 1) throw new ArtifactStorageError("stale_state", "task revision changed while sealing");
+      // 受影响行数必须走共享契约：node:sqlite 返回 changes，
+      // 读 affectedRows 会得到 NaN，而 NaN !== 1 恒真 → 封存此前必然失败
+      if (getAffectedRows(update) !== 1) throw new ArtifactStorageError("stale_state", "task revision changed while sealing");
       await enqueueTaskOutboxEvent(tx, {
         taskId: request.taskDatabaseId,
         taskPublicId: request.taskPublicId,

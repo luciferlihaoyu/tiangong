@@ -28,6 +28,7 @@ import { createHash } from "node:crypto";
 import { getDb } from "../queries/connection";
 import { auditEvents, type AuditEvent, type InsertAuditEvent } from "@db/schema";
 import { asc, desc } from "drizzle-orm";
+import { getInsertId } from "./insert-id";
 
 export const AUDIT_EVENT_NAMES = [
   "workspace:created",
@@ -184,10 +185,13 @@ export interface AuditLogger {
   getTailCache(): AuditChainTail | null;
 }
 
-/** Best-effort extraction of the auto-increment id from a MySQL insert result. */
+/**
+ * 自增主键；无有效值时返回 null（保持 AuditChainTail 的契约）。
+ * 取值统一委托给共享契约——本仓库跑 node:sqlite，写入返回
+ * `{ changes, lastInsertRowid }`，直接读 insertId 只会拿到 undefined。
+ */
 function insertIdOf(result: unknown): number | null {
-  const header = (Array.isArray(result) ? result[0] : result) as { insertId?: unknown } | null;
-  return header && typeof header.insertId === "number" ? header.insertId : null;
+  return getInsertId(result) || null;
 }
 
 export function createAuditLogger(dbFn: () => AuditDb): AuditLogger {

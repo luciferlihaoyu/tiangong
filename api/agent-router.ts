@@ -9,31 +9,10 @@ import { claimNextTask } from "./lib/task-claim";
 type AgentNode = Agent & { children: AgentNode[] };
 type AgentCapability = AgentCard["capabilities"][number];
 
-/**
- * S2 (PLAN_SQLITE_MIGRATION): SQLite (via drizzle/better-sqlite3) returns the
- * insert result as a plain RunResult object — `{ lastInsertRowid, changes }`.
- * The legacy MySQL `MySqlRawQueryResult` tuple shape is no longer in the
- * pipeline, so the union collapses to a single SQLite-compatible object.
- */
-type InsertResult = {
-  readonly insertId?: number;
-  readonly lastInsertRowid?: number | bigint;
-  readonly changes?: number;
-};
-
-function getInsertId(result: InsertResult): number {
-  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
-    return Number(result.lastInsertRowid);
-  }
-  return result.insertId ?? 0;
-}
-
-/** update 返回的受影响行数（兼容 mysql2 数组形状与测试 mock 的普通对象形状） */
-function getAffectedRows(result: unknown): number {
-  const value = Array.isArray(result) ? result[0] : result;
-  if (value === null || typeof value !== "object") return 0;
-  return Number((value as { affectedRows?: number }).affectedRows ?? 0);
-}
+// 写入返回值统一走共享契约（api/lib/insert-id.ts）：
+// node:sqlite 返回 { changes, lastInsertRowid }，本地各写一份极易只读
+// mysql2 的 insertId/affectedRows 而静默拿到 0/undefined（markRead 就因此恒返回 marked:false）
+import { getAffectedRows, getInsertId } from "./lib/insert-id";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;

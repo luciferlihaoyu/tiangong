@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { getInsertId as readInsertId } from "./lib/insert-id";
 
 const mailboxTypeEnum = z.enum([
   "direct",
@@ -34,21 +35,10 @@ type MailboxType = typeof mailboxMessages.$inferInsert["type"];
  * The legacy MySQL `MySqlRawQueryResult` tuple shape is no longer in the
  * pipeline, so the union collapses to a single SQLite-compatible object.
  */
-type InsertResult = {
-  readonly insertId?: number;
-  readonly lastInsertRowid?: number | bigint;
-  readonly changes?: number;
-};
-
-function getInsertId(result: InsertResult): number | undefined {
-  let insertId: number | bigint | undefined;
-  if (typeof result === "object" && result !== null && "lastInsertRowid" in result && result.lastInsertRowid !== undefined) {
-    insertId = result.lastInsertRowid;
-  } else {
-    insertId = result.insertId;
-  }
-  const normalized = insertId === undefined ? undefined : Number(insertId);
-  return normalized === 0 ? undefined : normalized;
+/** 自增主键；无有效值时 undefined（本文件其余调用点依赖该契约）。 */
+function getInsertId(result: unknown): number | undefined {
+  const id = readInsertId(result);
+  return id > 0 ? id : undefined;
 }
 
 function normalizeMailboxId(mailboxId: string) {

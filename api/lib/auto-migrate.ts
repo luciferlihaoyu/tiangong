@@ -14,7 +14,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { env } from "./env";
 
-const CREATE_TABLES_SQL: string[] = [
+export const CREATE_TABLES_SQL: string[] = [
   // ─── users ───
   `CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -11,8 +11,10 @@
  * 这覆盖了部分失败的中间态（如旧部署 tasks 缺列导致中断：agents 已导、
  * tasks 及其后表为空），下一轮部署自动补齐剩余空表，且不重导已有数据。
  *
- * 前置修复：旧部署建出的表可能缺列（tasks 缺 board_* 等 13 列），先跑
- * repairMissingColumns（ALTER TABLE ADD COLUMN）再判断/导入。
+ * 前置修复：旧部署建出的表可能缺列（tasks 缺 board_* 等 13 列）。补列现在统一由
+ * autoMigrate 在建表之后执行（对所有 DSN 生效）；本函数只管导入。
+ * 历史教训：补列原先写在本函数内，但本函数对非 MySQL DSN 会提前 return，
+ * 于是原生 SQLite 老库永远补不上后来新增的列。
  *
  * 安全：数据只从 MySQL 单向流入 SQLite，不反向写回；失败只 warn 不阻断
  * 启动（应用仍可用已有数据启动）。
@@ -21,7 +23,6 @@ import { createConnection, type RowDataPacket } from "mysql2/promise";
 import { DatabaseSync } from "node:sqlite";
 import { env } from "./env";
 import { resolveDbPath } from "../queries/connection";
-import { repairMissingColumns } from "./schema-repair";
 
 /**
  * 各表的 timestamp 列（mode:"timestamp"）静态清单。
@@ -125,14 +126,9 @@ export async function bootstrapMysqlImport(): Promise<string[]> {
   const dbPath = resolveDbPath(databaseUrl);
   const db = new DatabaseSync(dbPath);
 
-  // 旧部署（#61-S4c 前）可能在 volume 建出缺列的表（tasks 缺 board_* 等 13 列），
-  // autoMigrate 的 IF NOT EXISTS 不重建 → 先补列再判断/导入。
-  try {
-    const repairLogs = repairMissingColumns(db);
-    if (repairLogs.length) logs.push(...repairLogs);
-  } catch (e) {
-    logs.push(`schema-repair error (continue): ${e instanceof Error ? e.message : String(e)}`);
-  }
+  // 注意：补列（schema-repair）已统一移到 autoMigrate 建表之后执行，对所有 DSN 生效。
+  // 原先放在这里是有缺陷的——本函数对非 MySQL DSN 会提前 return，
+  // 于是原生 SQLite 老库永远补不上后来新增的列。
 
   logs.push(`bootstrap-import: db=${dbPath}, importing empty tables from MySQL…`);
 

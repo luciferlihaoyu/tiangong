@@ -81,7 +81,7 @@ flowchart TB
 
 ### 4. 旧库升级、备份和就绪状态（近期）
 
-- auto-migrate.ts主要CREATE IF NOT EXISTS，:790-808补列函数no-op；bootstrap-mysql-import.ts:116-123非MySQL提前return，而repair在:128-134。旧原生SQLite不能依靠此路径补列。先覆盖旧库升级，再用版本迁移减少schema/DDL/repair多份定义。
+- ✅（本轮完成，仅补列部分）auto-migrate.ts主要CREATE IF NOT EXISTS，:790-808补列函数no-op；bootstrap-mysql-import.ts:120非MySQL提前return，而repair原在:131（**提前返回之后**）→ 结论确认：**旧原生SQLite从来不补列**。已改为：补列统一在 autoMigrate 建表之后执行（对所有 DSN 生效，bootstrap 里那份删除并留注释说明教训）；补列清单从**手写**改为**从 db/schema.ts 派生**（原手写清单只列 13 个 tasks.board_*，下次往 schema 加列仍会静默漏）；SQLite 拒绝补的列（表达式默认值如 unixepoch()、PRIMARY KEY、NOT NULL 且无常量默认值）进 skipped 并打日志，不静默略过也不降级成可空列。证据：tests/api/schema-upgrade.test.ts（6 个，含复刻 13 列历史事故、派生性、skip 上报、幂等、真实 drizzle 查询可用）+ tests/api/schema-upgrade-boot.test.ts（跑真实 autoMigrate 两轮：建库 → 删列 → 重启必须补回；已用"撤掉接线"验证过 RED）。**剩余**：版本迁移以减少 schema/DDL/repair 多份定义；NOT NULL+表达式默认值的列需要表重建，当前只上报不处理。
 - 关键迁移失败readiness=false且不接单；可选集成失败则降级。boot.ts:75-94仅尝试getDb的health不足以证明迁移和执行器就绪。
 - 用SQLite backup API或VACUUM INTO生成一致快照，再校验、加密、上传与轮换。**不能在线逐个cp数据库/WAL/SHM**；checkpoint后继续写也不能保证随后复制一致。另一方案是停写并关闭相关连接后备份。必须恢复演练。
 - WAL/busy_timeout是条件性调优，不是无条件P0：核实实际journal、卷文件系统、锁等待和备份方式。WAL仍单写，不保证无BUSY，不自动支持多实例。

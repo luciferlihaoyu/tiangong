@@ -977,6 +977,7 @@ function seedMcpKeys(db: import("node:sqlite").DatabaseSync, logs: string[]): vo
  * data/tiangong.db 而 getDb 已迁 artifact 卷，导致建表与读写分离）。
  */
 import { resolveDbPath } from "../queries/connection";
+import { describeSchemaRepair, repairMissingColumns } from "./schema-repair";
 
 function ensureParentDir(filePath: string): void {
   const parent = path.dirname(filePath);
@@ -1045,6 +1046,17 @@ export async function autoMigrate(force = false): Promise<string[]> {
         logs.push(`${tableName}: ${e.message?.slice(0, 80)}`);
         console.warn("Migration statement warning:", e.message?.slice(0, 100));
       }
+    }
+
+    // 建表之后统一做列对齐（Phase B 旧库升级）。
+    // CREATE TABLE IF NOT EXISTS 不会修改**已存在**的表，所以老库后来新增的列
+    // 只能在这里补；否则部署新版后查询会报 no such column，而本地测试全绿。
+    // 补列清单从 db/schema.ts 派生；SQLite 拒绝补的列会进 skipped 并打日志。
+    try {
+      const repair = repairMissingColumns(sqliteDb);
+      logs.push(...describeSchemaRepair(repair));
+    } catch (e) {
+      logs.push(`schema-repair error (continue): ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // 历史迁移（全部 no-op；保留调用点防止 boot.ts / 测试断链）

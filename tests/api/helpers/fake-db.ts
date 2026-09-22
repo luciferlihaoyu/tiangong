@@ -338,7 +338,16 @@ export class FakeDb {
           inserted.push(copy);
           this.nextIds.set(name, ids + 1);
         }
-        return Promise.resolve({ insertId: inserted[0]?.id, affectedRows: inserted.length });
+        return Promise.resolve({
+          // 真实 node:sqlite 驱动的写入返回形状是 {changes, lastInsertRowid}；
+          // 旧别名 insertId/affectedRows 一并保留，兼容既有断言。
+          // 曾经这里只有 MySQL 形状，导致"按受影响行数裁决"的代码在假 DB 下恒判失败，
+          // 真实驱动差异被测试掩盖（Phase A/§2 的教训）。
+          changes: inserted.length,
+          lastInsertRowid: inserted[0]?.id,
+          insertId: inserted[0]?.id,
+          affectedRows: inserted.length,
+        });
       },
     };
   }
@@ -379,7 +388,8 @@ export class FakeDb {
               Object.assign(r, dbPatch);
             }
           }
-          return Promise.resolve({ affectedRows });
+          // 真实驱动形状（见 insert 处说明）：changes 是"受影响行数"的裁决依据
+          return Promise.resolve({ changes: affectedRows, affectedRows });
         },
       }),
     };
@@ -391,7 +401,8 @@ export class FakeDb {
         const rows = this.rowsOf(table);
         const kept = rows.filter((r) => !evaluate(cond, r));
         this.tables.set(tableName(table), kept);
-        return Promise.resolve({ affectedRows: rows.length - kept.length });
+        // 真实驱动形状（见 insert 处说明）
+        return Promise.resolve({ changes: rows.length - kept.length, affectedRows: rows.length - kept.length });
       },
     };
   }

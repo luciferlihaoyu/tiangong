@@ -977,7 +977,8 @@ function seedMcpKeys(db: import("node:sqlite").DatabaseSync, logs: string[]): vo
  * data/tiangong.db 而 getDb 已迁 artifact 卷，导致建表与读写分离）。
  */
 import { resolveDbPath } from "../queries/connection";
-import { describeSchemaRepair, repairMissingColumns } from "./schema-repair";
+import { describeSchemaRepair, repairMissingColumns, type SchemaRepairResult } from "./schema-repair";
+import { readiness } from "./readiness";
 
 function ensureParentDir(filePath: string): void {
   const parent = path.dirname(filePath);
@@ -1022,6 +1023,9 @@ export async function autoMigrate(force = false): Promise<string[]> {
     logs.push("Database connected");
     console.log("Database connected, running migrations...");
 
+    // Phase B §2：区分"良性幂等告警"与"真失败"，后者会让 not-ready → 不接单
+    const criticalFailures: string[] = [];
+
     for (const sql of CREATE_TABLES_SQL) {
       try {
         // 兼容 CREATE TABLE / CREATE UNIQUE INDEX / CREATE INDEX 三种语句
@@ -1043,8 +1047,12 @@ export async function autoMigrate(force = false): Promise<string[]> {
         }
       } catch (e: any) {
         const tableName = sql.match(/CREATE\s+(?:TABLE IF NOT EXISTS|UNIQUE\s+INDEX|INDEX)\s+(?:IF NOT EXISTS\s+)?(\w+)/)?.[1] || "unknown";
+        const message = e.message?.slice(0, 100) ?? String(e);
         logs.push(`${tableName}: ${e.message?.slice(0, 80)}`);
-        console.warn("Migration statement warning:", e.message?.slice(0, 100));
+        console.warn("Migration statement warning:", message);
+        // "already exists" 是幂等重跑的良性告警（生产日志里一堆），不算失败；
+        // 其余（磁盘/权限/DDL 语法等）是真失败 → 就绪判定要据此拦住接单。
+        if (!/already exists/i.test(message)) criticalFailures.push(`${tableName}: ${message.slice(0, 120)}`);
       }
     }
 
@@ -1052,12 +1060,24 @@ export async function autoMigrate(force = false): Promise<string[]> {
     // CREATE TABLE IF NOT EXISTS 不会修改**已存在**的表，所以老库后来新增的列
     // 只能在这里补；否则部署新版后查询会报 no such column，而本地测试全绿。
     // 补列清单从 db/schema.ts 派生；SQLite 拒绝补的列会进 skipped 并打日志。
+    let repair: SchemaRepairResult | undefined;
     try {
-      const repair = repairMissingColumns(sqliteDb);
+      repair = repairMissingColumns(sqliteDb);
       logs.push(...describeSchemaRepair(repair));
     } catch (e) {
-      logs.push(`schema-repair error (continue): ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      logs.push(`schema-repair error: ${message}`);
+      criticalFailures.push(`schema-repair: ${message.slice(0, 120)}`);
     }
+
+    // 就绪上报（Phase B §2）：迁移失败或 schema 与代码不一致 → 不就绪 → 不接单。
+    // 补列被跳过意味着代码要用的列在库里不存在，运行时必然 no such column，
+    // 因此它和迁移失败一样属于"关键"而非"可选集成"。
+    readiness.recordMigration(
+      criticalFailures.length === 0,
+      criticalFailures.length > 0 ? criticalFailures.join("; ") : undefined,
+    );
+    readiness.recordSchemaDrift(repair?.skipped ?? []);
 
     // 历史迁移（全部 no-op；保留调用点防止 boot.ts / 测试断链）
     migrateMailboxColumns(db, logs);

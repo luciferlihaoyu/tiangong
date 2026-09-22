@@ -21,6 +21,7 @@ import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { sweeperScheduler } from "./lib/sweepers/scheduler";
 import { taskOutboxDispatcher } from "./lib/task-outbox";
+import { getReadiness, readiness } from "./lib/readiness";
 import { ArtifactVolume } from "./lib/artifacts/artifact-volume";
 import { agents, messages } from "@db/schema";
 import { ensureAssistantAgent } from "./lib/ai-assistant";
@@ -72,14 +73,20 @@ app.use("/api/trpc/*", async (c) => {
 // ========== 统一健康检查端点（P0-3）==========
 // 与北斗/璇玑一致：GET /health → {ok, name, db}。getDb() 打开 SQLite 连接，
 // 失败（路径/卷异常）则 db=false 并返回 503。
+// 注意 liveness 与 readiness 的分工（Phase B §2）：/health 是 liveness——
+// 只回答"进程还活着吗、库能开吗"，不就绪**不**返回 503（那会让编排层重启容器，
+// 反而把故障放大）。"能不能接单"看 /ready 与下面的 ready 字段。
 const healthStartTime = Date.now();
 app.get("/health", (c) => {
+  const readiness = getReadiness();
   try {
     getDb();
     return c.json({
       ok: true,
       name: "tiangong",
       db: true,
+      ready: readiness.ready,
+      reasons: readiness.reasons,
       uptime: Math.floor((Date.now() - healthStartTime) / 1000),
     });
   } catch {
@@ -88,11 +95,28 @@ app.get("/health", (c) => {
         ok: true,
         name: "tiangong",
         db: false,
+        ready: false,
+        reasons: readiness.reasons,
         uptime: Math.floor((Date.now() - healthStartTime) / 1000),
       },
       503
     );
   }
+});
+
+// Phase B §2：就绪探针。不就绪返回 503 + 可读原因（迁移/schema 对齐/执行器/派发）。
+// 与 /health 的区别：这里 503 表示"别给我派活"，不是"进程挂了"。
+app.get("/ready", (c) => {
+  const readiness = getReadiness();
+  return c.json(
+    {
+      ready: readiness.ready,
+      checks: readiness.checks,
+      reasons: readiness.reasons,
+      degraded: readiness.degraded,
+    },
+    readiness.ready ? 200 : 503
+  );
 });
 
 // P11.4: 版本信息端点（读取部署环境变量或构建时注入的 commit，无运行时 .git 依赖）
@@ -525,14 +549,19 @@ if (env.isProduction) {
 try {
   await autoMigrate();
 } catch (e: unknown) {
-  console.warn("Auto-migration failed:", e instanceof Error ? e.message : String(e));
+  const msg = e instanceof Error ? e.message : String(e);
+  console.warn("Auto-migration failed:", msg);
+  // Phase B §2：迁移失败 → 不就绪 → 不接单（而不是照常派活、等运行时才炸）
+  readiness.recordMigration(false, msg);
 }
 
 // V2 migration — add new columns to existing tables
 try {
   await migrateV2();
 } catch (e: unknown) {
-  console.warn("V2 migration failed:", e instanceof Error ? e.message : String(e));
+  const msg = e instanceof Error ? e.message : String(e);
+  console.warn("V2 migration failed:", msg);
+  readiness.recordMigration(false, `V2 migration: ${msg}`);
 }
 
 // MySQL → SQLite 启动自迁移（#61）：若仍配置 MySQL DSN 且 SQLite 空，全量导入。
@@ -540,7 +569,10 @@ try {
   const impLogs = await bootstrapMysqlImport();
   for (const l of impLogs) console.log(l);
 } catch (e: unknown) {
-  console.warn("Bootstrap MySQL import failed (app continues):", e instanceof Error ? e.message : String(e));
+  const msg = e instanceof Error ? e.message : String(e);
+  console.warn("Bootstrap MySQL import failed (app continues):", msg);
+  // 可选集成：降级而非不接单（生产已迁到原生 SQLite，此路径通常直接 skip）
+  readiness.recordDegraded("mysql-import", msg);
 }
 
 // Load MCP tokens from DB into global key set for API key verification
@@ -570,8 +602,11 @@ try {
 try {
   taskRunner.start();
   console.log("[Boot] Task Runner started");
+  readiness.recordExecutor(true);
 } catch (e: unknown) {
-  console.warn("[Boot] Task Runner start failed:", e instanceof Error ? e.message : String(e));
+  const msg = e instanceof Error ? e.message : String(e);
+  console.warn("[Boot] Task Runner start failed:", msg);
+  readiness.recordExecutor(false, msg);
 }
 
 // Start server-side maintenance sweepers (timeouts, watchdog, approval nag, memory, newapi patrol)
@@ -585,8 +620,11 @@ try {
 try {
   taskOutboxDispatcher.start();
   console.log("[Boot] Task outbox dispatcher started");
+  readiness.recordOutbox(true);
 } catch (e: unknown) {
-  console.warn("[Boot] Task outbox dispatcher start failed:", e instanceof Error ? e.name : "unknown");
+  const msg = e instanceof Error ? e.message : String(e);
+  console.warn("[Boot] Task outbox dispatcher start failed:", msg);
+  readiness.recordOutbox(false, msg);
 }
 
 const port = parseInt(process.env.PORT || "3000");

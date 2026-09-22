@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { markSystemReady } from "./helpers/test-db";
 
 type DbRow = Readonly<Record<string, unknown>>;
 
@@ -26,7 +27,9 @@ const dbMocks = vi.hoisted(() => {
     })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
-        where: vi.fn(() => Promise.resolve([])),
+        // 真实 node:sqlite 的 update 返回 {changes, lastInsertRowid}；返回 []（旧写法）
+        // 会让"按受影响行数裁决"的 CAS 恒判失败（假 DB 与真驱动不符）。
+        where: vi.fn(() => Promise.resolve({ changes: 1 })),
       })),
     })),
   };
@@ -76,6 +79,8 @@ async function callerForKey(key: string) {
 
 describe("Connector authentication with issued MCP keys", () => {
   beforeEach(() => {
+    // Phase B §2 起认领有就绪闸门；本文件测的是 MCP Key 鉴权，需先声明系统已就绪
+    markSystemReady();
     vi.clearAllMocks();
   });
 

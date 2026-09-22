@@ -17,6 +17,22 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as fullSchema from "@db/schema";
 import { nodeSqliteAdapter } from "../../../api/lib/node-sqlite-adapter";
 import { CREATE_TABLES_SQL } from "../../../api/lib/auto-migrate";
+import { readiness } from "../../../api/lib/readiness";
+
+/**
+ * 把进程就绪状态置为"已就绪"。
+ *
+ * Phase B §2 起，认领入口（claimNextTask）与事件派发循环都有就绪闸门——
+ * 迁移/schema 对齐/执行器/派发未就绪时一律不接单（fail-closed）。
+ * 因此任何"验证认领/派发正常路径"的测试都必须先声明系统已就绪，
+ * 否则会被闸门先挡住，测不到真正要测的东西。
+ */
+export function markSystemReady(): void {
+  readiness.recordMigration(true);
+  readiness.recordSchemaDrift([]);
+  readiness.recordExecutor(true);
+  readiness.recordOutbox(true);
+}
 
 export interface TestDb {
   /** drizzle client（与生产环境相同构造方式） */

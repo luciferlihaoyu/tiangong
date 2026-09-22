@@ -4,6 +4,7 @@ import { and, eq, isNull, lte } from "drizzle-orm";
 import { taskOutboxEvents, type TaskOutboxEvent } from "@db/schema";
 import { getDb } from "../queries/connection";
 import { signRawBody } from "./raw-body-signature";
+import { isReady } from "./readiness";
 
 const MAX_ATTEMPTS = 5;
 const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -249,6 +250,11 @@ export class TaskOutboxDispatcher {
 
   async tick(now = new Date()): Promise<number> {
     if (this.running) return 0;
+    // Phase B §2 不接单：迁移/schema 对齐/执行器未就绪时不派发事件。
+    // 事件留在 outbox 里不会丢，等就绪后照常派发；反之在库不对的情况下派发
+    // 会把不一致的状态推给下游（北斗/璇玑），比延迟更难收场。
+    // 闸门放在循环里而不是 dispatchDueOutboxEvents 内部，是为了让该纯函数保持可直测。
+    if (!isReady()) return 0;
     this.running = true;
     try {
       return await dispatchDueOutboxEvents(now);

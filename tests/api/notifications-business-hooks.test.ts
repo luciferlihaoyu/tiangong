@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createFakeDb } from "./helpers/fake-db";
+import { markSystemReady } from "./helpers/test-db";
 import { tasks, agents, notifications } from "@db/schema";
 import { mergeTaskMetadata } from "../../api/lib/task-metadata";
 
@@ -60,6 +61,9 @@ function notifRows(type: string) {
 
 beforeEach(() => {
   db.reset();
+  // Phase B §2 起认领先过就绪闸门（未就绪返回 not_ready，会抢在 budget_exhausted 之前）；
+  // 本文件测的是预算熔断通知，需先声明系统已就绪。
+  markSystemReady();
 });
 
 // ─── C-1 / C-2：taskboard approve / reject ───

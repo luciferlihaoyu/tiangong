@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { markSystemReady } from "./helpers/test-db";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -30,7 +31,9 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实 node:sqlite 的 update 返回 {changes, lastInsertRowid}；
+        // 返回 []（旧写法）会让"按受影响行数裁决"的 CAS 恒判失败（假 DB 与真驱动不符）。
+        return { where: vi.fn(() => Promise.resolve({ changes: 1 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -144,6 +147,8 @@ async function callerForKey(key: string) {
 
 describe("Execution approval gate", () => {
   beforeEach(() => {
+    // Phase B §2 起认领有就绪闸门；本文件测的是审批闸门，需先声明系统已就绪
+    markSystemReady();
     vi.clearAllMocks();
     dbMocks.clearUpdateSets();
     _globalApiKeys.add(GLOBAL_KEY);

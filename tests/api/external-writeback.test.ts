@@ -9,6 +9,7 @@
  *   - agent.claimTask / agent.updateHeartbeat 预算耗尽 → 不认领 + reason
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { markSystemReady } from "./helpers/test-db";
 
 // ─── 按表名路由的 mock db（可断言 SQL 参数） ───
 type AnyRow = Record<string, unknown>;
@@ -164,6 +165,8 @@ function seedPricing(model = "test-model") {
 }
 
 beforeEach(() => {
+  // Phase B §2 起认领有就绪闸门；本文件测的是预算/记账/产物通道，需先声明系统已就绪
+  markSystemReady();
   vi.clearAllMocks();
   state.rows = {};
   state.insertCalls = [];

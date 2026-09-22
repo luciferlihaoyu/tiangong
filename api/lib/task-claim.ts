@@ -17,6 +17,7 @@ import { getApprovalState, selectExecutableTask, type Db } from "./execution-gat
 import { notifyBudgetExhausted } from "./notification-hooks";
 import { parseTaskMetadata } from "./task-metadata";
 import { getAffectedRows } from "./insert-id";
+import { isReady } from "./readiness";
 
 /** 认领结果中的任务投影（形状对齐 agent.claimTask 既有返回） */
 export interface ClaimedTask {
@@ -30,7 +31,7 @@ export interface ClaimedTask {
   approvalRequired: boolean;
 }
 
-export type ClaimNextReason = "budget_exhausted" | "agent_not_found" | "already_claimed";
+export type ClaimNextReason = "budget_exhausted" | "agent_not_found" | "already_claimed" | "not_ready";
 
 /**
  * 路由归属判定（认领保护，P-claim-routing）：
@@ -116,6 +117,15 @@ export async function claimNextTask(
   db: Db,
   agentId: number
 ): Promise<{ task: ClaimedTask | null; reason?: ClaimNextReason }> {
+  // 0. 就绪闸门（Phase B §2）：迁移 / schema 对齐 / 执行器 / 事件派发未就绪时**不接单**。
+  //    原状况：迁移失败或补列失败时进程照常启动、照常把任务派给 Agent，
+  //    故障被推迟到运行时才爆（如 no such column）。宁可不接单，也不接一半。
+  //    闸门放在这里（而不是各调用面）是为了让 tRPC 面与 MCP 工具面共用同一判定，
+  //    与 CAS 一样避免"两份拷贝漂移"。
+  if (!isReady()) {
+    return { task: null, reason: "not_ready" };
+  }
+
   // 1. 查询 Agent 信息
   const agentRows = await db
     .select()

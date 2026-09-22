@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTestDb } from "./helpers/test-db";
+import { createTestDb, markSystemReady } from "./helpers/test-db";
 import { agents, tasks } from "@db/schema";
 import { claimNextTask } from "../../api/lib/task-claim";
 
@@ -16,6 +16,10 @@ import { claimNextTask } from "../../api/lib/task-claim";
  * 只有胜者才返回任务并触发副作用（把 Agent 置为 busy）。
  */
 async function setup() {
+  // Phase B §2 起，认领入口有就绪闸门（未就绪一律不接单）；本文件测的是 CAS 本身，
+  // 因此先声明系统已就绪，否则会被闸门先挡住、测不到 CAS。
+  markSystemReady();
+
   const { db, dispose } = createTestDb();
   await db.insert(agents).values({ agentId: "cas-a", name: "Agent A", system: "dsh" });
   await db.insert(agents).values({ agentId: "cas-b", name: "Agent B", system: "dsh" });

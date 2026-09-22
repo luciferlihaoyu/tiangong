@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Server,
   Cpu,
+  HardDrive,
 } from "lucide-react";
 
 /* ═══════════════════════════════════════════
@@ -465,6 +466,151 @@ function CostHeatmap({ heatmap, loading }: { heatmap: CostHeatmap | null; loadin
    主页面
    ═══════════════════════════════════════════ */
 
+interface BackupSnapshotRow {
+  name: string;
+  mb: number;
+  createdAt: string;
+  verified: boolean;
+  detail: string;
+}
+
+interface BackupStatusData {
+  ready: boolean;
+  reasons: string[];
+  lastRunAt: string | null;
+  lastReport: {
+    ok: boolean;
+    detail: string;
+    uploadedTo: string | null;
+    uploadError: string | null;
+  } | null;
+  skippedReason: string | null;
+  snapshots: BackupSnapshotRow[];
+}
+
+/**
+ * 数据备份卡片（Phase B §4）。
+ *
+ * 目标是「傻瓜式」：先给一句人话结论（备份正常 / 还没有备份 / 有快照损坏），
+ * 再列出每份快照的大小与校验结果，最后给一个「立即备份」按钮。
+ * 不把 JSON 甩给用户看——备份最常见的失效是"其实不可用却没人知道"，
+ * 所以结论和校验结论必须摆在最上面。
+ */
+function DbBackupCard() {
+  const statusQuery = trpc.ops.backupStatus.useQuery(undefined, { retry: 1, staleTime: 30_000 });
+  const runMutation = trpc.ops.backupRun.useMutation({
+    onSuccess: () => {
+      void statusQuery.refetch();
+    },
+  });
+
+  const status = statusQuery.data as BackupStatusData | undefined;
+  const snapshots = status?.snapshots ?? [];
+  const newest = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+  const brokenCount = snapshots.filter((s) => !s.verified).length;
+
+  const verdict = !status
+    ? { color: "var(--text-muted)", icon: <Clock size={14} />, text: "读取备份状态中…" }
+    : snapshots.length === 0
+      ? { color: "var(--accent-gold)", icon: <AlertTriangle size={14} />, text: "还没有任何备份（定时备份默认每天一次）" }
+      : brokenCount > 0
+        ? { color: "var(--danger)", icon: <XCircle size={14} />, text: `有 ${brokenCount} 份快照未通过完整性校验，不可用于恢复` }
+        : { color: "var(--success)", icon: <CheckCircle2 size={14} />, text: `备份正常：共 ${snapshots.length} 份，最近一份可用` };
+
+  const report = runMutation.data as
+    | { ok: boolean; detail: string; snapshot?: { name: string }; uploadError?: string }
+    | undefined;
+
+  return (
+    <div className="glass-panel p-4 sci-border">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+          数据备份 · DATABASE BACKUP
+        </div>
+        <button
+          onClick={() => runMutation.mutate()}
+          disabled={runMutation.isPending}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+          style={{ color: "var(--accent-cyan)", border: "1px solid var(--border-default)" }}
+        >
+          <HardDrive size={13} />
+          {runMutation.isPending ? "备份中…" : "立即备份"}
+        </button>
+      </div>
+
+      {/* 一句话结论 */}
+      <div className="flex items-center gap-2 text-xs font-mono mb-3" style={{ color: verdict.color }}>
+        {verdict.icon}
+        <span>{verdict.text}</span>
+      </div>
+
+      {/* 关键事实 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+          最近备份
+          <div className="text-[11px] mt-0.5" style={{ color: "var(--text-primary)" }}>
+            {newest ? fmtDateTime(newest.createdAt) : "—"}
+          </div>
+        </div>
+        <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+          保留份数
+          <div className="text-[11px] mt-0.5" style={{ color: "var(--text-primary)" }}>
+            {snapshots.length} 份
+          </div>
+        </div>
+        <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+          离机上传
+          <div className="text-[11px] mt-0.5" style={{ color: status?.lastReport?.uploadError ? "var(--danger)" : "var(--success)" }}>
+            {!status?.lastReport
+              ? "—"
+              : status.lastReport.uploadError
+                ? "失败（本地快照仍可用）"
+                : status.lastReport.uploadedTo
+                  ? "已上传"
+                  : "未配置"}
+          </div>
+        </div>
+        <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+          自动备份
+          <div className="text-[11px] mt-0.5" style={{ color: status?.skippedReason?.includes("未就绪") ? "var(--accent-gold)" : "var(--text-primary)" }}>
+            {status?.skippedReason ?? (status?.lastRunAt ? "已执行" : "待执行")}
+          </div>
+        </div>
+      </div>
+
+      {/* 快照列表：每份都带校验结论 */}
+      {snapshots.length > 0 && (
+        <div className="space-y-1">
+          {[...snapshots].reverse().map((s) => (
+            <div key={s.name} className="flex items-center justify-between text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+              <span className="truncate max-w-[46%]">{s.name}</span>
+              <span>{s.mb} MB</span>
+              <span>{fmtDateTime(s.createdAt)}</span>
+              <span style={{ color: s.verified ? "var(--success)" : "var(--danger)" }}>
+                {s.verified ? "✓ 可用" : "✗ 损坏"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 手动备份结果 */}
+      {report && (
+        <div
+          className="mt-3 text-[10px] font-mono px-2 py-1.5 rounded"
+          style={{
+            color: report.ok ? "var(--success)" : "var(--danger)",
+            background: "rgba(180,200,255,0.04)",
+            border: "1px solid var(--border-default)",
+          }}
+        >
+          {report.ok ? "✅ 备份完成" : "❌ 备份失败"}：{report.detail}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OpsPanel() {
   const [showHighCostOnly, setShowHighCostOnly] = useState(false);
 
@@ -690,12 +836,15 @@ export default function OpsPanel() {
         </div>
 
         {/* 成本热力图 */}
-        <div className="glass-panel p-4 sci-border">
+        <div className="glass-panel p-4 sci-border mb-6">
           <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
             成本热力图 · COST HEATMAP (近 7 天)
           </div>
           <CostHeatmap heatmap={heatmap} loading={loading} />
         </div>
+
+        {/* 数据备份（Phase B §4） */}
+        <DbBackupCard />
       </div>
     </div>
   );

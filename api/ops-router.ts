@@ -13,6 +13,10 @@ import { getDb } from "./queries/connection";
 import { agents, tasks, tokenUsage } from "@db/schema";
 import { eq, and, gte, lte, desc, sql, type SQL } from "drizzle-orm";
 import { sqlDayOf } from "./lib/day-sql";
+import { verifySnapshot } from "./lib/db-backup";
+import { env } from "./lib/env";
+import { readiness } from "./lib/readiness";
+import { sweeperConfig } from "./lib/sweepers/config";
 
 export const opsRouter = createRouter({
   /**
@@ -279,5 +283,62 @@ export const opsRouter = createRouter({
         highCostCount: Number(usage.highCostCount),
       },
     };
+  }),
+
+  /**
+   * 备份状态（Phase B §4）：让"备份到底行不行"一眼可见，而不是靠翻日志。
+   * 列出本地快照、逐份给出校验结论，并带上最近一次备份报告与就绪状态。
+   */
+  backupStatus: authedQuery.query(async () => {
+    const { backupSweepState } = await import("./lib/sweepers/db-backup");
+    const state = backupSweepState();
+    const snapshots = state.snapshots.map((snapshot) => {
+      // 校验结论随状态一起返回：备份最常见的失效是"其实不可用却没人知道"
+      const check = verifySnapshot(snapshot.path);
+      return {
+        name: snapshot.name,
+        mb: Math.round((snapshot.bytes / 1024 / 1024) * 100) / 100,
+        createdAt: snapshot.createdAt.toISOString(),
+        verified: check.ok,
+        detail: check.detail,
+      };
+    });
+
+    return {
+      ready: readiness.isReady(),
+      reasons: readiness.snapshot().reasons,
+      lastRunAt: state.lastRunAt,
+      lastReport: state.lastReport
+        ? {
+            ok: state.lastReport.ok,
+            detail: state.lastReport.detail,
+            uploadedTo: state.lastReport.uploadedTo ?? null,
+            uploadError: state.lastReport.uploadError ?? null,
+          }
+        : null,
+      skippedReason: state.skippedReason,
+      snapshots,
+    };
+  }),
+
+  /**
+   * 手动立刻备份一次（不等定时窗口）。sweeper 自带节流，管理端点要的是"现在就备"，
+   * 所以这里直接调 runBackupJob，不走 sweeper 的间隔判断。
+   */
+  backupRun: authedQuery.mutation(async () => {
+    const { backupDir } = await import("./lib/sweepers/db-backup");
+    const { resolveDbPath } = await import("./queries/connection");
+    const { runBackupJob } = await import("./lib/db-backup");
+    const { resolveAlistConfig, alistUpload } = await import("./connectors/alist");
+
+    const alist = await resolveAlistConfig().catch(() => null);
+    const report = await runBackupJob({
+      dbPath: resolveDbPath(env.databaseUrl ?? ""),
+      destDir: backupDir(),
+      keep: sweeperConfig.dbBackupKeep,
+      upload: alist ? (name, bytes) => alistUpload(alist, `/tiangong/db-backups/${name}`, bytes) : undefined,
+    });
+
+    return report;
   }),
 });

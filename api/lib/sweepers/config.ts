@@ -11,6 +11,8 @@
  *   TIANGONG_NEWAPI_PATROL_EVERY_TICKS   default 10
  *   TIANGONG_DISPATCH_CLAIM_STALE_MS     default 90000 (90s)
  *   TIANGONG_BLOCKED_RECOVER_STALE_MS    default 86400000 (1 day)
+ *   TIANGONG_DB_BACKUP_INTERVAL_MS       default 86400000 (1 day)，0 = 关闭自动备份
+ *   TIANGONG_DB_BACKUP_KEEP              default 7（保留份数）
  */
 import { z } from "zod";
 
@@ -61,6 +63,11 @@ export const sweeperConfigSchema = z.object({
   dispatchClaimStaleMs: integerFromEnv(10_000, 3_600_000, 90_000),
   // 非「审批停放」的 blocked 任务超过该时长自动恢复到阻塞前状态。
   blockedRecoverStaleMs: integerFromEnv(300_000, 31_536_000_000, 86_400_000),
+  // 一致备份（Phase B §4）：备份不该每 tick 都跑，这里自节流——只有最新快照
+  // 超过该时长才真做一次。0 表示关闭自动备份（仍可在管理端点手动触发）。
+  dbBackupIntervalMs: integerFromEnv(0, 31_536_000_000, 86_400_000),
+  // 保留份数（轮换）。同卷快照只是第一道防线，离机上传才是抗卷丢失的那道。
+  dbBackupKeep: integerFromEnv(1, 365, 7),
 });
 
 export type SweeperConfig = Readonly<z.infer<typeof sweeperConfigSchema>>;
@@ -78,6 +85,8 @@ export function loadSweeperConfig(env: SweeperEnv = process.env): SweeperConfig 
     newApiPatrolEveryTicks: env.TIANGONG_NEWAPI_PATROL_EVERY_TICKS,
     dispatchClaimStaleMs: env.TIANGONG_DISPATCH_CLAIM_STALE_MS,
     blockedRecoverStaleMs: env.TIANGONG_BLOCKED_RECOVER_STALE_MS,
+    dbBackupIntervalMs: env.TIANGONG_DB_BACKUP_INTERVAL_MS,
+    dbBackupKeep: env.TIANGONG_DB_BACKUP_KEEP,
   });
 }
 

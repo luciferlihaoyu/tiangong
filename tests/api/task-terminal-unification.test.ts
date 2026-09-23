@@ -253,4 +253,23 @@ describe("失败/取消/超时终态动作统一", () => {
     const types = (await notificationsFor(id)).map((n) => n.type).sort();
     expect(types).toEqual(["lesson_recorded", "task_failed"]);
   });
+
+  it("无执行代理的任务：教训照常归档，通知按设计跳过（不再靠外键报错吞掉）", async () => {
+    // notifications.agent_id 是 NOT NULL + REFERENCES agents(id)，而"无代理"没有合法归属。
+    // 历史实现传哨兵值 0，插入被外键拒绝后由兜底 catch 吞掉——静默丢失。
+    // 现在显式传 null，由通知层"无归属即跳过"，行为可见且不再产生被吞的异常。
+    const parentId = await seedTask({ taskId: "T-P4", name: "父任务4" });
+    const id = await seedTask({ taskId: "T-NOAGENT", name: "无代理任务", status: "running", parentTaskId: parentId });
+
+    const { payload } = await callTool("cancel_task", { taskId: id, reason: "流水线取消" });
+    expect(payload.success).toBe(true);
+    expect((await taskRow(id)).status).toBe("failed");
+
+    // 归档不受影响：教训 + 产物 + 父任务汇总照做
+    expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
+    expect(mocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
+    expect(mocks.autoSummarizeCollab).toHaveBeenCalledWith(parentId);
+    // 通知：无归属 → 不落库（且不抛错）
+    expect(await notificationsFor(id)).toHaveLength(0);
+  });
 });

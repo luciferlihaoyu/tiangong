@@ -112,13 +112,18 @@ export async function finalizeFailedTask(
         id: task.id,
         taskId: task.taskId,
         name: task.name,
-        // 无执行代理的任务归 0（沿用 sweeper 超时路径的既有哨兵值）。注意：
-        // notifications.agent_id 是 NOT NULL + REFERENCES agents(id)，而"0"并不是一行真实 agent；
-        // 应用运行时连接**没有**开 PRAGMA foreign_keys（SQLite 每连接生效，只有 auto-migrate
-        // 的连接开了），所以生产能写进去（指向不存在 agent 的孤儿行），而测试库（显式 ON）
-        // 会直接 FK 报错。这是"测试桩比生产更严"的已知差异，未在本轮改变行为——
-        // 若将来在运行时打开 FK，需要先把这类哨兵值清理/归属化。
-        agentId: task.agentId ?? 0,
+        // 无执行代理的任务传 null，交给通知层按"无归属即跳过"的既有设计处理。
+        // 【纠正】这里原先沿用 sweeper 的哨兵值 0 并注释说"运行时没开 FK、生产能写进去"——
+        // 生产实测证明那是错的：node:sqlite 的 enableForeignKeyConstraints **默认为 true**，
+        // 用一个未设任何 PRAGMA 的新连接打开生产库，PRAGMA foreign_keys 报 1；生产
+        // notifications.agent_id 也只有真实 agent（1 与 17），没有 0 行。
+        // 也就是说 notifications.agent_id 是 NOT NULL + REFERENCES agents(id)，而 0 不是任何
+        // 一行真实 agent ⇒ **每次插入都 FK 失败并被兜底 catch 吞掉**：51 个任务里 21 个没有
+        // 执行代理，这些任务的失败教训通知一直在静默丢失（教训本身照常入璇玑，不受影响）。
+        // 传 null 至少让它变成"按设计跳过"而不是"报错被吞"。
+        // 真正的修法（未做，需产品决策）：给系统通知一个归属——要么新建"系统"agent 行，
+        // 要么把 agent_id 改成可空（SQLite 不能直接改可空性，需重建表，属 §4 版本化迁移范畴）。
+        agentId: task.agentId ?? null,
         error: errorText,
       },
       options.errorChannel ?? "task.failed",

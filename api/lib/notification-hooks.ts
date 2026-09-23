@@ -26,6 +26,12 @@ export async function notifyLessonRecorded(
   task: TaskForLessonNotify,
   errorChannel: string
 ): Promise<void> {
+  // 无归属任务（agentId=null）按 recordNotification 的既有设计直接跳过：notifications.agent_id
+  // 是 NOT NULL + 外键，没有真实 agent 就没有合法的归属。显式记一行，避免"静默丢失"
+  // （历史上这里传过哨兵值 0，插入被外键拒绝后由兜底 catch 吞掉，谁也看不见）。
+  if (task.agentId === null) {
+    console.info(`[Notification] 任务 ${task.taskId} 无执行代理，跳过失败教训通知（channel=${errorChannel}）`);
+  }
   await recordNotification(db, {
     agentId: task.agentId,
     type: "lesson_recorded",

@@ -5,9 +5,7 @@ import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/sch
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
-import { finalizeCompletedTask } from "./lib/task-finalize";
-import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
-import { notifyLessonRecorded } from "./lib/notification-hooks";
+import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
 import { getInsertId } from "./lib/insert-id";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
@@ -510,13 +508,11 @@ export const a2aRouter = createRouter({
         metadata: { lifecycleStatus: nextStatus },
       });
 
-      // 失败教训写璇玑（3.1 范围外缺口补漏）：a2a fail 是终态失败之一，与
-      // taskboard reject 同口径——落库后调 syncTaskLessonToXuanji，把 a2a 通道
-      // 标记的失败归档为长期记忆，便于后续同类任务 search_xuanji 检索教训。
-      // 幂等标记 xuanji_lesson 保证同一任务至多一条；try/catch 兜底防御未来行为变化
-      // 破坏 a2a fail 主流程，行为与 task-writeback / taskboard 钩子一致。
+      // Phase B §3-2：终态动作统一走 finalizeFailedTask（教训 + 产物归档 + 协作父任务汇总
+      // 归档 + 失败教训通知）。原先这里内联"教训 + 通知"，漏了产物归档与协作汇总归档。
+      // 语义保留：errorChannel 仍标 a2a.fail，检索方仍能按"通道 + 终态"维度过滤。
       try {
-        await syncTaskLessonToXuanji(db, {
+        await finalizeFailedTask(db, {
           id: task.id,
           taskId: task.taskId,
           name: task.name,
@@ -527,25 +523,10 @@ export const a2aRouter = createRouter({
           status: "failed",
           lifecycleStatus: nextStatus,
           error: input.error ?? task.error,
-        });
+          parentTaskId: task.parentTaskId,
+        }, { errorChannel: "a2a.fail", errorText: input.error ?? task.error ?? null });
       } catch (error) {
-        console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      // 失败教训通知（NC-3）：a2a fail 是终态失败，落库后记一条 lesson_recorded 通知。
-      try {
-        await notifyLessonRecorded(
-          db,
-          {
-            id: task.id,
-            taskId: task.taskId,
-            name: task.name,
-            agentId: task.agentId,
-            error: input.error ?? task.error ?? null,
-          },
-          "a2a.fail"
-        );
-      } catch (error) {
-        console.warn(`[a2a] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`[a2a] terminal archive failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       wsManager.broadcastToDashboard({
@@ -571,6 +552,7 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
+      const timeoutText = input.note ? `a2a timeout：${input.note}` : "a2a timeout";
       await db.update(tasks).set({
         lifecycleStatus: nextStatus,
         status: "failed",
@@ -585,11 +567,10 @@ export const a2aRouter = createRouter({
         metadata: { lifecycleStatus: nextStatus },
       });
 
-      // 失败教训写璇玑（3.1 范围外缺口补漏）：a2a timeout 也是终态失败（status=failed），
-      // 与 fail 同款模式归档教训。语义保留：failure 标签用 "a2a timeout" 标识
-      // 通道来源，便于检索方按"通道+终态"维度过滤。
+      // Phase B §3-2：同 fail 路径，统一走 finalizeFailedTask。语义保留：errorChannel 仍标
+      // a2a.timeout，失败文案仍带 "a2a timeout" 通道来源。
       try {
-        await syncTaskLessonToXuanji(db, {
+        await finalizeFailedTask(db, {
           id: task.id,
           taskId: task.taskId,
           name: task.name,
@@ -599,26 +580,11 @@ export const a2aRouter = createRouter({
           agentId: task.agentId,
           status: "failed",
           lifecycleStatus: nextStatus,
-          error: input.note ? `a2a timeout：${input.note}` : "a2a timeout",
-        });
+          error: timeoutText,
+          parentTaskId: task.parentTaskId,
+        }, { errorChannel: "a2a.timeout", errorText: timeoutText });
       } catch (error) {
-        console.warn(`[a2a] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      // 失败教训通知（NC-3）：a2a timeout 是终态失败（status=failed），同 fail 模式记通知。
-      try {
-        await notifyLessonRecorded(
-          db,
-          {
-            id: task.id,
-            taskId: task.taskId,
-            name: task.name,
-            agentId: task.agentId,
-            error: input.note ? `a2a timeout：${input.note}` : "a2a timeout",
-          },
-          "a2a.timeout"
-        );
-      } catch (error) {
-        console.warn(`[a2a] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`[a2a] terminal archive failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       return { success: true, lifecycleStatus: nextStatus };

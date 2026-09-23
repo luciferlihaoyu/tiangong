@@ -76,7 +76,7 @@ export async function finalizeCompletedTask(db: Db, task: FinalizeTaskView): Pro
 export async function finalizeFailedTask(
   db: Db,
   task: FinalizeTaskView,
-  options: { readonly errorChannel?: string; readonly errorText?: string } = {},
+  options: { readonly errorChannel?: string; readonly errorText?: string | null } = {},
 ): Promise<void> {
   const errorText = options.errorText ?? task.error ?? null;
   const view: FinalizeTaskView = { ...task, error: errorText };

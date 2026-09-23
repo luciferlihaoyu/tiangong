@@ -23,10 +23,8 @@ import { tasks, taskArtifacts } from "@db/schema";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-gate";
-import { finalizeCompletedTask } from "./task-finalize";
+import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
 import { recordExternalUsage } from "./external-usage";
-import { syncTaskLessonToXuanji } from "./xuanji-sync";
-import { notifyLessonRecorded } from "./notification-hooks";
 import { recordNotification } from "./notification";
 import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
 
@@ -188,8 +186,14 @@ export async function reportTaskProgress(
   // 因此与内部 Runner 的"重试耗尽才写"判定不同，此处每次失败回写都归档教训
   // （幂等标记 xuanji_lesson 保证同一任务至多一条）。落库后尽力而为，失败绝不影响回写主流程。
   if (taskRow && (input.status === "failed" || input.lifecycleStatus === "failed")) {
+    // Phase B §3-2：终态动作统一走 finalizeFailedTask（教训 + 产物归档 + 协作父任务汇总归档
+    // + 失败教训通知）。原先这里内联"教训 + 通知"，漏了产物归档与协作汇总归档——
+    // 外部执行体回写失败时，父任务的 collab_summary artifact 永远不会被补上。
+    // 注意与下方 emitCollabSummaryForTask 的分工：那个是**实时广播 + 解锁兄弟任务**，
+    // 本入口负责**归档**，且 autoSummarizeCollab 自带幂等闸，不会重复。
+    const failureText = input.error ?? taskRow.error ?? null;
     try {
-      await syncTaskLessonToXuanji(db, {
+      await finalizeFailedTask(db, {
         id: taskRow.id,
         taskId: taskRow.taskId,
         name: taskRow.name,
@@ -199,30 +203,12 @@ export async function reportTaskProgress(
         agentId: taskRow.agentId,
         status: "failed",
         lifecycleStatus: input.lifecycleStatus ?? "failed",
-        // 失败原因优先取本次回写附带的 error，缺省回退 tasks 行已存的 error 列
-        error: input.error ?? taskRow.error,
-      });
+        error: failureText,
+        parentTaskId: taskRow.parentTaskId,
+      }, { errorChannel: "task-writeback", errorText: failureText });
     } catch (error) {
-      // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
-      console.warn(`[task-writeback] xuanji lesson sync failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    // 失败教训通知（NC-3）：外部失败回写是终态失败，落库后记一条 lesson_recorded 通知
-    // （尽力而为，失败绝不影响回写主流程；60s 防抖防同一任务的 lesson/task-failed 路径重复）。
-    try {
-      await notifyLessonRecorded(
-        db,
-        {
-          id: taskRow.id,
-          taskId: taskRow.taskId,
-          name: taskRow.name,
-          agentId: taskRow.agentId,
-          error: input.error ?? taskRow.error ?? null,
-        },
-        "task-writeback"
-      );
-    } catch (error) {
-      // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏回写主流程
-      console.warn(`[task-writeback] notification failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏回写主流程
+      console.warn(`[task-writeback] terminal archive failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);
     }
     // 任务失败通知（NC-5）：外部失败回写是终态失败，落库后记一条 task_failed
     // （尽力而为，失败绝不影响回写主流程；60s 防抖防同一任务重复刷屏）。

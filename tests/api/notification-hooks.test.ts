@@ -32,6 +32,14 @@ const xuanjiMocks = vi.hoisted(() => ({
   syncTaskLessonToXuanji: vi.fn().mockResolvedValue({ synced: true, reason: "written" }),
   syncTaskMemoryToXuanji: vi.fn().mockResolvedValue({ synced: true, reason: "written" }),
 }));
+const alistMocks = vi.hoisted(() => ({
+  syncTaskArtifactsToAlist: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../../api/lib/alist-sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/lib/alist-sync")>()),
+  syncTaskArtifactsToAlist: alistMocks.syncTaskArtifactsToAlist,
+}));
+
 vi.mock("../../api/lib/xuanji-sync", () => ({
   syncTaskLessonToXuanji: xuanjiMocks.syncTaskLessonToXuanji,
   syncTaskMemoryToXuanji: xuanjiMocks.syncTaskMemoryToXuanji,
@@ -289,6 +297,8 @@ describe("挂点：taskboard.reject 触发 lesson_recorded 通知", () => {
       taskId: 40,
       metadata: { taskKey: "TG-040", channel: "taskboard.reject" },
     });
+    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
+    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
     expect(String(input?.metadata?.error ?? "")).toContain("人工驳回");
     expect(String(input?.metadata?.error ?? "")).toContain("数据口径错误");
   });
@@ -325,6 +335,8 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
       metadata: { taskKey: "T-A2A01", channel: "a2a.fail" },
     });
     expect(String(input?.body ?? "")).toContain("模型网关 502");
+    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
+    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
   });
 
   it("Given a2a 任务 working, When a2a.timeout 附 note, Then 通知 channel=a2a.timeout 且带 a2a timeout 标识", async () => {
@@ -342,6 +354,8 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
     });
     expect(String(input?.metadata?.error ?? "")).toContain("a2a timeout");
     expect(String(input?.metadata?.error ?? "")).toContain("上游 30s 无响应");
+    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
+    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -9,9 +9,7 @@ import { isAgentAllowedByRouting } from "./lib/task-claim";
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
-import { finalizeCompletedTask } from "./lib/task-finalize";
-import { syncTaskLessonToXuanji } from "./lib/xuanji-sync";
-import { notifyLessonRecorded } from "./lib/notification-hooks";
+import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
 import { recordNotification } from "./lib/notification";
 import { reportTaskProgress } from "./lib/task-writeback";
 import { getInsertId } from "./lib/insert-id";
@@ -724,11 +722,15 @@ export const taskboardRouter = createRouter({
           reviewerId: input.agentId,
         })
         .where(eq(tasks.id, input.taskId));
-      // 失败教训写璇玑（任务 3.1 质量反哺）：人工驳回是终态失败（无重试语义，与
-      // requestChanges 的"退回重做"不同），落库后把驳回意见作为失败原因归档教训，
-      // 尽力而为，失败绝不影响驳回主流程（时序与 approve 分支的 finalize 一致：记忆是事后归档）。
+      // Phase B §3-2：终态动作统一走 finalizeFailedTask（教训 + 产物归档 + 协作父任务汇总
+      // 归档 + 失败教训通知）。人工驳回是终态失败（无重试语义，与 requestChanges 的
+      // "退回重做"不同）。原先这里内联"教训 + 通知"，漏了产物归档与协作汇总归档——
+      // 被驳回的协作子任务不会补上父任务的 collab_summary。
+      const rejectText = input.reason?.trim()
+        ? `人工驳回：${input.reason.trim()}`
+        : `人工驳回：未填写理由（agent ${input.agentId}）`;
       try {
-        await syncTaskLessonToXuanji(db, {
+        await finalizeFailedTask(db, {
           id: row.id,
           taskId: row.taskId,
           name: row.name,
@@ -738,33 +740,12 @@ export const taskboardRouter = createRouter({
           agentId: row.agentId,
           status: "failed",
           lifecycleStatus: row.lifecycleStatus,
-          error: input.reason?.trim()
-            ? `人工驳回：${input.reason.trim()}`
-            : `人工驳回：未填写理由（agent ${input.agentId}）`,
-        });
+          error: rejectText,
+          parentTaskId: row.parentTaskId,
+        }, { errorChannel: "taskboard.reject", errorText: rejectText });
       } catch (error) {
-        // syncTaskLessonToXuanji 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
-        console.warn(`[taskboard] xuanji lesson sync failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      // 失败教训通知（NC-3）：人工驳回是终态失败，落库后记一条 lesson_recorded 通知
-      // （尽力而为，失败绝不影响驳回主流程）。
-      try {
-        await notifyLessonRecorded(
-          db,
-          {
-            id: row.id,
-            taskId: row.taskId,
-            name: row.name,
-            agentId: row.agentId,
-            error: input.reason?.trim()
-              ? `人工驳回：${input.reason.trim()}`
-              : `人工驳回：未填写理由（agent ${input.agentId}）`,
-          },
-          "taskboard.reject"
-        );
-      } catch (error) {
-        // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏驳回主流程
-        console.warn(`[taskboard] notification failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏驳回主流程
+        console.warn(`[taskboard] terminal archive failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
       // 驳回通知（NC-5）：落库后记一条 task_rejected（尽力而为，失败绝不影响驳回主流程）
       try {

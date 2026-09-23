@@ -48,6 +48,7 @@ vi.mock("../../api/lib/task-validator", async (importOriginal) => ({
 
 import { getMcpServer, type McpToolContext } from "../../api/mcp/server";
 import { sweepTaskTimeouts } from "../../api/lib/sweepers/task-lifecycle";
+import { reportTaskProgress } from "../../api/lib/task-writeback";
 
 const CTX: McpToolContext = { apiKeyId: 3, agentId: null, permissions: [] };
 const NOW = new Date("2026-09-23T02:00:00Z");
@@ -221,5 +222,35 @@ describe("失败/取消/超时终态动作统一", () => {
 
     expect(mocks.autoSummarizeCollab).not.toHaveBeenCalled();
     expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
+  });
+
+  it("外部执行体回写失败也补齐产物归档与协作汇总（原先只内联教训+通知）", async () => {
+    const agentId = await seedAgent();
+    const parentId = await seedTask({ taskId: "T-P3", name: "父任务3", agentId });
+    const id = await seedTask({
+      taskId: "T-WRITEBACK",
+      name: "外部回写任务",
+      status: "running",
+      agentId,
+      parentTaskId: parentId,
+    });
+    await testDb.db.insert(schema.taskArtifacts).values({ taskId: id, type: "output", name: "out.md", content: "外部产物" });
+
+    const res = await reportTaskProgress(
+      testDb.db,
+      { id, progress: 100, status: "failed", error: "外部执行失败" },
+      { apiKeyAgentId: agentId },
+    );
+    expect(res.success).toBe(true);
+    expect((await taskRow(id)).status).toBe("failed");
+
+    expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
+    // 关键新增：这条路径原先**从不**归档产物，也不补父任务协作汇总
+    expect(mocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
+    expect(mocks.autoSummarizeCollab).toHaveBeenCalledWith(parentId);
+
+    // 通知保留原样：lesson_recorded（统一入口）+ task_failed（回写路径自身）
+    const types = (await notificationsFor(id)).map((n) => n.type).sort();
+    expect(types).toEqual(["lesson_recorded", "task_failed"]);
   });
 });

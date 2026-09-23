@@ -1065,7 +1065,12 @@ export async function autoMigrate(force = false): Promise<string[]> {
     let repair: SchemaRepairResult | undefined;
     try {
       repair = repairMissingColumns(sqliteDb);
-      logs.push(...describeSchemaRepair(repair));
+      const repairLogs = describeSchemaRepair(repair);
+      logs.push(...repairLogs);
+      // 同时打到 stdout：补列是"在生产上静默改库"的动作，只放进返回数组的话
+      // 运维在容器日志里看不到它发生过（本轮生产就静默补了 outbox 的租约两列，
+      // 直到手工查表才发现）。启动各打一行，代价可以忽略。
+      for (const line of repairLogs) console.log(line);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       logs.push(`schema-repair error: ${message}`);

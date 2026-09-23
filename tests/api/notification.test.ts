@@ -63,7 +63,7 @@ describe("recordNotification（NC-2）", () => {
       metadata: { reason: "ok" },
     });
     expect(rows[0]?.createdAt).toBeInstanceOf(Date);
-    expect(rows[0]?.readAt).toBeUndefined();
+    expect(rows[0]?.readAt).toBeNull(); // 未读的可空列在真实库里是 NULL
   });
 
   it("null agentId 早退 → 0 行", async () => {

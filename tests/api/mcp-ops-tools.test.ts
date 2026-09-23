@@ -290,7 +290,7 @@ describe("admin-gated write tools", () => {
     const { payload } = await callTool("set_agent_budget", { agentId: 1, budgetCents: 5000 }, PLAIN_CTX);
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("admin");
-    expect(db.rowsOfTable(schema.agents)[0].budgetCents).toBeUndefined();
+    expect(db.rowsOfTable(schema.agents)[0].budgetCents).toBeNull(); // 未设置的可空列在真实库里是 NULL
   });
 
   it("set_agent_budget succeeds with admin permission", async () => {

@@ -187,6 +187,8 @@ export const CREATE_TABLES_SQL: string[] = [
     delivered_at INTEGER,
     dead_letter_at INTEGER,
     last_error_code TEXT,
+    claimed_at INTEGER,
+    lease_expires_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at INTEGER NOT NULL DEFAULT (unixepoch())
   )`,

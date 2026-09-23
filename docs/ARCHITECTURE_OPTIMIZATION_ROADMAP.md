@@ -73,8 +73,8 @@ flowchart TB
 
 ### 3. 回调、归档和任务状态（第一批至近期）
 
-- **Outbox饥饿**：task-outbox.ts:189-209先无筛选limit100，再JS过滤未完成/到期。前100条若都结束，后续待发送可能持续取不到。改SQL WHERE+稳定ORDER BY+LIMIT，测试超过100条历史记录。
-- running标志（task-outbox.ts:212-239）仅进程内；补有期限的claim/lease，接收端按eventId幂等。目标是至少一次投递+幂等消费，不能承诺网络场景绝不重复。
+- ✅（本轮补齐后半）**Outbox饥饿**：WHERE 早已下推 SQL 并有真 SQL 回归（tests/api/task-outbox-starvation.test.ts）；本轮补上**稳定 ORDER BY**——`selectDue` 现按 `next_attempt_at, id` 显式排序，不再把"先发哪些"交给存储引擎的顺带顺序（顺序一变，积压重试可能长期排在新事件之后）。
+- ✅（本轮完成）**投递租约**：原来选出来就直接发、发完才 UPDATE，`running` 只是进程内标志 → 在飞行中的事件对其它派发者仍可见（重复投递）、进程崩了也没人知道归谁处理。现在 `claimDueEvents` 用**有期限的租约**做原子 CAS 领取（`claimed_at` / `lease_expires_at` 两列可空，老库由派生补列自动加上），投递完成立刻释放租约；租约到期即视为持有者已崩 → 事件自动放回重投。租约默认 60s，刻意显著大于单次发送超时（10s），避免"还在飞、租约已过"造成重复投递。**契约是至少一次，不是恰好一次**：发送成功但写库前崩掉会重发，极端崩溃下 attempts 计数可能少于实际发送次数（计数在完成时累加，所以重试上限是"软"的）——因此**接收端必须按 eventId 幂等**（我们始终发送稳定的 `X-TG-Event-ID`）。证据：tests/api/task-outbox-lease.test.ts（9 个，真实 SQLite）；撤掉 `selectDue` 的租约条件后 2 条转红。**同时修掉一个被测试掩盖的真问题**：假 DB 的行只存"插入时给的键"，未赋值列是 `undefined` 而非 NULL，导致 `isNull(未赋值列)` 与 `未赋值列 <= x` 在假 DB 下静默判错（租约 CAS 因此领不到事件）——已让假 DB 按真实 SQLite 语义把未赋值列补成 NULL，并把两处依赖 `undefined` 的旧断言改为 `toBeNull()`。
 - task-finalize.ts:36-87有归档钩子，但MCP取消server.ts:1170-1173直接failed；超时sweepers/task-lifecycle.ts:50-96自行写状态、教训、通知。统一终态转换及后续动作，保留成功/失败/取消语义。
 - db/schema.ts:94-119的status/lifecycleStatus/boardStatus是不同维度。以单一transition服务维护一致投影和修订号，不粗暴合成单枚举。
 - 扩展现有可靠投递机制覆盖内部归档/通知时，区分内部接收端和现有外部callback binding，不能强迫内部归档配置外部回调密钥。

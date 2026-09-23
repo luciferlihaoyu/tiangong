@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createFakeDb, type FakeDb } from "./helpers/fake-db";
+import { markSystemReady } from "./helpers/test-db";
 
 const connMocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("../../api/queries/connection", () => ({ getDb: connMocks.getDb }));
@@ -156,6 +157,9 @@ beforeEach(() => {
   syncMocks.syncTaskMemoryToXuanji.mockResolvedValue(undefined);
   syncMocks.syncTaskLessonToXuanji.mockResolvedValue(undefined);
   syncMocks.syncTaskArtifactsToAlist.mockResolvedValue(undefined);
+  // Phase B §2 起认领要过就绪闸门（fail-closed）：本文件只测工具行为，
+  // 不测就绪，所以显式声明系统已就绪，否则 claim_task 一律 reason=not_ready。
+  markSystemReady();
 });
 
 // ─── 任务 2.1：claim_task ───

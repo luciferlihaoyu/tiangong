@@ -214,6 +214,11 @@ export const taskOutboxEvents = sqliteTable("task_outbox_events", {
   deliveredAt: integer("delivered_at", { mode: "timestamp" }),
   deadLetterAt: integer("dead_letter_at", { mode: "timestamp" }),
   lastErrorCode: text("last_error_code", { length: 64 }),
+  // Phase B §3 投递租约：领取时写入到期时间，投递完成时清空。
+  // 租约到期即视为"持有者已崩"→ 事件重新可领取，从而保证**至少一次**投递，
+  // 又不会因为进程崩溃而永久卡死。两列都可空，所以老库能被派生补列自动加上。
+  claimedAt: integer("claimed_at", { mode: "timestamp" }),
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({

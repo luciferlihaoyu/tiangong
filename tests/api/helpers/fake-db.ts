@@ -320,6 +320,13 @@ export class FakeDb {
           if (createdAtDbName && copy[createdAtDbName] === undefined) {
             copy[createdAtDbName] = new Date();
           }
+          // 真实 SQLite 的行**拥有全部列**，未显式赋值的列读出来是 NULL（不是 undefined）。
+          // 假 DB 曾经只存"插入时给的键"，于是 `isNull(未赋值列)` 得 false、`未赋值列 <= x` 也 false，
+          // 让"空值时应当命中"的条件在假 DB 下静默判错（Phase B §3 的租约 CAS 就因此领不到事件）。
+          // 教训：假 DB 与真实驱动的差异会被测试掩盖，必须逐项对齐（写入形状、NULL 语义）。
+          for (const dbName of this.columnMapOf(table).dbToProp.keys()) {
+            if (copy[dbName] === undefined) copy[dbName] = null;
+          }
           const duplicate = name === "tasks" && store.find((stored) =>
             stored.origin_system !== null && stored.origin_system !== undefined &&
             stored.origin_system === copy.origin_system &&

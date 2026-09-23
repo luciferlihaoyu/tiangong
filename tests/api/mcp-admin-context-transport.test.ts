@@ -100,7 +100,7 @@ describe("MCP transport injects key context into tools", () => {
 
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("admin");
-    expect(db.rowsOfTable(schema.agents)[0].budgetCents).toBeUndefined();
+    expect(db.rowsOfTable(schema.agents)[0].budgetCents).toBeNull(); // 未设置的可空列在真实库里是 NULL
   });
 
   it("key with admin permission passes the gate end to end", async () => {

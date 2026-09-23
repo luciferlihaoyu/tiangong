@@ -1,14 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, eq, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
 import { taskOutboxEvents, type TaskOutboxEvent } from "@db/schema";
 import { getDb } from "../queries/connection";
+import { getAffectedRows } from "./insert-id";
 import { signRawBody } from "./raw-body-signature";
 import { isReady } from "./readiness";
 
 const MAX_ATTEMPTS = 5;
 const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const INITIAL_RETRY_MS = 60 * 1000;
+/** 单轮最多领取多少条（与历史 LIMIT 保持一致）。 */
+const CLAIM_LIMIT = 100;
+/**
+ * 默认租约时长。必须显著大于一次 HTTP 发送的超时（sendCallback 是 10s），
+ * 否则会出现"还在飞行中、租约已过期"从而被第二个派发者重复投递；
+ * 也不能太长，否则进程崩溃后要等很久事件才会被放回重投。
+ */
+export const DEFAULT_LEASE_MS = 60 * 1000;
 
 const CallbackKeySchema = z.object({
   keyId: z.string().min(1).max(64),
@@ -188,15 +197,18 @@ export async function enqueueTaskOutboxEvent(db: Database | Transaction, input: 
 }
 
 /**
- * 选出待投递的事件：未投递、未死信、已到投递时间。
+ * 选出待投递的事件：未投递、未死信、已到投递时间、**且没有被别人持有有效租约**。
  *
  * WHERE 必须下推到 SQL——历史上这里先 `SELECT … LIMIT 100` 再在 JS 侧 filter，
  * 一旦表头堆满已投递/死信行，待投递事件会被挤到 LIMIT 之外**永久饿死**
  * （真 SQL 回归见 tests/api/task-outbox-starvation.test.ts）。
+ *
+ * ORDER BY 也必须显式给出：只靠存储引擎的顺带顺序等于把"先发哪些"交给实现细节，
+ * 一旦顺序变化，重试积压的事件可能长期排在新事件之后。
  * idx_task_outbox_due(next_attempt_at, delivered_at, dead_letter_at) 覆盖本查询。
  * @testable
  */
-export async function selectDue(db: Database, now: Date): Promise<OutboxEventView[]> {
+export async function selectDue(db: Database, now: Date, limit = CLAIM_LIMIT): Promise<OutboxEventView[]> {
   return db
     .select()
     .from(taskOutboxEvents)
@@ -205,31 +217,109 @@ export async function selectDue(db: Database, now: Date): Promise<OutboxEventVie
         isNull(taskOutboxEvents.deliveredAt),
         isNull(taskOutboxEvents.deadLetterAt),
         lte(taskOutboxEvents.nextAttemptAt, now),
+        // 有效租约内的勿动：持有者可能正在投递，抢过来就会重复投递
+        or(
+          isNull(taskOutboxEvents.leaseExpiresAt),
+          lte(taskOutboxEvents.leaseExpiresAt, now),
+        ),
       ),
     )
-    .limit(100);
+    .orderBy(asc(taskOutboxEvents.nextAttemptAt), asc(taskOutboxEvents.id))
+    .limit(limit);
+}
+
+/**
+ * 领取待投递事件：给每一条打上**有期限的租约**，返回真正抢到的那些。
+ *
+ * 为什么需要租约（Phase B §3）：原来选出来就直接发、发完才 UPDATE，于是
+ *   1. "在飞行中"的事件对任何其它派发者仍然可见 → 重复投递；
+ *   2. `running` 标志只是进程内的，进程崩了没人知道这条事件归谁处理。
+ * 租约解决这两点：租约内别人抢不到（互斥），租约到期自动放回（不会永久卡死）。
+ *
+ * 语义边界（诚实说明）：这是**至少一次**投递，不是恰好一次——
+ *   - 发送成功但进程在写库前崩掉 → 租约到期后会重发；
+ *   - 极端崩溃场景下 attempts 计数可能少于实际发送次数（计数在完成时才累加），
+ *     所以重试上限是"软"的。
+ * 因此接收端必须按 eventId 幂等（我们始终发送稳定的 X-TG-Event-ID）。
+ * @testable
+ */
+export async function claimDueEvents(
+  db: Database,
+  now: Date,
+  options: { readonly limit?: number; readonly leaseMs?: number } = {},
+): Promise<OutboxEventView[]> {
+  const limit = options.limit ?? CLAIM_LIMIT;
+  const leaseExpiresAt = new Date(now.getTime() + (options.leaseMs ?? DEFAULT_LEASE_MS));
+  const candidates = await selectDue(db, now, limit);
+
+  const claimed: OutboxEventView[] = [];
+  for (const event of candidates) {
+    // 原子 CAS：只有"没人持有"或"租约已过期"才能抢到；按真实受影响行数裁决
+    const result = await db
+      .update(taskOutboxEvents)
+      .set({ claimedAt: now, leaseExpiresAt })
+      .where(
+        and(
+          eq(taskOutboxEvents.eventId, event.eventId),
+          isNull(taskOutboxEvents.deliveredAt),
+          isNull(taskOutboxEvents.deadLetterAt),
+          lte(taskOutboxEvents.nextAttemptAt, now),
+          or(
+            isNull(taskOutboxEvents.leaseExpiresAt),
+            lte(taskOutboxEvents.leaseExpiresAt, now),
+          ),
+        ),
+      );
+    if (getAffectedRows(result) === 1) claimed.push(event);
+  }
+  return claimed;
+}
+
+/** 投递结果落库：成功/重试/死信三态，并**立刻释放租约**（不必等它自然过期）。 */
+export async function completeDelivery(
+  db: Database,
+  event: OutboxEventView,
+  result: DeliveryResult,
+  now: Date,
+): Promise<void> {
+  const shared = {
+    attempts: event.attempts + 1,
+    firstAttemptAt: event.firstAttemptAt ?? now,
+    claimedAt: null,
+    leaseExpiresAt: null,
+  };
+  switch (result.kind) {
+    case "delivered":
+      await db
+        .update(taskOutboxEvents)
+        .set({ ...shared, deliveredAt: now, lastErrorCode: null })
+        .where(eq(taskOutboxEvents.eventId, event.eventId));
+      return;
+    case "retry":
+      await db
+        .update(taskOutboxEvents)
+        .set({ ...shared, nextAttemptAt: result.nextAttemptAt, lastErrorCode: "delivery_failed" })
+        .where(eq(taskOutboxEvents.eventId, event.eventId));
+      return;
+    case "dead_letter":
+      await db
+        .update(taskOutboxEvents)
+        .set({ ...shared, deadLetterAt: now, lastErrorCode: "delivery_failed" })
+        .where(eq(taskOutboxEvents.eventId, event.eventId));
+      return;
+  }
 }
 
 export async function dispatchDueOutboxEvents(now: Date = new Date()): Promise<number> {
   const db = getDb();
-  const due = await selectDue(db, now);
-  for (const event of due) {
+  // 先领取再投递：领取失败的（别人持有租约）本轮直接不碰
+  const claimed = await claimDueEvents(db, now);
+  for (const event of claimed) {
     const binding = bindingFor(event);
     const result = await dispatchOutboxEvent(event, binding, { now, send: sendCallback, log: console.warn });
-    const attempts = event.attempts + 1;
-    switch (result.kind) {
-      case "delivered":
-        await db.update(taskOutboxEvents).set({ attempts, firstAttemptAt: event.firstAttemptAt ?? now, deliveredAt: now, lastErrorCode: null }).where(eq(taskOutboxEvents.eventId, event.eventId));
-        break;
-      case "retry":
-        await db.update(taskOutboxEvents).set({ attempts, firstAttemptAt: event.firstAttemptAt ?? now, nextAttemptAt: result.nextAttemptAt, lastErrorCode: "delivery_failed" }).where(eq(taskOutboxEvents.eventId, event.eventId));
-        break;
-      case "dead_letter":
-        await db.update(taskOutboxEvents).set({ attempts, firstAttemptAt: event.firstAttemptAt ?? now, deadLetterAt: now, lastErrorCode: "delivery_failed" }).where(eq(taskOutboxEvents.eventId, event.eventId));
-        break;
-    }
+    await completeDelivery(db, event, result, now);
   }
-  return due.length;
+  return claimed.length;
 }
 
 export class TaskOutboxDispatcher {

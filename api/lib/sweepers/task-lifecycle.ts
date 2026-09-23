@@ -13,8 +13,7 @@ import { and, eq, gt, lte } from "drizzle-orm";
 import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
-import { syncTaskLessonToXuanji } from "../xuanji-sync";
-import { notifyLessonRecorded } from "../notification-hooks";
+import { finalizeFailedTask } from "../task-finalize";
 import type { Db } from "./db";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -47,6 +46,7 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         })
         .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
     } else {
+      const timeoutText = `任务超时未响应（timeout ${task.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms）`;
       await db
         .update(tasks)
         .set({ status: "failed", lifecycleStatus: "failed", failedAt: now, workerLeaseToken: null, workerLeaseExpiresAt: null, updatedAt: now })
@@ -57,43 +57,24 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         entityId: task.id,
         metadata: { taskId: task.taskId },
       });
-      // 失败教训写璇玑（3.1 质量反哺）：lifecycle sweeper 的超时是 orchestration 路径的终态
-      // （任务真的超时无响应、重试耗尽），非执行失败，但同样归档教训供同类任务检索规避。
-      // 错误文案带超时上下文；agentId 归任务行（无执行代理时归 0）；xuanji_lesson 幂等标记
-      // 兜底去重（sweeper 周期性运行，同一任务至多归档一次）。尽力而为，失败绝不影响 sweeper。
-      try {
-        await syncTaskLessonToXuanji(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          output: task.output,
-          agentId: task.agentId ?? 0,
-          status: "failed",
-          lifecycleStatus: "failed",
-          error: `任务超时未响应（timeout ${(task.timeoutMs ?? DEFAULT_TIMEOUT_MS)}ms）`,
-        });
-      } catch (error) {
-        console.warn(`[task-lifecycle] xuanji lesson sync failed for task ${task.taskId}: ${describeError(error)}`);
-      }
-      // 失败教训通知（NC-3）：lifecycle sweeper 的超时终态是失败教训挂点之一，
-      // 落库后记一条 lesson_recorded 通知（尽力而为，失败绝不影响 sweeper）。
-      try {
-        await notifyLessonRecorded(
-          db,
-          {
-            id: task.id,
-            taskId: task.taskId,
-            name: task.name,
-            agentId: task.agentId ?? 0,
-            error: `任务超时未响应（timeout ${(task.timeoutMs ?? DEFAULT_TIMEOUT_MS)}ms）`,
-          },
-          "lifecycle.sweeper"
-        );
-      } catch (error) {
-        console.warn(`[task-lifecycle] notification failed for task ${task.taskId}: ${describeError(error)}`);
-      }
+      // Phase B §3-2：超时终态动作与取消/执行失败**统一走 finalizeFailedTask**。
+      // 原先这里内联"教训 + 通知"，漏了产物归档与协作父任务汇总（父任务汇总会一直等到
+      // 其它兄弟完成才发生——功能缺口，不只是少写日志）。超时文案由编排层推断，
+      // 任务行的 error 可能为空，所以显式传 errorText。
+      // finalizeFailedTask 各步骤已全 catch，绝不抛错打断 sweeper。
+      await finalizeFailedTask(db as never, {
+        id: task.id,
+        taskId: task.taskId,
+        name: task.name,
+        description: task.description,
+        input: task.input,
+        output: task.output,
+        agentId: task.agentId ?? 0,
+        status: "failed",
+        lifecycleStatus: "failed",
+        error: timeoutText,
+        parentTaskId: task.parentTaskId,
+      }, { errorChannel: "lifecycle.sweeper", errorText: timeoutText });
     }
   }
 

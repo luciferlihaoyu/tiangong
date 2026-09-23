@@ -38,7 +38,6 @@ import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { parseTaskMetadata } from "./task-metadata";
 import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
-import { notifyLessonRecorded } from "./notification-hooks";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
@@ -629,29 +628,10 @@ class TaskRunner {
               status: "failed",
               lifecycleStatus: "failed",
               error: errorText ?? "Task execution failed",
-            });
+            }, { errorChannel: "task-runner.execute", errorText: errorText ?? "Task execution failed" });
           } catch (error) {
             // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          // 失败教训通知（NC-3）：与璇玑教训同终态失败闸门，落库后记一条 lesson_recorded
-          // 通知中心（尽力而为，失败绝不影响执行主流程）。60s 防抖自动去重同一任务
-          // 在 6 个失败挂点间的重复通知。
-          try {
-            await notifyLessonRecorded(
-              db,
-              {
-                id: task.id,
-                taskId: task.taskId,
-                name: task.name,
-                agentId: task.agentId,
-                error: errorText ?? null,
-              },
-              "task-runner.execute"
-            );
-          } catch (error) {
-            // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
-            console.warn(`[TaskRunner] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
 
@@ -709,27 +689,10 @@ class TaskRunner {
               status: "failed",
               lifecycleStatus: "failed",
               error: internalError ?? "Task execution failed",
-            });
+            }, { errorChannel: "task-runner.catch", errorText: internalError ?? "Task execution failed" });
           } catch (error) {
             // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-          // 失败教训通知（NC-3）：catch 兜底路径同样记一条 lesson_recorded（channel 区分来源）。
-          try {
-            await notifyLessonRecorded(
-              db,
-              {
-                id: task.id,
-                taskId: task.taskId,
-                name: task.name,
-                agentId: task.agentId,
-                error: internalError ?? null,
-              },
-              "task-runner.catch"
-            );
-          } catch (error) {
-            // notifyLessonRecorded 自身已全 catch；此处兜底防御未来行为变化破坏执行主流程
-            console.warn(`[TaskRunner] notification failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
 

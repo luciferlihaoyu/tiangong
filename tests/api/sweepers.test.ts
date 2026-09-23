@@ -76,6 +76,15 @@ const xuanjiMocks = vi.hoisted(() => ({
   syncTaskLessonToXuanji: vi.fn(async () => ({ synced: true, reason: "written" as const })),
 }));
 
+vi.mock("../../api/lib/alist-sync", () => ({
+  syncTaskArtifactsToAlist: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../api/lib/task-validator", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/lib/task-validator")>()),
+  autoSummarizeCollab: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../api/lib/xuanji-sync", () => ({
   XUANJI_MEMORY_ARTIFACT_TYPE: "xuanji_memory",
   XUANJI_LESSON_ARTIFACT_TYPE: "xuanji_lesson",
@@ -231,6 +240,9 @@ describe("sweepTaskTimeouts", () => {
       timeoutMs: 300_000,
       claimedAt: new Date(NOW.getTime() - 3_600_000),
       updatedAt: new Date(NOW.getTime() - 3_600_000),
+      // 真实 DB 行拥有全部列；显式 null 可避免终态统一入口为查父任务多打一次 select
+      // （本文件按顺序喂 select 结果，多余查询会冲掉后续的 storm-check 结果）
+      parentTaskId: null,
     };
     const failedRows: DbRow[] = Array.from({ length: 5 }, (_, i) => ({
       id: 100 + i,

@@ -98,7 +98,11 @@ vi.mock("../../api/ws-manager", () => ({ wsManager: wsMocks }));
 vi.mock("../../api/lib/collaboration-events", () => ({
   emitCollabSummaryForTask: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("../../api/lib/task-finalize", () => ({
+// Phase B §3-2：失败/取消/超时的终态动作统一走 finalizeFailedTask，sweeper 不再自己内联
+// 通知。这里保留真实 finalizeFailedTask（只桩 finalizeCompletedTask），才能验证
+// "超时终态 → 失败教训通知（channel=lifecycle.sweeper）"这条链路真的还在。
+vi.mock("../../api/lib/task-finalize", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/lib/task-finalize")>()),
   finalizeCompletedTask: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../../api/lib/password", () => ({

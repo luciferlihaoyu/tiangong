@@ -41,6 +41,7 @@ import {
 } from "@db/schema";
 import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
+import { finalizeFailedTask } from "../lib/task-finalize";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
@@ -1154,7 +1155,18 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
     async (params) => {
       const db = getDb();
       const task = await db
-        .select({ id: tasks.id, status: tasks.status })
+        .select({
+          id: tasks.id,
+          taskId: tasks.taskId,
+          name: tasks.name,
+          description: tasks.description,
+          input: tasks.input,
+          output: tasks.output,
+          agentId: tasks.agentId,
+          parentTaskId: tasks.parentTaskId,
+          lifecycleStatus: tasks.lifecycleStatus,
+          status: tasks.status,
+        })
         .from(tasks)
         .where(eq(tasks.id, params.taskId))
         .then((r) => r[0]);
@@ -1165,10 +1177,29 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       }
 
       const reason = params.reason?.trim() || "通过 MCP 取消";
+      const errorText = `[cancelled] ${reason}`;
       await db
         .update(tasks)
-        .set({ status: "failed", error: `[cancelled] ${reason}` })
+        .set({ status: "failed", error: errorText })
         .where(eq(tasks.id, params.taskId));
+
+      // Phase B §3-2：取消也要走**统一终态动作**。原先这里只写 status=failed，
+      // 于是取消的任务：教训不进记忆（检索不到）、产物不归档、协作父任务汇总永远
+      // 不触发、也没有失败教训通知。终态写入在前，归档动作在后（archive 失败绝不影响
+      // 终态本身——finalizeFailedTask 各步骤自带 catch）。
+      await finalizeFailedTask(db, {
+        id: task.id,
+        taskId: task.taskId,
+        name: task.name,
+        description: task.description,
+        input: task.input,
+        output: task.output,
+        agentId: task.agentId ?? null,
+        status: "failed",
+        lifecycleStatus: task.lifecycleStatus,
+        error: errorText,
+        parentTaskId: task.parentTaskId,
+      }, { errorChannel: "mcp.cancel", errorText });
 
       return textResult({ success: true, taskId: params.taskId, status: "failed", reason });
     }

@@ -20,6 +20,7 @@ import { eq } from "drizzle-orm";
 import { tasks } from "@db/schema";
 import { syncTaskMemoryToXuanji, syncTaskLessonToXuanji, type CompletedTaskView, type Db } from "./xuanji-sync";
 import { syncTaskArtifactsToAlist } from "./alist-sync";
+import { notifyLessonRecorded } from "./notification-hooks";
 import { autoSummarizeCollab } from "./task-validator";
 
 /**
@@ -58,31 +59,72 @@ export async function finalizeCompletedTask(db: Db, task: FinalizeTaskView): Pro
 }
 
 /**
- * 失败任务归档（与完成路径对称）：把失败教训写入璇玑 + 协作汇总。
- * AList 失败时无产物可传，跳过。
- * 调用点：task-runner 五个 failed 路径（取消/超时/执行失败/panicked/internal）。
+ * 失败/取消/超时的**统一终态动作**（与完成路径对称）。所有把任务推进到
+ * "失败类终态"的路径都必须经由这里，不要在调用点自己拼装动作——历史上正是
+ * 三处各写各的，导致动作集不一致：
+ *   - 超时 sweeper 只做"教训 + 通知"，漏了产物归档与协作父任务汇总；
+ *   - MCP cancel_task 只把 status 写成 failed，**什么归档都不做**；
+ * 后果不是"少写日志"而是功能缺口：被取消/超时的协作子任务永远不触发父任务汇总
+ * （要等其它兄弟完成），取消任务的教训也不进记忆、检索不到。
+ *
+ * 各步骤各自 catch，单个接收端失败不阻断其余步骤，也绝不影响终态写入本身。
+ *
+ * @param options.errorChannel 通知里标注的失败挂点（如 lifecycle.sweeper / mcp.cancel）
+ * @param options.errorText 覆盖展示/归档用的失败原因（超时是编排层推断出来的文案，
+ *   任务行的 error 字段可能为空，所以允许调用方显式给）
  */
-export async function finalizeFailedTask(db: Db, task: FinalizeTaskView): Promise<void> {
+export async function finalizeFailedTask(
+  db: Db,
+  task: FinalizeTaskView,
+  options: { readonly errorChannel?: string; readonly errorText?: string } = {},
+): Promise<void> {
+  const errorText = options.errorText ?? task.error ?? null;
+  const view: FinalizeTaskView = { ...task, error: errorText };
+
   // 1) 璇玑记忆：失败教训入库（lesson kind，与成功记录走同一 writeTaskMemory
   //    但用独立 type=xuanji_lesson 幂等键，不污染成功归档）
   try {
-    await syncTaskLessonToXuanji(db, task);
+    await syncTaskLessonToXuanji(db, view);
   } catch (error) {
     console.warn(`[task-finalize] xuanji lesson sync failed for task ${task.taskId}: ${describeError(error)}`);
   }
 
   // 2) AList：失败任务通常无产物，但若用户在 taskArtifacts 留了"失败现场"附件仍归档
   try {
-    await syncTaskArtifactsToAlist(db, task);
+    await syncTaskArtifactsToAlist(db, view);
   } catch (error) {
     console.warn(`[task-finalize] alist artifact sync failed for task ${task.taskId}: ${describeError(error)}`);
   }
 
   // 3) 协作汇总（与完成路径同语义）
   try {
-    await maybeSummarizeParent(db, task);
+    await maybeSummarizeParent(db, view);
   } catch (error) {
     console.warn(`[task-finalize] parent collab summary failed for task ${task.taskId}: ${describeError(error)}`);
+  }
+
+  // 4) 失败教训通知（NC-3）：原先只有 sweeper 内联做，取消路径完全没有通知。
+  //    recordNotification 自带 60s 防抖，同一任务多挂点重复触发不会刷屏。
+  try {
+    await notifyLessonRecorded(
+      db,
+      {
+        id: task.id,
+        taskId: task.taskId,
+        name: task.name,
+        // 无执行代理的任务归 0（沿用 sweeper 超时路径的既有哨兵值）。注意：
+        // notifications.agent_id 是 NOT NULL + REFERENCES agents(id)，而"0"并不是一行真实 agent；
+        // 应用运行时连接**没有**开 PRAGMA foreign_keys（SQLite 每连接生效，只有 auto-migrate
+        // 的连接开了），所以生产能写进去（指向不存在 agent 的孤儿行），而测试库（显式 ON）
+        // 会直接 FK 报错。这是"测试桩比生产更严"的已知差异，未在本轮改变行为——
+        // 若将来在运行时打开 FK，需要先把这类哨兵值清理/归属化。
+        agentId: task.agentId ?? 0,
+        error: errorText,
+      },
+      options.errorChannel ?? "task.failed",
+    );
+  } catch (error) {
+    console.warn(`[task-finalize] lesson notification failed for task ${task.taskId}: ${describeError(error)}`);
   }
 }
 

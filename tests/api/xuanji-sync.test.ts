@@ -31,7 +31,9 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实驱动（node:sqlite 适配器）的 update 结果是 { changes, lastInsertRowid }，
+        // 不是 []：返回 [] 会让依赖 changes===1 的 CAS 转移（applyTaskTransition）误判成冲突。
+        return { where: vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: 0 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -290,8 +292,13 @@ describe("Xuanji task memory sync on completion", () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
-    const submittedTask: DbRow = { ...completedTask, status: "running", lifecycleStatus: "submitted" };
-    dbMocks.queueSelectResults([[submittedTask]]);
+    // 真实行必有修订号：§3-3 转移服务会再读一次任务行用它做 CAS
+    const submittedTask: DbRow = { ...completedTask, status: "running", lifecycleStatus: "submitted", stateRevision: 1 };
+    dbMocks.queueSelectResults([
+      [submittedTask], // a2a.review 首查任务行
+      [submittedTask], // §3-3 转移服务读行做 CAS
+      [], // 归档幂等检查
+    ]);
 
     // When
     const result = await createA2aCaller(mockCtx()).review({ taskId: 19, approved: true, note: "ok" });

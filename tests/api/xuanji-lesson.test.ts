@@ -43,7 +43,9 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实驱动（node:sqlite 适配器）的 update 结果是 { changes, lastInsertRowid }，
+        // 不是 []：返回 [] 会让依赖 changes===1 的 CAS 转移（applyTaskTransition）误判成冲突。
+        return { where: vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: 0 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -562,6 +564,8 @@ describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
     lifecycleStatus: "working",
     originSystem: null,
     parentTaskId: null,
+    // 真实行必有修订号：转移服务用它做 CAS
+    stateRevision: 1,
   };
 
   it("Given a2a 任务在 working 状态, When 调 a2a.fail, Then 写入含 error 的失败教训且不影响主流程", async () => {
@@ -570,6 +574,7 @@ describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
     dbMocks.queueSelectResults([
       [workingTask], // a2a.fail 首查任务行
+      [workingTask], // §3-3 转移服务读行做 CAS
       [], // 教训幂等检查
     ]);
 
@@ -596,6 +601,7 @@ describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
     dbMocks.queueSelectResults([
       [workingTask], // a2a.timeout 首查任务行
+      [workingTask], // §3-3 转移服务读行做 CAS
       [], // 教训幂等检查
     ]);
 

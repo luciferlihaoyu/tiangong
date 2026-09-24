@@ -110,6 +110,13 @@ export interface TaskTransitionRequest {
   readonly expectedRevision?: number;
   /** 是否清理执行租约（终态通常要清，避免陈旧 worker 继续推进）。 */
   readonly clearLease?: boolean;
+  /**
+   * 调用方自己的业务字段（进度、输出、分工，以及 acceptedAt/dispatchedAt/timeoutAt
+   * 这类专属时间戳），与状态维度**同一次** UPDATE 落库。服务不解释其语义，
+   * 且服务自己负责的键（status/lifecycleStatus/boardStatus/stateRevision/updatedAt
+   * 及终态时间戳）优先，`extra` 不能把它们覆盖掉。
+   */
+  readonly extra?: Readonly<Record<string, unknown>>;
 }
 
 export interface TaskTransitionSnapshot {
@@ -148,6 +155,7 @@ export async function applyTaskTransition(db: Db, request: TaskTransitionRequest
   const isCompleted = request.lifecycleStatus === "completed";
 
   const patch: Record<string, unknown> = {
+    ...(request.extra ?? {}),
     status: nextStatus,
     lifecycleStatus: nextLifecycle,
     stateRevision: current.stateRevision + 1,

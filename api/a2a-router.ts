@@ -6,7 +6,7 @@ import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
-import { LIFECYCLE_STATUSES, isValidLifecycleTransition } from "./lib/task-transition";
+import { LIFECYCLE_STATUSES, isValidLifecycleTransition, applyTaskTransition } from "./lib/task-transition";
 import { getInsertId } from "./lib/insert-id";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
@@ -143,14 +143,22 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      const dispatchedAt = new Date();
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
         status: "running", // 保持 backward compat
-        agentId: input.targetAgentId,
-        dispatcherAgentId: input.dispatcherAgentId ?? null,
-        dispatchedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: dispatchedAt,
+        expectedRevision: task.stateRevision,
+        extra: {
+          agentId: input.targetAgentId,
+          dispatcherAgentId: input.dispatcherAgentId ?? null,
+          dispatchedAt,
+        },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       // 记录 dispatch event
       await recordTaskEvent({
@@ -197,11 +205,17 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      const acceptedAt = new Date();
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        acceptedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: acceptedAt,
+        expectedRevision: task.stateRevision,
+        extra: { acceptedAt },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -243,11 +257,16 @@ export const a2aRouter = createRouter({
       }
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "working";
-      await db.update(tasks).set({
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        progress: input.progress ?? task.progress ?? 0,
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: { progress: input.progress ?? task.progress ?? 0 },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -273,10 +292,17 @@ export const a2aRouter = createRouter({
       if (!task) throw new Error("Task not found");
 
       const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = "awaiting_result";
-      await db.update(tasks).set({
+      // 原先这条没有任何校验，终态任务也能被改成 awaiting_result；现在与兄弟路径一致，
+      // 由转移服务的状态机拒绝终态回退。
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -319,13 +345,20 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
         status: "running",
-        progress: Math.max(task.progress ?? 0, 95),
-        output: input.output ?? task.output,
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: {
+          progress: Math.max(task.progress ?? 0, 95),
+          output: input.output ?? task.output,
+        },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       // 记录 submit event
       await recordTaskEvent({
@@ -395,13 +428,19 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      // completedAt 由服务在 approved 时按同一个 at 写入（非 approved 分支原先只是把
+      // task.completedAt 原值再写一遍，等价于不动，故不再显式传）。
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
         status: input.approved ? "done" : task.status,
-        progress: input.approved ? 100 : task.progress,
-        completedAt: input.approved ? new Date() : task.completedAt,
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: { progress: input.approved ? 100 : task.progress },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -450,13 +489,17 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      // status 与 failedAt 由服务从 lifecycleStatus=failed 推导，保证三个维度一致。
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        status: "failed",
+        at: new Date(),
         error: input.error ?? task.error,
-        failedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        expectedRevision: task.stateRevision,
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -511,12 +554,17 @@ export const a2aRouter = createRouter({
       }
 
       const timeoutText = input.note ? `a2a timeout：${input.note}` : "a2a timeout";
-      await db.update(tasks).set({
+      const timeoutAt = new Date();
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        status: "failed",
-        timeoutAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: timeoutAt,
+        expectedRevision: task.stateRevision,
+        extra: { timeoutAt },
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,
@@ -560,10 +608,17 @@ export const a2aRouter = createRouter({
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
       }
 
-      await db.update(tasks).set({
+      // 取消同样要落粗粒度 status（服务从 cancelled 推导 failed）与 failedAt；
+      // 原先这里只改 lifecycleStatus，留下同一行上互相矛盾的两个维度。
+      const transition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: nextStatus,
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+      });
+      if (!transition.ok) {
+        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
+      }
 
       await recordTaskEvent({
         taskId: input.taskId,

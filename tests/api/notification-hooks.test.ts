@@ -322,10 +322,16 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
     lifecycleStatus: "working",
     originSystem: null,
     parentTaskId: null,
+    // 真实行必有修订号：§3-3 转移服务用它做 CAS
+    stateRevision: 1,
   };
 
   it("Given a2a 任务 working, When a2a.fail, Then 通知 channel=a2a.fail", async () => {
-    dbMocks.queueSelectResults([[workingTask]]);
+    dbMocks.queueSelectResults([
+      [workingTask], // a2a.fail 首查任务行
+      [workingTask], // §3-3 转移服务读行做 CAS
+      [], // 通知防抖检查
+    ]);
 
     const result = await a2aCaller(mockCtx()).fail({ taskId: 50, error: "模型网关 502", agentId: 16 });
 
@@ -343,7 +349,11 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
   });
 
   it("Given a2a 任务 working, When a2a.timeout 附 note, Then 通知 channel=a2a.timeout 且带 a2a timeout 标识", async () => {
-    dbMocks.queueSelectResults([[workingTask]]);
+    dbMocks.queueSelectResults([
+      [workingTask], // a2a.timeout 首查任务行
+      [workingTask], // §3-3 转移服务读行做 CAS
+      [], // 通知防抖检查
+    ]);
 
     const result = await a2aCaller(mockCtx()).timeout({ taskId: 50, note: "上游 30s 无响应" });
 

@@ -6,6 +6,7 @@ import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
+import { LIFECYCLE_STATUSES, isValidLifecycleTransition } from "./lib/task-transition";
 import { getInsertId } from "./lib/insert-id";
 
 // ─── A2A-lite v0.1: 多助手任务通信 ───
@@ -15,21 +16,6 @@ import { getInsertId } from "./lib/insert-id";
 //   result   → 助手提交最终结果
 //   started  ≠ done/completed（投递成功不代表执行成功）
 
-const LIFECYCLE_STATUSES = [
-  "created",
-  "queued",
-  "claimed",
-  "dispatched",
-  "accepted",
-  "working",
-  "awaiting_result",
-  "submitted",
-  "reviewing",
-  "completed",
-  "failed",
-  "timeout",
-  "cancelled",
-] as const;
 
 const lifecycleStatusEnum = z.enum(LIFECYCLE_STATUSES);
 
@@ -78,34 +64,6 @@ async function recordArtifact(
     mimeType: input.mimeType ?? null,
   });
   return { artifactId: getInsertId(result) };
-}
-
-/** 安全地更新 lifecycleStatus（严格向前流转，禁止非法回退和跳跃） */
-function isValidLifecycleTransition(from: string, to: string): boolean {
-  // terminal states 不可逆
-  if (["completed", "failed", "timeout", "cancelled"].includes(from)) {
-    return false;
-  }
-  // 已到达 submitted 后不能回退到 working/dispatched/accepted/claimed 等
-  if (from === "submitted" && !["reviewing", "completed", "failed", "timeout", "cancelled"].includes(to)) {
-    return false;
-  }
-  if (from === "reviewing" && !["completed", "failed", "timeout", "cancelled"].includes(to)) {
-    return false;
-  }
-  // completed 只能从 submitted 或 reviewing 进入
-  if (to === "completed" && !["submitted", "reviewing"].includes(from)) {
-    return false;
-  }
-  // submitted 只能从 awaiting_result、working、dispatched、accepted、claimed 或 created/queued 进入
-  if (to === "submitted" && !["awaiting_result", "working", "dispatched", "accepted", "claimed", "queued", "created"].includes(from)) {
-    return false;
-  }
-  // reviewing 只能从 submitted 进入
-  if (to === "reviewing" && from !== "submitted") {
-    return false;
-  }
-  return true;
 }
 
 export const a2aRouter = createRouter({

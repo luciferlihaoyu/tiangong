@@ -27,7 +27,10 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实驱动（node:sqlite 适配器）的 update 结果是 { changes, lastInsertRowid }，
+        // 不是 []。返回 [] 会让需要判 `changes === 1` 的 CAS 转移（applyTaskTransition）
+        // 误判成冲突——桩比生产"松"同样会让测试失去意义。
+        return { where: vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: 0 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -131,10 +134,11 @@ describe("sweepTaskTimeouts", () => {
       retryCount: 1,
       maxRetries: 3,
       timeoutMs: 300_000,
+      stateRevision: 1,
       claimedAt: new Date(NOW.getTime() - 3_600_000),
       updatedAt: new Date(NOW.getTime() - 3_600_000),
     };
-    dbMocks.queueSelectResults([[staleTask], []]); // running rows + storm-check rows
+    dbMocks.queueSelectResults([[staleTask], [staleTask], []]); // running rows + 转移服务读行(CAS) + storm-check rows
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);
@@ -154,10 +158,11 @@ describe("sweepTaskTimeouts", () => {
       retryCount: 3,
       maxRetries: 3,
       timeoutMs: 300_000,
+      stateRevision: 1,
       claimedAt: new Date(NOW.getTime() - 7_200_000),
       updatedAt: new Date(NOW.getTime() - 7_200_000),
     };
-    dbMocks.queueSelectResults([[exhaustedTask], [], []]); // running + 通知防抖查询 + storm-check
+    dbMocks.queueSelectResults([[exhaustedTask], [exhaustedTask], [], []]); // running + 转移服务读行 + 通知防抖查询 + storm-check
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);
@@ -185,10 +190,11 @@ describe("sweepTaskTimeouts", () => {
       retryCount: 3,
       maxRetries: 3,
       timeoutMs: 300_000,
+      stateRevision: 1,
       claimedAt: new Date(NOW.getTime() - 7_200_000),
       updatedAt: new Date(NOW.getTime() - 7_200_000),
     };
-    dbMocks.queueSelectResults([[exhaustedTask], [], []]); // running + 通知防抖查询 + storm-check
+    dbMocks.queueSelectResults([[exhaustedTask], [exhaustedTask], [], []]); // running + 转移服务读行 + 通知防抖查询 + storm-check
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);
@@ -216,6 +222,7 @@ describe("sweepTaskTimeouts", () => {
       retryCount: 0,
       maxRetries: 3,
       timeoutMs: 300_000,
+      stateRevision: 1,
       claimedAt: new Date(NOW.getTime() - 60_000),
       updatedAt: new Date(NOW.getTime() - 60_000),
     };
@@ -238,11 +245,14 @@ describe("sweepTaskTimeouts", () => {
       retryCount: 3,
       maxRetries: 3,
       timeoutMs: 300_000,
+      stateRevision: 1,
       claimedAt: new Date(NOW.getTime() - 3_600_000),
       updatedAt: new Date(NOW.getTime() - 3_600_000),
       // 真实 DB 行拥有全部列；显式 null 可避免终态统一入口为查父任务多打一次 select
       // （本文件按顺序喂 select 结果，多余查询会冲掉后续的 storm-check 结果）
       parentTaskId: null,
+      // 真实行必有修订号：转移服务用它做 CAS（缺了会拼出 eq(state_revision, undefined)）
+      stateRevision: 1,
     };
     const failedRows: DbRow[] = Array.from({ length: 5 }, (_, i) => ({
       id: 100 + i,
@@ -250,7 +260,7 @@ describe("sweepTaskTimeouts", () => {
       status: "failed",
       updatedAt: new Date(NOW.getTime() - 600_000),
     }));
-    dbMocks.queueSelectResults([[staleTask], [], failedRows]); // running + 通知防抖查询 + storm-check rows
+    dbMocks.queueSelectResults([[staleTask], [staleTask], [], failedRows]); // running + 转移服务读行 + 通知防抖查询 + storm-check rows
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);

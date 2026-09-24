@@ -14,6 +14,7 @@ import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
 import { finalizeFailedTask } from "../task-finalize";
+import { applyTaskTransition } from "../task-transition";
 import type { Db } from "./db";
 
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -47,10 +48,20 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
     } else {
       const timeoutText = `任务超时未响应（timeout ${task.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms）`;
-      await db
-        .update(tasks)
-        .set({ status: "failed", lifecycleStatus: "failed", failedAt: now, workerLeaseToken: null, workerLeaseExpiresAt: null, updatedAt: now })
-        .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
+      // Phase B §3-3：状态转移改由单一服务写——一次写齐 status/lifecycleStatus/failedAt
+      // 并**递增 stateRevision**（原先这里不递增，而 task_outbox_events 上有
+      // (task_id, state_revision) 唯一索引且入队无冲突处理 ⇒ 同一修订号下第二条外部回调事件
+      // 会撞唯一索引抛错）。expectedRevision 用扫到的这一版做 CAS：租约过期后若已被别人推进，
+      // 这里返回 revision_conflict 而不是覆盖别人的写入，也不再触发归档。
+      const transition = await applyTaskTransition(db as never, {
+        taskId: task.id,
+        lifecycleStatus: "failed",
+        at: now,
+        error: timeoutText,
+        clearLease: true,
+        expectedRevision: task.stateRevision,
+      });
+      if (!transition.ok) continue;
       emitSweeperAudit({
         event: "task:timeout",
         entityType: "task",

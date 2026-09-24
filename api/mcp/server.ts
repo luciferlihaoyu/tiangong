@@ -42,6 +42,7 @@ import {
 import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
 import { finalizeFailedTask } from "../lib/task-finalize";
+import { applyTaskTransition } from "../lib/task-transition";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
@@ -1166,6 +1167,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
           parentTaskId: tasks.parentTaskId,
           lifecycleStatus: tasks.lifecycleStatus,
           status: tasks.status,
+          stateRevision: tasks.stateRevision,
         })
         .from(tasks)
         .where(eq(tasks.id, params.taskId))
@@ -1178,10 +1180,23 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
 
       const reason = params.reason?.trim() || "通过 MCP 取消";
       const errorText = `[cancelled] ${reason}`;
-      await db
-        .update(tasks)
-        .set({ status: "failed", error: errorText })
-        .where(eq(tasks.id, params.taskId));
+      // Phase B §3-3：走单一转移服务。原先这里只写 { status: "failed", error }，留下
+      // **同一行上互相矛盾的两个维度**：生产实测（2026-09-23）取消一个 dispatched 任务后
+      // status='failed' 而 lifecycle_status 仍是 'dispatched'、failed_at 为空；而且
+      // stateRevision 不递增，外部回调的第二条事件会撞 (task_id, state_revision) 唯一索引。
+      // 现在一次写齐 status(=failed 由 cancelled 推导)/lifecycleStatus=cancelled/failedAt，
+      // 并递增修订号。
+      const transition = await applyTaskTransition(db, {
+        taskId: task.id,
+        lifecycleStatus: "cancelled",
+        at: new Date(),
+        error: errorText,
+        clearLease: true,
+        expectedRevision: task.stateRevision,
+      });
+      if (!transition.ok) {
+        return failResult(`任务状态已被其他写入推进（${transition.reason}），取消未生效`);
+      }
 
       // Phase B §3-2：取消也要走**统一终态动作**。原先这里只写 status=failed，
       // 于是取消的任务：教训不进记忆（检索不到）、产物不归档、协作父任务汇总永远
@@ -1196,7 +1211,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         output: task.output,
         agentId: task.agentId ?? null,
         status: "failed",
-        lifecycleStatus: task.lifecycleStatus,
+        lifecycleStatus: "cancelled",
         error: errorText,
         parentTaskId: task.parentTaskId,
       }, { errorChannel: "mcp.cancel", errorText });

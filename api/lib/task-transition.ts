@@ -111,6 +111,12 @@ export interface TaskTransitionRequest {
   /** 是否清理执行租约（终态通常要清，避免陈旧 worker 继续推进）。 */
   readonly clearLease?: boolean;
   /**
+   * **有意**把终态拉回非终态（重试/重置语义）。这是状态机"终态不可逆"的显式例外：
+   * 只有确实带重试语义的调用方才能开，且只放宽"from 为终态"这一条，
+   * 其余规则（submitted/reviewing 等）照旧生效。
+   */
+  readonly restart?: boolean;
+  /**
    * 调用方自己的业务字段（进度、输出、分工，以及 acceptedAt/dispatchedAt/timeoutAt
    * 这类专属时间戳），与状态维度**同一次** UPDATE 落库。服务不解释其语义，
    * 且服务自己负责的键（status/lifecycleStatus/boardStatus/stateRevision/updatedAt
@@ -144,7 +150,12 @@ export async function applyTaskTransition(db: Db, request: TaskTransitionRequest
 
   const currentLifecycle = current.lifecycleStatus ?? "created";
   if (request.lifecycleStatus !== undefined && !isValidLifecycleTransition(currentLifecycle, request.lifecycleStatus)) {
-    return { ok: false, reason: "invalid_transition" };
+    // 重试/重置是有意把终态拉回非终态的：只在显式 restart + from 为终态 + to 非终态时放行。
+    const permittedRestart =
+      request.restart === true && isTerminalLifecycle(currentLifecycle) && !isTerminalLifecycle(request.lifecycleStatus);
+    if (!permittedRestart) {
+      return { ok: false, reason: "invalid_transition" };
+    }
   }
 
   const nextLifecycle = request.lifecycleStatus ?? currentLifecycle;

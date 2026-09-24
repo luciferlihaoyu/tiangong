@@ -10,6 +10,7 @@ import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
 import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
+import { applyTaskTransition } from "./lib/task-transition";
 import { recordNotification } from "./lib/notification";
 import { reportTaskProgress } from "./lib/task-writeback";
 import { getInsertId } from "./lib/insert-id";
@@ -352,14 +353,18 @@ export const taskboardRouter = createRouter({
       if (!row) throw new Error("Task not found");
       if (isTerminalStatus(row.boardStatus || "")) throw new Error("Cannot block a terminal task");
 
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "blocked",
-          blockedAt: new Date(),
-          boardNotes: input.reason,
-        })
-        .where(eq(tasks.id, input.taskId));
+      // Phase B §3-3：板状态变更也走单一转移服务，关键是拿到修订号递增
+      // （改了状态却不换版本，外部回调的 (task_id, state_revision) 唯一索引就会撞）。
+      // 板机与生命周期机是两个维度，block 不动生命周期，所以只传 boardStatus。
+      const blockedAt = new Date();
+      const blocked = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: "blocked",
+        at: blockedAt,
+        expectedRevision: row.stateRevision,
+        extra: { blockedAt, boardNotes: input.reason },
+      });
+      if (!blocked.ok) throw new Error(`Task state changed concurrently (${blocked.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,
@@ -417,10 +422,13 @@ export const taskboardRouter = createRouter({
         }
       }
 
-      await db
-        .update(tasks)
-        .set({ boardStatus: previousStatus })
-        .where(eq(tasks.id, input.taskId));
+      const unblocked = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: previousStatus,
+        at: new Date(),
+        expectedRevision: row.stateRevision,
+      });
+      if (!unblocked.ok) throw new Error(`Task state changed concurrently (${unblocked.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,
@@ -1069,20 +1077,20 @@ export const taskboardRouter = createRouter({
         throw new Error(`已达最大重试次数 (${maxRetries})，请「重新打开」走完整流程`);
       }
 
-      await db
-        .update(tasks)
-        .set({
-          status: "queued",
-          lifecycleStatus: "queued",
-          boardStatus: "ready",
-          retryCount: retryCount + 1,
-          error: null,
-          failedAt: null,
-          workerLeaseToken: null,
-          workerLeaseExpiresAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, input.taskId));
+      // 重试是**有意**把终态拉回非终态：只有这里开 restart，其余调用方仍受"终态不可逆"约束。
+      // 失败痕迹（error / failedAt）与租约随同这次转移一起清掉。
+      const retried = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        lifecycleStatus: "queued",
+        status: "queued",
+        boardStatus: "ready",
+        at: new Date(),
+        restart: true,
+        clearLease: true,
+        expectedRevision: row.stateRevision,
+        extra: { retryCount: retryCount + 1, error: null, failedAt: null },
+      });
+      if (!retried.ok) throw new Error(`Task state changed concurrently (${retried.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,
@@ -1122,14 +1130,16 @@ export const taskboardRouter = createRouter({
         throw new Error(`Task cannot be dispatched (current status: ${row.status})`);
       }
 
-      await db
-        .update(tasks)
-        .set({
-          status: "queued",
-          lifecycleStatus: "dispatched",
-          dispatchedAt: new Date(),
-        })
-        .where(eq(tasks.id, input.taskId));
+      const dispatchedAt = new Date();
+      const dispatched = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        lifecycleStatus: "dispatched",
+        status: "queued",
+        at: dispatchedAt,
+        expectedRevision: row.stateRevision,
+        extra: { dispatchedAt },
+      });
+      if (!dispatched.ok) throw new Error(`Task state changed concurrently (${dispatched.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,

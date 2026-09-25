@@ -22,7 +22,7 @@
 //   4. 终态由 lifecycleStatus **推导**粗粒度 status（completed→done，失败族→failed）
 //      并盖上对应时间戳；非终态转移不动 status、不盖终态戳。
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import { tasks } from "@db/schema";
 import { getDb } from "../queries/connection";
 import { getAffectedRows } from "./insert-id";
@@ -111,6 +111,13 @@ export interface TaskTransitionRequest {
   /** 是否清理执行租约（终态通常要清，避免陈旧 worker 继续推进）。 */
   readonly clearLease?: boolean;
   /**
+   * 调用方自有的并发守卫（如租约令牌、status=queued 的安全领取条件）。
+   * 给了它，WHERE 就变成 (id AND alsoWhere)，**不再**做修订号相等 CAS——
+   * 调用方的守卫是并发判据，修订号取服务重读到的当前值 +1。
+   * 用于"租约/状态守卫本来就比修订号更精确"的执行链路（task-runner）。
+   */
+  readonly alsoWhere?: SQL;
+  /**
    * **有意**把终态拉回非终态（重试/重置语义）。这是状态机"终态不可逆"的显式例外：
    * 只有确实带重试语义的调用方才能开，且只放宽"from 为终态"这一条，
    * 其余规则（submitted/reviewing 等）照旧生效。
@@ -183,10 +190,15 @@ export async function applyTaskTransition(db: Db, request: TaskTransitionRequest
   }
 
   const expected = request.expectedRevision ?? current.stateRevision;
+  // alsoWhere 在场时以调用方守卫为并发判据（修订号取重读到的当前值 +1，已并入 patch）；
+  // 不在场时用修订号相等做 CAS：读后被别人改过就拒绝，绝不静默覆盖。
+  const where = request.alsoWhere
+    ? and(eq(tasks.id, request.taskId), request.alsoWhere)
+    : and(eq(tasks.id, request.taskId), eq(tasks.stateRevision, expected));
   const result = await db
     .update(tasks)
     .set(patch)
-    .where(and(eq(tasks.id, request.taskId), eq(tasks.stateRevision, expected)));
+    .where(where);
   if (getAffectedRows(result) !== 1) {
     return { ok: false, reason: "revision_conflict" };
   }

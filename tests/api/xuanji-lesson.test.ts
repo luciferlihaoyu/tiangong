@@ -451,15 +451,25 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     expectedOutputSchema: null,
   };
 
-  /** 领取成功后的回读行（claimAndExecute 的第二次 select） */
-  const claimedRow: DbRow = { status: "running", progress: 10, lifecycleStatus: "claimed" };
+  // §3-3 之后 Runner 的状态写入走 applyTaskTransition：每次写入前服务都会**重读当前行**
+  // （拿最新修订号 + 校验生命周期规则），stub 按消费顺序供给这些重读行。
+  /** 领取写入前的重读行 */
+  const claimReadRow: DbRow = { status: "queued", lifecycleStatus: "queued", stateRevision: 1 };
+  /** working 写入前的重读行 */
+  const workingReadRow: DbRow = { status: "running", lifecycleStatus: "claimed", stateRevision: 2 };
+  /** 失败终态写入前的重读行 */
+  const failedReadRow: DbRow = { status: "running", lifecycleStatus: "working", stateRevision: 3 };
+  /** catch 兜底写入前的重读行（抛错发生在领取广播处，任务停在 claimed） */
+  const catchReadRow: DbRow = { status: "running", lifecycleStatus: "claimed", stateRevision: 2 };
 
   it("Given 重试已耗尽（retryCount >= maxRetries）且执行失败, When claimAndExecute, Then 写入含执行错误的失败教训", async () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
     dbMocks.queueSelectResults([
-      [claimedRow], // 领取确认回读
+      [claimReadRow], // 领取写入前重读
+      [workingReadRow], // working 写入前重读
+      [failedReadRow], // 失败终态写入前重读
       [], // 教训幂等检查
     ]);
 
@@ -480,7 +490,7 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
-    dbMocks.queueSelectResults([[claimedRow]]);
+    dbMocks.queueSelectResults([[claimReadRow], [workingReadRow], [failedReadRow]]);
 
     // When
     await (taskRunner as unknown as { claimAndExecute(task: DbRow): Promise<void> }).claimAndExecute({
@@ -502,7 +512,7 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     // Given：领取确认回读 + 领取后的状态广播意外抛错（驱动 try/catch 兜底路径）
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
-    dbMocks.queueSelectResults([[claimedRow]]);
+    dbMocks.queueSelectResults([[claimReadRow], [catchReadRow], []]);
     wsMocks.broadcastToDashboard.mockImplementationOnce(() => {
       throw new Error("broadcast boom");
     });
@@ -526,7 +536,7 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
-    dbMocks.queueSelectResults([[claimedRow]]);
+    dbMocks.queueSelectResults([[claimReadRow], [catchReadRow]]);
     wsMocks.broadcastToDashboard.mockImplementationOnce(() => {
       throw new Error("broadcast boom");
     });

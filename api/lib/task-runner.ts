@@ -41,6 +41,7 @@ import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
+import { applyTaskTransition } from "./task-transition";
 import { registerExecutor, unregisterExecutor } from "./executor-cancellation";
 import { resolveTianshuDefaultModel, resolveTianshuFallbackModel } from "../tianshu-router";
 import { ASSISTANT_AGENT_KEY, ASSISTANT_TASK_SYSTEM_PROMPT, getAssistantModel } from "./ai-assistant";
@@ -245,6 +246,16 @@ class TaskRunner {
     }
   }
 
+  /**
+   * 测试缝（Phase B §3-3）：手动驱动一次扫描。
+   * 生产路径不变——tick() 仍只由 start() 的定时器调用；此前 Runner 的执行方法全是
+   * private，测试里只 import 过模块、从未调用，即内部执行主链路（最常走的路径）
+   * 没有任何覆盖其状态写入的测试。这个缝就是为补上那块测试而开。
+   */
+  async runOnce(): Promise<void> {
+    await this.tick();
+  }
+
   /** 每隔 intervalMs 执行一次扫描 */
   private async tick(): Promise<void> {
     if (CONFIG.mode === "none") return;
@@ -275,10 +286,17 @@ class TaskRunner {
             continue;
           }
           const now = new Date();
-          await db
-            .update(tasks)
-            .set({ status: "queued", lifecycleStatus: "dispatched", dispatchedAt: now, updatedAt: now })
-            .where(and(eq(tasks.id, task.id), eq(tasks.status, "pending")));
+          // §3-3：派发也是状态变更，改走转移服务拿修订号递增；status=pending 的安全领取
+          // 条件用 alsoWhere 原样保留（别的写入者不递增修订号时，修订号 CAS 会误伤）。
+          const dispatched = await applyTaskTransition(db, {
+            taskId: task.id,
+            lifecycleStatus: "dispatched",
+            status: "queued",
+            at: now,
+            alsoWhere: eq(tasks.status, "pending"),
+            extra: { dispatchedAt: now },
+          });
+          if (!dispatched.ok) continue;
           wsManager.broadcastToDashboard({
             type: "task_update",
             action: "dispatched",
@@ -396,30 +414,25 @@ class TaskRunner {
     const cancellation = registerExecutor(task.id);
 
     try {
-      // 安全领取：只有 status 仍是 queued 才更新
-      await db
-        .update(tasks)
-        .set({
-          status: "running",
-          lifecycleStatus: "claimed",
+      // 安全领取：只有 status 仍是 queued 才更新（alsoWhere 原样保留该守卫）。
+      // 原先"写完再回读 status=running 且 progress=10"的确认挡不住双领取——两个 Runner
+      // 写的是完全相同的值，回读永远像自己写的；转移服务的 changes 判定才是真判据。
+      const claimTransition = await applyTaskTransition(db, {
+        taskId: task.id,
+        lifecycleStatus: "claimed",
+        status: "running",
+        at: startedAt,
+        alsoWhere: eq(tasks.status, "queued"),
+        extra: {
           progress: 10,
           claimedAt: startedAt,
           lastHeartbeatAt: startedAt,
           workerLeaseToken: leaseToken,
           workerLeaseGeneration: (task.workerLeaseGeneration ?? 0) + 1,
           workerLeaseExpiresAt: leaseExpiresAt,
-          updatedAt: startedAt,
-        })
-        .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
-
-      // 重新读取确认领取成功
-      const claimed = await db
-        .select({ status: tasks.status, progress: tasks.progress, lifecycleStatus: tasks.lifecycleStatus })
-        .from(tasks)
-        .where(eq(tasks.id, task.id))
-        .then((r) => r[0]);
-
-      if (!claimed || claimed.status !== "running" || claimed.progress !== 10) {
+        },
+      });
+      if (!claimTransition.ok) {
         // 已被其他 Runner 领取
         return;
       }
@@ -456,10 +469,12 @@ class TaskRunner {
       const prompt = this.buildPrompt(task, agent);
 
       // 4. 更新进度到 25，标记 working
-      await db
-        .update(tasks)
-        .set({ progress: 25, lifecycleStatus: "working" })
-        .where(eq(tasks.id, task.id));
+      await applyTaskTransition(db, {
+        taskId: task.id,
+        lifecycleStatus: "working",
+        at: new Date(),
+        extra: { progress: 25 },
+      });
       wsManager.broadcastToDashboard({
         type: "task_update",
         action: "updated",
@@ -493,14 +508,13 @@ class TaskRunner {
 
       if (result.awaitingResult) {
         // A2A-lite: gateway 只返回 started，进入 awaiting_result
-        await db
-          .update(tasks)
-          .set({
-            lifecycleStatus: "awaiting_result",
-            output: outputText || null,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+        await applyTaskTransition(db, {
+          taskId: task.id,
+          lifecycleStatus: "awaiting_result",
+          at: new Date(),
+          alsoWhere: and(eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")),
+          extra: { output: outputText || null },
+        });
 
         await this.recordEvent(task.id, "system", "Gateway returned 'started' only. Task is awaiting final result.", { mode: CONFIG.mode }, task.agentId ?? undefined);
 
@@ -527,42 +541,38 @@ class TaskRunner {
           return;
         }
         if (cancellation.aborted) {
-          await db.update(tasks).set({
-            status: "failed",
+          const cancelAckAt = new Date();
+          await applyTaskTransition(db, {
+            taskId: task.id,
             lifecycleStatus: "cancelled",
-            cancelAcknowledgedAt: new Date(),
-            failedAt: new Date(),
-            updatedAt: new Date(),
-          }).where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken)));
+            at: cancelAckAt,
+            alsoWhere: eq(tasks.workerLeaseToken, leaseToken),
+            extra: { cancelAcknowledgedAt: cancelAckAt },
+          });
           return;
         }
         // A2A-lite: submit result first; completion happens only after explicit review/auto-review
-        await db
-          .update(tasks)
-          .set({
-            status: "running",
-            lifecycleStatus: "submitted",
-            progress: 95,
-            output: outputText,
-            error: errorText ?? null,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+        await applyTaskTransition(db, {
+          taskId: task.id,
+          lifecycleStatus: "submitted",
+          status: "running",
+          at: new Date(),
+          error: errorText ?? null,
+          alsoWhere: and(eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")),
+          extra: { progress: 95, output: outputText },
+        });
 
         await this.recordEvent(task.id, "result", outputText, { artifactType: "task_result", lifecycleStatus: "submitted" }, task.agentId ?? undefined);
         await this.recordArtifact(task.id, "task_result", outputText, task.agentId ?? undefined);
 
         // Auto-review: since this is an automated runner, complete the task immediately after submitted is recorded
-        await db
-          .update(tasks)
-          .set({
-            status: "done",
-            lifecycleStatus: "completed",
-            progress: 100,
-            completedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+        await applyTaskTransition(db, {
+          taskId: task.id,
+          lifecycleStatus: "completed",
+          at: new Date(),
+          alsoWhere: and(eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")),
+          extra: { progress: 100 },
+        });
 
         // 完成（通过执行闸门）→ 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
         await finalizeCompletedTask(db, {
@@ -598,18 +608,14 @@ class TaskRunner {
           `[TaskRunner] Task ${task.taskId} (id=${task.id}) completed in ${Date.now() - startedAt.getTime()}ms`
         );
       } else {
-        await db
-          .update(tasks)
-          .set({
-            status: "failed",
-            lifecycleStatus: "failed",
-            progress: task.progress,
-            output: outputText || null,
-            error: errorText,
-            failedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+        await applyTaskTransition(db, {
+          taskId: task.id,
+          lifecycleStatus: "failed",
+          at: new Date(),
+          error: errorText,
+          alsoWhere: and(eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")),
+          extra: { progress: task.progress, output: outputText || null },
+        });
 
         // 失败教训写璇玑（任务 3.1 质量反哺）：只有终态失败才写——retryCount >= maxRetries
         // （或 maxRetries=0 无重试）时失败不能再经 failed→queued 重派（与 MCP retry 路径同一闸门）；
@@ -661,16 +667,13 @@ class TaskRunner {
       // 尝试回写失败状态
       try {
         const internalError = `Runner internal error: ${e instanceof Error ? e.message : String(e)}`.slice(0, CONFIG.resultMaxChars);
-        await db
-          .update(tasks)
-          .set({
-            status: "failed",
-            lifecycleStatus: "failed",
-            error: internalError,
-            failedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")));
+        await applyTaskTransition(db, {
+          taskId: task.id,
+          lifecycleStatus: "failed",
+          at: new Date(),
+          error: internalError,
+          alsoWhere: and(eq(tasks.workerLeaseToken, leaseToken), eq(tasks.status, "running")),
+        });
 
         // 失败教训写璇玑（catch 兜底路径，与 result.success === false 路径同一闸门）：
         // 执行过程"意外抛错"同样是终态失败，retryCount >= maxRetries 时才归档教训，

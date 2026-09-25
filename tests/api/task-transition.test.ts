@@ -336,4 +336,49 @@ describe("§3-3 transition 服务契约", () => {
     expect(row.workerLeaseToken).toBeNull();
     expect(row.workerLeaseExpiresAt).toBeNull();
   });
+
+  it("alsoWhere：调用方自有的并发守卫不满足时拒绝且一个字段都不写", async () => {
+    const id = await seedTask({
+      taskId: "T-TRANS-GUARD",
+      status: "running",
+      lifecycleStatus: "working",
+      workerLeaseToken: "lease-mine",
+    });
+    const before = await taskRow(id);
+
+    // 模拟"租约已被别人接管"：守卫里的令牌与行上的不一致
+    const result = await applyTaskTransition(testDb.db, {
+      taskId: id,
+      lifecycleStatus: "submitted",
+      at: NOW,
+      alsoWhere: eq(schema.tasks.workerLeaseToken, "lease-theirs"),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("revision_conflict");
+
+    const after = await taskRow(id);
+    expect(after.lifecycleStatus).toBe(before.lifecycleStatus);
+    expect(after.stateRevision).toBe(before.stateRevision);
+  });
+
+  it("alsoWhere：守卫满足时正常写入并递增修订号", async () => {
+    const id = await seedTask({
+      taskId: "T-TRANS-GUARD2",
+      status: "running",
+      lifecycleStatus: "working",
+      workerLeaseToken: "lease-mine",
+    });
+
+    const result = await applyTaskTransition(testDb.db, {
+      taskId: id,
+      lifecycleStatus: "submitted",
+      at: NOW,
+      alsoWhere: eq(schema.tasks.workerLeaseToken, "lease-mine"),
+    });
+    expect(result.ok).toBe(true);
+
+    const row = await taskRow(id);
+    expect(row.lifecycleStatus).toBe("submitted");
+    expect(row.stateRevision).toBe(2);
+  });
 });

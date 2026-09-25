@@ -287,7 +287,8 @@ describe("挂点：taskboard.reject 触发 lesson_recorded 通知", () => {
   };
 
   it("Given 审阅中的任务被驳回, When reject 附理由, Then 通知 agent 2 / task 40 / channel=taskboard.reject 且驳回理由进 error", async () => {
-    dbMocks.queueSelectResults([[reviewTask]]);
+    // 第 1 行供路由读取，第 2 行供转移服务写入前重读
+    dbMocks.queueSelectResults([[reviewTask], [reviewTask]]);
 
     const result = await taskboardCaller(mockCtx()).reject({ taskId: 40, agentId: 7, reason: "数据口径错误" });
 

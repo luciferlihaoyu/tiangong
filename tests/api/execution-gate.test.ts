@@ -291,7 +291,8 @@ describe("Execution approval gate", () => {
 
   it("requeues a parked high-risk task for execution on admin approval", async () => {
     // Given: task parked pending approval
-    dbMocks.queueSelectResults([[parkedHighRiskTask()]]);
+    // 第 1 行供路由读取，第 2 行供转移服务写入前重读
+    dbMocks.queueSelectResults([[parkedHighRiskTask()], [parkedHighRiskTask()]]);
 
     // When: logged-in admin approves via the existing taskboard.approve
     const caller = createBoardCaller(mockCtx());

@@ -17,7 +17,9 @@ const chained = (val: unknown) => ({
 const mockDb = {
   select: vi.fn(() => ({ from: vi.fn(() => chained(mockSelectFn())) })),
   insert: vi.fn(() => ({ values: vi.fn(() => mockInsertResult()) })),
-  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => chained([])) })) })),
+  // 真实 node:sqlite 适配器的 update 结果是 {changes, lastInsertRowid}；
+  // 转移服务靠 changes 判定写入是否命中，解析 [] 会变成 changes=0 的假冲突
+  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => chained({ changes: 1, lastInsertRowid: 0 })) })) })),
   delete: vi.fn(() => ({ where: vi.fn() })),
 };
 

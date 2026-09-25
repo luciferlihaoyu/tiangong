@@ -18,7 +18,7 @@ import { createTestDb, markSystemReady, type TestDb } from "./helpers/test-db";
 import * as schema from "@db/schema";
 
 const conn = vi.hoisted(() => ({ getDb: vi.fn() }));
-const wsMocks = vi.hoisted(() => ({ broadcastToDashboard: vi.fn(), broadcastToTask: vi.fn() }));
+const wsMocks = vi.hoisted(() => ({ broadcastToDashboard: vi.fn(), broadcastToTask: vi.fn(), sendToAgent: vi.fn() }));
 const gateMocks = vi.hoisted(() => ({ checkCompletionGate: vi.fn(), parkTaskForApproval: vi.fn() }));
 const syncMocks = vi.hoisted(() => ({
   syncTaskLessonToXuanji: vi.fn(),
@@ -99,6 +99,7 @@ beforeEach(() => {
   conn.getDb.mockReturnValue(testDb.db);
   wsMocks.broadcastToDashboard.mockReset();
   wsMocks.broadcastToTask.mockReset();
+  wsMocks.sendToAgent.mockReset();
   gateMocks.checkCompletionGate.mockReset().mockResolvedValue({ allowed: true, reasons: [] } as never);
   gateMocks.parkTaskForApproval.mockReset().mockResolvedValue(undefined as never);
   for (const fn of Object.values(syncMocks)) fn.mockReset().mockResolvedValue({ ok: true } as never);
@@ -106,6 +107,135 @@ beforeEach(() => {
 
 afterEach(() => {
   testDb.dispose();
+});
+
+describe("§3-3 切片 5：看板剩余写入（submit/updateStatus/审批三件套/submitForReview）", () => {
+  it("submit：running→review 落 reviewAt/reviewerId/output，修订号 1→2", async () => {
+    const agentId = await seedAgent();
+    // 审稿人推导链：父任务 agent > 派发人 > null——这里给派发人，reviewerId 应取到它
+    const id = await seedTask({
+      boardStatus: "running",
+      agentId,
+      status: "running",
+      dispatcherAgentId: agentId,
+    });
+
+    await createBoardCaller(mockCtx()).submit({ taskId: id, agentId, output: "结果内容" });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("review");
+    expect(row.reviewAt).toEqual(expect.any(Date));
+    expect(row.reviewerId).toBe(agentId);
+    expect(row.output).toBe("结果内容");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("updateStatus(to=done)：status=done + completedAt，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "review", status: "running" });
+
+    await createBoardCaller(mockCtx()).updateStatus({ taskId: id, agentId: 1, boardStatus: "done" });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("done");
+    expect(row.status).toBe("done");
+    expect(row.completedAt).toEqual(expect.any(Date));
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("updateStatus(to=failed)：status=failed + failedAt，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "running", status: "running" });
+
+    await createBoardCaller(mockCtx()).updateStatus({ taskId: id, agentId: 1, boardStatus: "failed" });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("failed");
+    expect(row.status).toBe("failed");
+    expect(row.failedAt).toEqual(expect.any(Date));
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("approve（review 且 lifecycle=reviewing）：生命周期推导 completed——修复 status=done 但 lifecycle 停在 reviewing 的投影错位", async () => {
+    const id = await seedTask({ boardStatus: "review", status: "running", lifecycleStatus: "reviewing" });
+
+    await createBoardCaller(mockCtx()).approve({ taskId: id, agentId: 1 });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("done");
+    expect(row.status).toBe("done");
+    expect(row.lifecycleStatus).toBe("completed");
+    expect(row.completedAt).toEqual(expect.any(Date));
+    expect(row.reviewResult).toBe("approved");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("approve（板式老流程，lifecycle 停在中间态）：生命周期不动、只补终态投影，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "review", status: "running", lifecycleStatus: "working" });
+
+    await createBoardCaller(mockCtx()).approve({ taskId: id, agentId: 1 });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("done");
+    expect(row.status).toBe("done");
+    // 状态机不允许 working→completed：老流程的生命周期保持原样（不误拒），只保证结果状态一致
+    expect(row.lifecycleStatus).toBe("working");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("reject：生命周期/结果/板三投影同次写齐 failed，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "review", status: "running", lifecycleStatus: "reviewing" });
+
+    await createBoardCaller(mockCtx()).reject({ taskId: id, agentId: 1, reason: "质量不达标" });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("failed");
+    expect(row.status).toBe("failed");
+    expect(row.lifecycleStatus).toBe("failed");
+    expect(row.failedAt).toEqual(expect.any(Date));
+    expect(row.reviewResult).toBe("rejected");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("requestChanges：review→running，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "review", status: "running", lifecycleStatus: "reviewing" });
+
+    await createBoardCaller(mockCtx()).requestChanges({ taskId: id, agentId: 1, reason: "再补一版" });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("running");
+    expect(row.status).toBe("running");
+    expect(row.reviewResult).toBe("changes_requested");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("submitForReview（已提交结果）：进入 reviewing，修订号递增", async () => {
+    const id = await seedTask({ boardStatus: "running", status: "running", lifecycleStatus: "submitted" });
+
+    const res = await createBoardCaller(mockCtx()).submitForReview({ taskId: id });
+
+    expect(res.success).toBe(true);
+    const row = await taskRow(id);
+    expect(row.lifecycleStatus).toBe("reviewing");
+    expect(row.stateRevision).toBe(2);
+  });
+
+  it("submitForReview（从严裁决）：尚未提交结果 → 拒绝且一个字段都不写", async () => {
+    const id = await seedTask({ boardStatus: "running", status: "running", lifecycleStatus: "working" });
+    const before = await taskRow(id);
+
+    await expect(createBoardCaller(mockCtx()).submitForReview({ taskId: id })).rejects.toThrow(
+      /submit.*result|先提交结果/i
+    );
+
+    const after = await taskRow(id);
+    expect(after.lifecycleStatus).toBe(before.lifecycleStatus);
+    expect(after.stateRevision).toBe(before.stateRevision);
+  });
+
+  it("submitForReview（任务不存在）：明确报错而不是静默成功", async () => {
+    await expect(createBoardCaller(mockCtx()).submitForReview({ taskId: 999999 })).rejects.toThrow(
+      "Task not found"
+    );
+  });
 });
 
 describe("§3-3 切片 3：看板状态写入必须递增修订号并保持一致投影", () => {

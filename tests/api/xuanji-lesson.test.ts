@@ -403,6 +403,7 @@ describe("挂点：taskboard.reject 驳回触发失败教训", () => {
     };
     dbMocks.queueSelectResults([
       [reviewTask], // reject 首查任务行
+      [reviewTask], // 转移服务写入前重读
       [], // 教训幂等检查
     ]);
 

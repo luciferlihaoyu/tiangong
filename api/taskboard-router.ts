@@ -280,14 +280,19 @@ export const taskboardRouter = createRouter({
         reviewerId = row.dispatcherAgentId;
       }
 
-      const updateFields: Record<string, unknown> = {
+      const reviewAt = new Date();
+      const submittedTransition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         boardStatus: "review",
-        reviewAt: new Date(),
-        reviewerId,
-      };
-      if (input.output !== undefined) updateFields.output = input.output;
-
-      await db.update(tasks).set(updateFields).where(eq(tasks.id, input.taskId));
+        at: reviewAt,
+        expectedRevision: row.stateRevision,
+        extra: {
+          reviewAt,
+          reviewerId,
+          ...(input.output !== undefined ? { output: input.output } : {}),
+        },
+      });
+      if (!submittedTransition.ok) throw new Error(`Task state changed concurrently (${submittedTransition.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,
@@ -486,23 +491,35 @@ export const taskboardRouter = createRouter({
       if (!validateBoardTransition(from, to)) {
         throw new Error(`Invalid transition from ${from} to ${to}`);
       }
-      const updateFields: Record<string, unknown> = { boardStatus: to };
+      // 执行审批闸门：高风险任务不得通过 updateStatus 自行完成
       if (to === "done") {
-        // 执行审批闸门：高风险任务不得通过 updateStatus 自行完成
         const gate = checkCompletionGate(row);
         if (gate.status === "blocked") {
           await parkTaskForApproval(db, row, { requiresApproval: true, riskTypes: gate.riskTypes });
           throw new Error(gate.reason);
         }
-        updateFields.completedAt = new Date();
-        updateFields.status = "done";
-      } else if (to === "failed") {
-        updateFields.failedAt = new Date();
-        updateFields.status = "failed";
-      } else if (to === "running") {
-        updateFields.status = "running";
       }
-      await db.update(tasks).set(updateFields).where(eq(tasks.id, input.taskId));
+      // §3-3：板面维度走服务（只给 boardStatus/显式 status，不给生命周期——
+      // 板语义不改生命周期，终态时刻由板语义自备），关键是修订号递增。
+      const statusAt = new Date();
+      const boardExtra: Record<string, unknown> = {};
+      let boardStatusOverride: "done" | "failed" | undefined;
+      if (to === "done") {
+        boardStatusOverride = "done";
+        boardExtra.completedAt = statusAt;
+      } else if (to === "failed") {
+        boardStatusOverride = "failed";
+        boardExtra.failedAt = statusAt;
+      }
+      const boardTransition = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: to,
+        ...(boardStatusOverride ? { status: boardStatusOverride } : to === "running" ? { status: "running" as const } : {}),
+        at: statusAt,
+        expectedRevision: row.stateRevision,
+        extra: boardExtra,
+      });
+      if (!boardTransition.ok) throw new Error(`Task state changed concurrently (${boardTransition.reason})`);
       if (to === "done") {
         // 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
         await finalizeCompletedTask(db, {
@@ -514,7 +531,7 @@ export const taskboardRouter = createRouter({
           output: row.output,
           agentId: row.agentId,
           status: "done",
-          lifecycleStatus: row.lifecycleStatus ?? "completed",
+          lifecycleStatus: row.lifecycleStatus === "submitted" || row.lifecycleStatus === "reviewing" ? "completed" : row.lifecycleStatus ?? "completed",
         });
       }
       await db.insert(taskMessages).values({
@@ -568,20 +585,23 @@ export const taskboardRouter = createRouter({
       const isPendingExecutionApproval =
         row.boardStatus === "blocked" && approvalState.required && approvalState.decision === "pending";
       if (isPendingExecutionApproval) {
-        await db
-          .update(tasks)
-          .set({
-            boardStatus: "ready",
-            status: "queued",
+        const readyAt = new Date();
+        const requeuedTransition = await applyTaskTransition(db, {
+          taskId: input.taskId,
+          boardStatus: "ready",
+          status: "queued",
+          at: readyAt,
+          expectedRevision: row.stateRevision,
+          extra: {
             boardNotes: row.boardNotes ? `${row.boardNotes} · approved by ${input.agentId}` : `Approved by agent ${input.agentId}`,
             reviewResult: "approved",
             reviewerId: input.agentId,
             input: approveTaskMetadata(row.input),
             blockedAt: null,
-            readyAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(tasks.id, input.taskId));
+            readyAt,
+          },
+        });
+        if (!requeuedTransition.ok) throw new Error(`Task state changed concurrently (${requeuedTransition.reason})`);
         await db.insert(taskMessages).values({
           taskId: input.taskId,
           fromAgentId: input.agentId,
@@ -628,16 +648,30 @@ export const taskboardRouter = createRouter({
       if (row.reviewerId && row.reviewerId !== input.agentId) {
         throw new Error("Only the assigned reviewer can approve this task");
       }
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "done",
-          status: "done",
-          completedAt: new Date(),
-          reviewerId: input.agentId,
-          reviewResult: "approved",
-        })
-        .where(eq(tasks.id, input.taskId));
+      // §3-3 修复：审批通过即终态完成——原先只改 status=done，lifecycle 停在 reviewing，
+      // 是"结果状态与生命周期错位"的一例。仅当当前生命周期走到 submitted/reviewing
+      // （状态机 completed 的合法前置）才推导 completed；板式老流程（生命周期停在
+      // working 等中间态）不动生命周期、只补结果状态，避免把老数据误拒之门外。
+      const lifecycleCanComplete = row.lifecycleStatus === "submitted" || row.lifecycleStatus === "reviewing";
+      const approveExtra: Record<string, unknown> = { reviewResult: "approved", reviewerId: input.agentId };
+      const approvedTransition = lifecycleCanComplete
+        ? await applyTaskTransition(db, {
+            taskId: input.taskId,
+            boardStatus: "done",
+            lifecycleStatus: "completed",
+            at: new Date(),
+            expectedRevision: row.stateRevision,
+            extra: approveExtra,
+          })
+        : await applyTaskTransition(db, {
+            taskId: input.taskId,
+            boardStatus: "done",
+            status: "done",
+            at: new Date(),
+            expectedRevision: row.stateRevision,
+            extra: { ...approveExtra, completedAt: new Date() },
+          });
+      if (!approvedTransition.ok) throw new Error(`Task state changed concurrently (${approvedTransition.reason})`);
       // 审批通过 → 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
       await finalizeCompletedTask(db, {
         id: row.id,
@@ -720,16 +754,16 @@ export const taskboardRouter = createRouter({
       if (row.reviewerId && row.reviewerId !== input.agentId) {
         throw new Error("Only the assigned reviewer can reject this task");
       }
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "failed",
-          status: "failed",
-          failedAt: new Date(),
-          reviewResult: "rejected",
-          reviewerId: input.agentId,
-        })
-        .where(eq(tasks.id, input.taskId));
+      // 人工驳回是终态失败：生命周期/结果/板三个投影与失败时刻一次写齐（原先不写生命周期）。
+      const rejectedTransition = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: "failed",
+        lifecycleStatus: "failed",
+        at: new Date(),
+        expectedRevision: row.stateRevision,
+        extra: { reviewResult: "rejected", reviewerId: input.agentId },
+      });
+      if (!rejectedTransition.ok) throw new Error(`Task state changed concurrently (${rejectedTransition.reason})`);
       // Phase B §3-2：终态动作统一走 finalizeFailedTask（教训 + 产物归档 + 协作父任务汇总
       // 归档 + 失败教训通知）。人工驳回是终态失败（无重试语义，与 requestChanges 的
       // "退回重做"不同）。原先这里内联"教训 + 通知"，漏了产物归档与协作汇总归档——
@@ -747,7 +781,7 @@ export const taskboardRouter = createRouter({
           output: row.output,
           agentId: row.agentId,
           status: "failed",
-          lifecycleStatus: row.lifecycleStatus,
+          lifecycleStatus: "failed",
           error: rejectText,
           parentTaskId: row.parentTaskId,
         }, { errorChannel: "taskboard.reject", errorText: rejectText });
@@ -824,15 +858,15 @@ export const taskboardRouter = createRouter({
       if (row.reviewerId && row.reviewerId !== input.agentId) {
         throw new Error("Only the assigned reviewer can request changes on this task");
       }
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "running",
-          status: "running",
-          reviewResult: "changes_requested",
-          reviewerId: input.agentId,
-        })
-        .where(eq(tasks.id, input.taskId));
+      const changesTransition = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: "running",
+        status: "running",
+        at: new Date(),
+        expectedRevision: row.stateRevision,
+        extra: { reviewResult: "changes_requested", reviewerId: input.agentId },
+      });
+      if (!changesTransition.ok) throw new Error(`Task state changed concurrently (${changesTransition.reason})`);
       await db.insert(taskMessages).values({
         taskId: input.taskId,
         fromAgentId: input.agentId,
@@ -1241,10 +1275,21 @@ export const taskboardRouter = createRouter({
     .input(z.object({ taskId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      await db.update(tasks).set({
+      // 从严（产品裁决 2026-09-23）：只有已提交结果（submitted）的任务才能进入等审，
+      // 与 a2a 状态机一致。此前该入口允许任意非终态直入 reviewing——两个入口的语义分歧，
+      // 生产核查确认该路径从未被使用过，从严不影响任何现有用法。
+      const reviewTransition = await applyTaskTransition(db, {
+        taskId: input.taskId,
         lifecycleStatus: "reviewing",
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, input.taskId));
+        at: new Date(),
+      });
+      if (!reviewTransition.ok) {
+        if (reviewTransition.reason === "not_found") throw new Error("Task not found");
+        if (reviewTransition.reason === "invalid_transition") {
+          throw new Error("Cannot submit for review: submit the task result first (only submitted tasks enter review)");
+        }
+        throw new Error(`Task state changed concurrently (${reviewTransition.reason})`);
+      }
 
       const t = await db
         .select({ taskId: tasks.taskId, name: tasks.name, agentId: tasks.agentId })

@@ -57,7 +57,6 @@ export async function sweepTaskRetry(db: Db, now: Date): Promise<void> {
     if (!failedAt || Number.isNaN(failedAt.getTime())) continue;
     if (now.getTime() - failedAt.getTime() < backoffMs) continue;
 
-    await db
     // 终态 failed → queued 是重试语义：显式开 restart（状态机"终态不可逆"的有意例外）。
     // expectedRevision 用扫到的这一版做 CAS：扫描后已被推进的任务不再重派。
     const requeued = await applyTaskTransition(db as never, {

@@ -41,7 +41,6 @@ export async function sweepDispatchClaim(db: Db, now: Date): Promise<void> {
     .limit(50);
 
   for (const task of stuck) {
-    await db
     // §3-3：滞留回收是状态变更，走服务递增修订号；CAS 败了说明已被推进，跳过
     const reclaimed = await applyTaskTransition(db as never, {
       taskId: task.id,

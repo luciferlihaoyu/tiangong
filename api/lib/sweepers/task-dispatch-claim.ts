@@ -21,6 +21,7 @@ import { tasks, taskMessages } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
 import { sweeperConfig } from "./config";
+import { applyTaskTransition } from "../task-transition";
 import type { Db } from "./db";
 
 export async function sweepDispatchClaim(db: Db, now: Date): Promise<void> {
@@ -41,9 +42,14 @@ export async function sweepDispatchClaim(db: Db, now: Date): Promise<void> {
 
   for (const task of stuck) {
     await db
-      .update(tasks)
-      .set({ status: "queued", updatedAt: now })
-      .where(eq(tasks.id, task.id));
+    // §3-3：滞留回收是状态变更，走服务递增修订号；CAS 败了说明已被推进，跳过
+    const reclaimed = await applyTaskTransition(db as never, {
+      taskId: task.id,
+      status: "queued",
+      at: now,
+      expectedRevision: task.stateRevision,
+    });
+    if (!reclaimed.ok) continue;
 
     try {
       await db.insert(taskMessages).values({

@@ -20,7 +20,8 @@ const chained = (val: unknown) => ({
 const mockDb = {
   select: vi.fn(() => ({ from: vi.fn(() => chained(mockSelectFn())) })),
   insert: vi.fn(() => ({ values: vi.fn(() => mockInsertResult()) })),
-  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => chained([])) })) })),
+  // 真实驱动 update 结算 {changes, lastInsertRowid}；[] 会让转移服务判假冲突
+  update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => chained({ changes: 1, lastInsertRowid: 0 })) })) })),
   delete: vi.fn(() => ({ where: vi.fn() })),
 };
 

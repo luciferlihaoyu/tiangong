@@ -24,6 +24,7 @@ import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-gate";
 import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
+import { applyTaskTransition } from "./task-transition";
 import { recordExternalUsage } from "./external-usage";
 import { recordNotification } from "./notification";
 import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
@@ -132,12 +133,48 @@ export async function reportTaskProgress(
     }
   }
 
-  const update: Record<string, unknown> = { progress: input.progress };
-  if (input.status) update.status = input.status;
-  if (input.lifecycleStatus) update.lifecycleStatus = input.lifecycleStatus;
-  if (input.output !== undefined) update.output = input.output;
-  if (input.error !== undefined) update.error = input.error;
-  await db.update(tasks).set(update).where(eq(tasks.id, input.id));
+  // §3-3：带状态/生命周期的回写是**状态转移**，走服务拿修订号递增（生命周期还接受
+  // 状态机校验——外部执行体不能再把生命周期写成漂移值）；纯进度/产出/错误字段的
+  // 回写不是状态转移，保持原写入（与心跳同例，不递增修订号）。
+  if (input.status || input.lifecycleStatus) {
+    const at = new Date();
+    let baseRevision = taskRow.stateRevision;
+    // 连接器的"完成"= 提交+复核通过（与内部执行器同构）：当前生命周期不能直达 completed
+    //（状态机规定 completed 只能从 submitted/reviewing 进入）时，先转 submitted 再转
+    // completed——两次转移、两次修订号递增。状态机不被绕开，外部连接器 API 也不变。
+    if (input.lifecycleStatus === "completed" && !["submitted", "reviewing"].includes(taskRow.lifecycleStatus ?? "")) {
+      const hop = await applyTaskTransition(db, {
+        taskId: input.id,
+        lifecycleStatus: "submitted",
+        at,
+        expectedRevision: baseRevision,
+      });
+      if (!hop.ok) {
+        return { success: false, error: `任务状态写入失败：${hop.reason}` };
+      }
+      baseRevision = hop.revision;
+    }
+    const written = await applyTaskTransition(db, {
+      taskId: input.id,
+      ...(input.status ? { status: input.status } : {}),
+      ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
+      ...(input.error !== undefined ? { error: input.error } : {}),
+      at,
+      expectedRevision: baseRevision,
+      extra: {
+        ...(input.progress !== undefined ? { progress: input.progress } : {}),
+        ...(input.output !== undefined ? { output: input.output } : {}),
+      },
+    });
+    if (!written.ok) {
+      return { success: false, error: `任务状态写入失败：${written.reason}` };
+    }
+  } else {
+    const update: Record<string, unknown> = { progress: input.progress };
+    if (input.output !== undefined) update.output = input.output;
+    if (input.error !== undefined) update.error = input.error;
+    await db.update(tasks).set(update).where(eq(tasks.id, input.id));
+  }
 
   // 长产物通道（任务 1.5）：逐条写 task_artifacts。必须在 finalizeCompletedTask 之前落库，
   // 这样完成时的 alist-sync 遍历才会把它们一并上传网盘。

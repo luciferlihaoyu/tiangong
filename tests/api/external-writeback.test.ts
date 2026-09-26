@@ -63,7 +63,12 @@ const mockDb = {
     set: vi.fn((set: AnyRow) => ({
       where: vi.fn((where: unknown) => {
         state.updateCalls.push({ table: table[TABLE_NAME], set, where });
-        return Promise.resolve({ affectedRows: 1 });
+        // 对齐真实驱动语义：tasks 行上的写入要回映到 state.rows，
+        // 否则"读-改-写"链（如转移服务的先提交再完成）第二次读到的还是旧状态。
+        if (table[TABLE_NAME] === "tasks" && state.rows.tasks?.[0]) {
+          Object.assign(state.rows.tasks[0], set);
+        }
+        return Promise.resolve({ changes: 1, lastInsertRowid: 0, affectedRows: 1 });
       }),
     })),
   })),
@@ -151,6 +156,7 @@ function seedTask(overrides: AnyRow = {}) {
       agentId: 5,
       status: "running",
       lifecycleStatus: "working",
+      stateRevision: 1,
       originSystem: null,
       ...overrides,
     },

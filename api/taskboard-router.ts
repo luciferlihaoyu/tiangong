@@ -144,16 +144,16 @@ export const taskboardRouter = createRouter({
         throw new Error(`Task ${row.taskId} is routed to another agent (${row.name})`);
       }
 
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "running",
-          status: "running",
-          agentId: input.agentId,
-          claimedAt: new Date(),
-          lastHeartbeatAt: new Date(),
-        })
-        .where(eq(tasks.id, input.taskId));
+      const claimedAt = new Date();
+      const claimed = await applyTaskTransition(db, {
+        taskId: input.taskId,
+        boardStatus: "running",
+        status: "running",
+        at: claimedAt,
+        expectedRevision: row.stateRevision,
+        extra: { agentId: input.agentId, claimedAt, lastHeartbeatAt: claimedAt },
+      });
+      if (!claimed.ok) throw new Error(`Task state changed concurrently (${claimed.reason})`);
 
       await db.insert(taskMessages).values({
         taskId: input.taskId,

@@ -160,7 +160,8 @@ describe("Execution approval gate", () => {
 
   it("blocks claiming of a high-risk task and parks it pending approval", async () => {
     // Given: agent + one high-risk queued task + no generic tasks
-    dbMocks.queueSelectResults([[agent16], [highRiskTask], []]);
+    // 末行供转移服务写入前重读（§3-3 认领/停放统一走服务）
+    dbMocks.queueSelectResults([[agent16], [highRiskTask], [], [highRiskTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);
@@ -176,7 +177,7 @@ describe("Execution approval gate", () => {
 
   it("still claims and executes a low-risk task (regression)", async () => {
     // Given
-    dbMocks.queueSelectResults([[agent16], [lowRiskTask], []]);
+    dbMocks.queueSelectResults([[agent16], [lowRiskTask], [], [lowRiskTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);
@@ -213,7 +214,7 @@ describe("Execution approval gate", () => {
         },
       }),
     });
-    dbMocks.queueSelectResults([[agent16], [approvedTask], []]);
+    dbMocks.queueSelectResults([[agent16], [approvedTask], [], [approvedTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);
@@ -274,7 +275,13 @@ describe("Execution approval gate", () => {
   it("still auto-completes a low-risk task via updateProgress (regression)", async () => {
     // Given: low-risk row + broadcast row
     const broadcastRow = { taskId: "T-LOW001", name: "计算 17*23", agentId: 16 };
-    dbMocks.queueSelectResults([[lowRiskTask], [broadcastRow]]);
+    // 第 2 行供转移服务重读；第 3 行是"先提交再完成"组合流中转后的真实状态（submitted）
+    dbMocks.queueSelectResults([
+      [lowRiskTask],
+      [lowRiskTask],
+      [{ ...lowRiskTask, lifecycleStatus: "submitted" }],
+      [broadcastRow],
+    ]);
 
     // When
     const caller = createTaskCaller(mockCtx());

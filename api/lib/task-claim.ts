@@ -16,7 +16,7 @@ import { agents, tasks } from "@db/schema";
 import { getApprovalState, selectExecutableTask, type Db } from "./execution-gate";
 import { notifyBudgetExhausted } from "./notification-hooks";
 import { parseTaskMetadata } from "./task-metadata";
-import { getAffectedRows } from "./insert-id";
+import { applyTaskTransition } from "./task-transition";
 import { isReady } from "./readiness";
 
 /** 认领结果中的任务投影（形状对齐 agent.claimTask 既有返回） */
@@ -164,17 +164,16 @@ export async function claimNextTask(
   //    原实现只按 id 更新，两个 Agent 在同一 tick 并发认领时两边都会"成功"——
   //    后者直接覆盖前者的 agentId，同一个任务被两个 Agent 同时认为归自己，
   //    进而在执行面造成重复执行。这里按**真实受影响行数**裁决胜负。
-  const claimed = await db
-    .update(tasks)
-    .set({
-      status: "running",
-      lifecycleStatus: "claimed",
-      agentId,
-      claimedAt: new Date(),
-    })
-    .where(and(eq(tasks.id, task.id), eq(tasks.status, "queued")));
+  const claimed = await applyTaskTransition(db, {
+    taskId: task.id,
+    lifecycleStatus: "claimed",
+    status: "running",
+    at: new Date(),
+    alsoWhere: eq(tasks.status, "queued"),
+    extra: { agentId, claimedAt: new Date() },
+  });
 
-  if (getAffectedRows(claimed) !== 1) {
+  if (!claimed.ok) {
     // 竞态落败：任务已被别的 Agent 抢先认领（或状态已变）。
     // 不返回任务、不置 busy —— 副作用只属于胜者，否则败者的 Agent 会
     // 无任务却被标成 busy，卡住后续认领。

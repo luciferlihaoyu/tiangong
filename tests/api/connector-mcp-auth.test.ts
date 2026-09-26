@@ -90,7 +90,7 @@ describe("Connector authentication with issued MCP keys", () => {
 
   it("claims an assigned task when an active MCP key is bound to the target agent", async () => {
     // Given
-    dbMocks.queueSelectResults([[activeBoundKey], [agent16], [agent16], [queuedTask], []]);
+    dbMocks.queueSelectResults([[activeBoundKey], [agent16], [agent16], [queuedTask], [], [queuedTask]]); // 末行供转移服务重读
     const caller = await callerForKey(BOUND_KEY);
 
     // When
@@ -128,7 +128,7 @@ describe("Connector authentication with issued MCP keys", () => {
     // Given
     _globalApiKeys.add(GLOBAL_KEY);
     const agent2: DbRow = { id: 2, name: "CodeMaster", orgId: null };
-    dbMocks.queueSelectResults([[agent2], [queuedTask], []]);
+    dbMocks.queueSelectResults([[agent2], [queuedTask], [], [queuedTask]]); // 末行供转移服务重读
     const caller = await callerForKey(GLOBAL_KEY);
 
     // When

@@ -26,6 +26,7 @@ import { tasks, taskMessages } from "@db/schema";
 import { emitSweeperAudit } from "./notify";
 import { notifyAgentMailbox } from "./notify";
 import { sweeperConfig } from "./config";
+import { applyTaskTransition } from "../task-transition";
 import type { Db } from "./db";
 
 const RETRY_BACKOFF_BASE_MS = Number(process.env.TIANGONG_TASK_RETRY_BACKOFF_MS ?? 300_000);
@@ -57,17 +58,19 @@ export async function sweepTaskRetry(db: Db, now: Date): Promise<void> {
     if (now.getTime() - failedAt.getTime() < backoffMs) continue;
 
     await db
-      .update(tasks)
-      .set({
-        status: "queued",
-        lifecycleStatus: "queued",
-        retryCount: retryCount + 1,
-        error: null,
-        workerLeaseToken: null,
-        workerLeaseExpiresAt: null,
-        updatedAt: now,
-      })
-      .where(eq(tasks.id, task.id));
+    // 终态 failed → queued 是重试语义：显式开 restart（状态机"终态不可逆"的有意例外）。
+    // expectedRevision 用扫到的这一版做 CAS：扫描后已被推进的任务不再重派。
+    const requeued = await applyTaskTransition(db as never, {
+      taskId: task.id,
+      lifecycleStatus: "queued",
+      status: "queued",
+      at: now,
+      restart: true,
+      clearLease: true,
+      expectedRevision: task.stateRevision,
+      extra: { retryCount: retryCount + 1, error: null },
+    });
+    if (!requeued.ok) continue;
 
     retried += 1;
 

@@ -333,6 +333,7 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
     dbMocks.queueSelectResults([
       [externalTask], // reportTaskProgress 首查任务行
+      [externalTask], // 转移服务写入前重读
       [], // 教训幂等检查
     ]);
 
@@ -362,6 +363,7 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
     dbMocks.queueSelectResults([
       [{ ...externalTask, error: "行内已记录的失败原因" }],
+      [{ ...externalTask, error: "行内已记录的失败原因" }], // 转移服务写入前重读
       [],
     ]);
 

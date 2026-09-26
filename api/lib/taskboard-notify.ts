@@ -2,6 +2,7 @@ import { eq, and, inArray, ne } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { tasks, taskMessages, mailboxMessages, agents } from "@db/schema";
 import { wsManager } from "../ws-manager";
+import { applyTaskTransition } from "./task-transition";
 
 function stringifyJson(value: unknown): string | null {
   if (value === null || value === undefined) return null;
@@ -111,13 +112,14 @@ export async function autoPromoteParentTask(taskId: number) {
 
   if (allDone && parent.boardStatus === "running") {
     await db
-      .update(tasks)
-      .set({
-        boardStatus: "review",
-        status: "running",
-        reviewAt: new Date(),
-      })
-      .where(eq(tasks.id, parent.id));
+    const promoted = await applyTaskTransition(db as never, {
+      taskId: parent.id,
+      boardStatus: "review",
+      status: "running",
+      at: new Date(),
+      extra: { reviewAt: new Date() },
+    });
+    if (!promoted.ok) return { parentId: parent.id, action: "skipped" as const };
 
     await db.insert(taskMessages).values({
       taskId: parent.id,
@@ -150,12 +152,13 @@ export async function autoPromoteParentTask(taskId: number) {
 
   if (anyFailed && parent.boardStatus !== "blocked" && !["done", "failed", "cancelled"].includes(parent.boardStatus || "")) {
     await db
-      .update(tasks)
-      .set({
-        boardStatus: "blocked",
-        blockedAt: new Date(),
-      })
-      .where(eq(tasks.id, parent.id));
+    const blocked = await applyTaskTransition(db as never, {
+      taskId: parent.id,
+      boardStatus: "blocked",
+      at: new Date(),
+      extra: { blockedAt: new Date() },
+    });
+    if (!blocked.ok) return { parentId: parent.id, action: "skipped" as const };
 
     await db.insert(taskMessages).values({
       taskId: parent.id,
@@ -218,9 +221,12 @@ export async function checkAndUnblockDependencies(taskId: number) {
     const allDepsDone = depTasks.every((t) => t.boardStatus === "done" || t.boardStatus === "cancelled");
     if (allDepsDone) {
       await db
-        .update(tasks)
-        .set({ boardStatus: "todo" })
-        .where(eq(tasks.id, dep.taskId));
+      const unblocked = await applyTaskTransition(db as never, {
+        taskId: dep.taskId,
+        boardStatus: "todo",
+        at: new Date(),
+      });
+      if (!unblocked.ok) continue;
 
       await db.insert(taskMessages).values({
         taskId: dep.taskId,

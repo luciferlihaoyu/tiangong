@@ -2,6 +2,7 @@ import { agents, messages, taskDependencies, tasks } from "@db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { wsManager } from "../ws-manager";
+import { applyTaskTransition } from "./task-transition";
 
 type TaskRow = typeof tasks.$inferSelect;
 type TaskStatus = "pending" | "queued" | "running" | "done" | "failed";
@@ -49,7 +50,12 @@ export async function unblockReadyCollabTasks(parentTaskId: number) {
     if (child.status !== "pending") continue;
     const depIds = await dependencyIdsForTask(child.id);
     if (await areDependenciesDone(depIds)) {
-      await db.update(tasks).set({ status: "queued" }).where(eq(tasks.id, child.id));
+    const promoted = await applyTaskTransition(db as never, {
+      taskId: child.id,
+      status: "queued",
+      at: new Date(),
+    });
+    if (!promoted.ok) continue;
       changed.push({ ...child, status: "queued" });
       wsManager.broadcastToDashboard({
         type: "task_update",

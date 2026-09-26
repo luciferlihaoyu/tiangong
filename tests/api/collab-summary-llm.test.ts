@@ -60,7 +60,8 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实 node:sqlite 驱动 update 结果是 {changes, lastInsertRowid}；[] 会让转移服务判假冲突
+        return { where: vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: 0 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -150,6 +151,7 @@ const happyPathSelects = (): ReadonlyArray<ReadonlyArray<Readonly<Record<string,
   [parentRow], // 父任务
   [childRowA, childRowB], // 子任务
   agentRows,
+  [parentRow], // 转移服务写入前重读（§3-3：状态写入统一走服务）
 ];
 
 describe("autoSummarizeCollab 集成 LLM 总结（开关关闭 / 默认）", () => {
@@ -378,6 +380,7 @@ describe("autoSummarizeCollab 集成 LLM 总结（开关开启）", () => {
       [parentRow], // 父任务
       largeChildren, // 51 个子任务
       agentRows,
+      [parentRow], // 转移服务写入前重读
     ]);
 
     // When

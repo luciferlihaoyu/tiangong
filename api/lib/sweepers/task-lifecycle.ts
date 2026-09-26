@@ -33,19 +33,18 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
     const maxRetries = task.maxRetries ?? DEFAULT_MAX_RETRIES;
     if (retryCount < maxRetries) {
       // Requeue, keeping the exact retry fields used by the MCP retry path.
-       await db
-        .update(tasks)
-        .set({
-          status: "queued",
-          lifecycleStatus: "queued",
-          retryCount: retryCount + 1,
-          error: null,
-          agentId: null,
-          workerLeaseToken: null,
-          workerLeaseExpiresAt: null,
-          updatedAt: now,
-        })
-        .where(and(eq(tasks.id, task.id), eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0)));
+       // §3-3：超时重派改走转移服务。租约代数守卫用 alsoWhere 原样保留（它是这处的
+      // 精确并发判据），修订号随写入递增；清租约 + 归还认领人同一次写齐。
+      const requeued = await applyTaskTransition(db as never, {
+        taskId: task.id,
+        lifecycleStatus: "queued",
+        status: "queued",
+        at: now,
+        clearLease: true,
+        alsoWhere: eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0),
+        extra: { retryCount: retryCount + 1, error: null, agentId: null },
+      });
+      if (!requeued.ok) continue;
     } else {
       const timeoutText = `任务超时未响应（timeout ${task.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms）`;
       // Phase B §3-3：状态转移改由单一服务写——一次写齐 status/lifecycleStatus/failedAt

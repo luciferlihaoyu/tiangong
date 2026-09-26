@@ -9,6 +9,7 @@ import { getDb } from "../queries/connection";
 import { tasks, taskArtifacts, agents } from "@db/schema";
 import { eq, and, inArray, asc } from "drizzle-orm";
 import { wsManager } from "../ws-manager";
+import { applyTaskTransition } from "./task-transition";
 import { summarizeCollabWithTianshu } from "./summarizer";
 import { recordExternalUsage } from "./external-usage";
 
@@ -292,13 +293,15 @@ export async function autoSummarizeCollab(parentTaskId: number): Promise<CollabS
 
   // 更新父任务 output 为汇总
   await db
-    .update(tasks)
-    .set({
-      output: summary,
-      status: overallStatus,
-      progress: 100,
-    })
-    .where(eq(tasks.id, parentTaskId));
+  // §3-3：汇总落库带状态（done/failed），走转移服务递增修订号；不传生命周期——
+  // 父任务生命周期由升审/审批流负责，这里保持既有语义只写结果状态。
+  const summarized = await applyTaskTransition(db as never, {
+    taskId: parentTaskId,
+    status: overallStatus as never,
+    at: new Date(),
+    extra: { output: summary, progress: 100 },
+  });
+  if (!summarized.ok) return null;
 
   // 广播事件
   wsManager.broadcastToDashboard({

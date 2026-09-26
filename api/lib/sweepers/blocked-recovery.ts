@@ -20,6 +20,7 @@ import { tasks, taskMessages } from "@db/schema";
 import { emitSweeperAudit, notifyAgentMailbox } from "./notify";
 import { getApprovalState } from "../execution-gate";
 import { sweeperConfig } from "./config";
+import { applyTaskTransition } from "../task-transition";
 import type { Db } from "./db";
 
 export async function sweepBlockedRecovery(db: Db, now: Date): Promise<void> {
@@ -69,10 +70,14 @@ export async function sweepBlockedRecovery(db: Db, now: Date): Promise<void> {
       previousStatus = "ready";
     }
 
-    await db
-      .update(tasks)
-      .set({ boardStatus: previousStatus, blockedAt: null, updatedAt: now })
-      .where(eq(tasks.id, task.id));
+    // §3-3：恢复也是状态变更，走转移服务拿修订号递增；败了说明已被别人推进，跳过本轮
+    const recovered = await applyTaskTransition(db as never, {
+      taskId: task.id,
+      boardStatus: previousStatus as never,
+      at: now,
+      extra: { blockedAt: null },
+    });
+    if (!recovered.ok) continue;
 
     try {
       await db.insert(taskMessages).values({

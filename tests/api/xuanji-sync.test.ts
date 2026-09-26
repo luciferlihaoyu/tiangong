@@ -190,7 +190,12 @@ describe("Xuanji task memory sync on completion", () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockResolvedValue(writeMemoryResponse);
-    dbMocks.queueSelectResults([[completedTask]]);
+    // 第 2 行供转移服务重读；第 3 行是组合流（先提交再完成）中转后的真实状态
+    dbMocks.queueSelectResults([
+      [completedTask],
+      [completedTask],
+      [{ ...completedTask, lifecycleStatus: "submitted" }],
+    ]);
 
     // When
     const result = await createTaskCaller(mockCtx()).progress({
@@ -221,7 +226,11 @@ describe("Xuanji task memory sync on completion", () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(xuanjiMocks.client);
     xuanjiMocks.client.writeTaskMemory.mockRejectedValue(new Error("connection refused"));
-    dbMocks.queueSelectResults([[completedTask]]);
+    dbMocks.queueSelectResults([
+      [completedTask],
+      [completedTask],
+      [{ ...completedTask, lifecycleStatus: "submitted" }],
+    ]);
 
     // When
     const result = await createTaskCaller(mockCtx()).progress({
@@ -253,7 +262,11 @@ describe("Xuanji task memory sync on completion", () => {
   it("Given no Xuanji base URL (client factory returns null), When a task completes, Then it is a silent no-op", async () => {
     // Given
     xuanjiMocks.createXuanjiClient.mockReturnValue(null);
-    dbMocks.queueSelectResults([[completedTask]]);
+    dbMocks.queueSelectResults([
+      [completedTask],
+      [completedTask],
+      [{ ...completedTask, lifecycleStatus: "submitted" }],
+    ]);
 
     // When
     const result = await createTaskCaller(mockCtx()).progress({

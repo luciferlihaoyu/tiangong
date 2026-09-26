@@ -26,7 +26,9 @@ const dbMocks = vi.hoisted(() => {
     update: vi.fn(() => ({
       set: vi.fn((values: Readonly<Record<string, unknown>>) => {
         updateSets.push(values);
-        return { where: vi.fn(() => Promise.resolve([])) };
+        // 真实 node:sqlite 驱动 update 结果是 {changes, lastInsertRowid}；
+        // 解析 [] 会让转移服务把 changes 算成 0 → 假 revision_conflict
+        return { where: vi.fn(() => Promise.resolve({ changes: 1, lastInsertRowid: 0 })) };
       }),
     })),
     insert: vi.fn(() => ({
@@ -148,6 +150,7 @@ const happyPathSelects = (): ReadonlyArray<ReadonlyArray<Readonly<Record<string,
   [parentRow], // 父任务行
   [childRowA, childRowB], // 子任务行
   agentRows, // 子任务 agent 名单
+  [parentRow], // 转移服务写入前重读（§3-3：状态写入统一走服务）
 ];
 
 describe("协作任务自动汇总接线（finalizeCompletedTask → autoSummarizeCollab → 双归档）", () => {

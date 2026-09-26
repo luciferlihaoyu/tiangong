@@ -109,6 +109,22 @@ afterEach(() => {
   testDb.dispose();
 });
 
+describe("§3-3 切片 6：看板认领", () => {
+  it("claim：认领写齐 board/status/agentId/心跳并递增修订号", async () => {
+    const agentId = await seedAgent();
+    const id = await seedTask({ status: "queued", boardStatus: "ready", lifecycleStatus: "created" });
+
+    await createBoardCaller(mockCtx()).claim({ taskId: id, agentId });
+
+    const row = await taskRow(id);
+    expect(row.boardStatus).toBe("running");
+    expect(row.status).toBe("running");
+    expect(row.agentId).toBe(agentId);
+    expect(row.claimedAt).toEqual(expect.any(Date));
+    expect(row.stateRevision).toBe(2);
+  });
+});
+
 describe("§3-3 切片 5：看板剩余写入（submit/updateStatus/审批三件套/submitForReview）", () => {
   it("submit：running→review 落 reviewAt/reviewerId/output，修订号 1→2", async () => {
     const agentId = await seedAgent();

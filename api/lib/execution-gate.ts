@@ -21,6 +21,7 @@ import { tasks } from "@db/schema";
 import { getDb } from "../queries/connection";
 import { createApprovalRequest, evaluateApproval } from "./approval-policy";
 import { mergeTaskMetadata, parseTaskMetadata, type TaskMetadataPatch } from "./task-metadata";
+import { applyTaskTransition } from "./task-transition";
 import type { ApprovalRiskType } from "../contracts/platform";
 
 export type Db = ReturnType<typeof getDb>;
@@ -193,17 +194,22 @@ export function approveTaskMetadata(input: string | null | undefined): string {
  * 并把风险原因写入 tasks.input 的 metadata 与 boardNotes。
  */
 export async function parkTaskForApproval(db: Db, task: TaskLike, decision: ExecutionDecision): Promise<void> {
-  await db
-    .update(tasks)
-    .set({
-      status: "pending",
-      boardStatus: "blocked",
+  // §3-3：停放是状态变更（pending + blocked），走转移服务递增修订号。
+  // 失败（并发推进）只告警不抛：park 的调用方（闸门/Runner）不 catch，抛错会打断扫描主流程。
+  const parked = await applyTaskTransition(db as never, {
+    taskId: task.id,
+    status: "pending",
+    boardStatus: "blocked",
+    at: new Date(),
+    extra: {
       boardNotes: `⏳ Pending human approval: ${decision.riskTypes.join(", ")}`,
       input: mergeTaskMetadata(task.input, buildApprovalPatch(task, decision)),
       blockedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(tasks.id, task.id));
+    },
+  });
+  if (!parked.ok) {
+    console.warn(`[execution-gate] park lost race for task ${task.id}: ${parked.reason}`);
+  }
 }
 
 /** 从候选任务中选出第一个可执行（未拦下）的任务，并把沿途高风险任务停放待审批。 */

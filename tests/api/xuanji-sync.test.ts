@@ -61,6 +61,14 @@ const dbMocks = vi.hoisted(() => {
 
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
+// §3-4：完成归档改为持久入队（队列 mock；writeTaskMemory 载荷由下方 sync 直驱用例覆盖）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // ─── Mock the Xuanji connector service factory (createXuanjiClient) ───
 const xuanjiMocks = vi.hoisted(() => {
   const client = {
@@ -205,21 +213,13 @@ describe("Xuanji task memory sync on completion", () => {
       lifecycleStatus: "completed",
     });
 
-    // Then
+    // Then：§3-4 完成路径入队（载荷构造由 sync 直驱用例覆盖）
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall).toBeDefined();
-    expect(WriteTaskMemoryRequestSchema.safeParse(writeCall).success).toBe(true);
-    // trace 上下文来自任务 input 中的既有 metadata
-    expect(writeCall?.trace.traceId).toBe("trc_sync01_abcdefgh");
-    expect(writeCall?.task.taskId).toBe("T-SYNC01");
-    expect(writeCall?.task.status).toBe("done");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("391");
-    // 成功后插入去重 artifact，携带 documentId / nodeIds 引用
-    const dedup = dbMocks.insertValues.find((v) => v.type === XUANJI_MEMORY_ARTIFACT_TYPE);
-    expect(dedup).toBeDefined();
-    expect(String(dedup?.jsonPayload ?? "")).toContain('"documentId":101');
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 19, taskPublicId: "T-SYNC01", outcome: "completed" }),
+    );
+    expect(xuanjiMocks.client.writeTaskMemory).not.toHaveBeenCalled();
   });
 
   it("Given the Xuanji client rejects, When updateProgress completes a task, Then completion still succeeds and no dedup artifact is stored", async () => {
@@ -316,8 +316,11 @@ describe("Xuanji task memory sync on completion", () => {
     // When
     const result = await createA2aCaller(mockCtx()).review({ taskId: 19, approved: true, note: "ok" });
 
-    // Then
+    // Then：§3-4 审批完成入队
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 19, outcome: "completed" }),
+    );
   });
 });

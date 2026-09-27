@@ -23,7 +23,7 @@ import { tasks, taskArtifacts } from "@db/schema";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-gate";
-import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
+import { enqueueTaskFinalize } from "./finalize-actions";
 import { applyTaskTransition } from "./task-transition";
 import { recordExternalUsage } from "./external-usage";
 import { recordNotification } from "./notification";
@@ -206,16 +206,11 @@ export async function reportTaskProgress(
         source: "external",
       });
     }
-    await finalizeCompletedTask(db, {
-      id: taskRow.id,
-      taskId: taskRow.taskId,
-      name: taskRow.name,
-      description: taskRow.description,
-      input: taskRow.input,
-      output: input.output ?? taskRow.output,
-      agentId: taskRow.agentId,
-      status: "done",
-      lifecycleStatus: input.lifecycleStatus ?? "completed",
+    // §3-4 可靠投递：改为持久入队，由 finalize-actions sweeper 执行。
+    await enqueueTaskFinalize(db, {
+      taskId: taskRow.id,
+      taskPublicId: taskRow.taskId,
+      outcome: "completed",
     });
   }
   // 失败教训写璇玑（任务 3.1 质量反哺）：外部执行体回写 status=failed 即视为终态失败——
@@ -230,19 +225,13 @@ export async function reportTaskProgress(
     // 本入口负责**归档**，且 autoSummarizeCollab 自带幂等闸，不会重复。
     const failureText = input.error ?? taskRow.error ?? null;
     try {
-      await finalizeFailedTask(db, {
-        id: taskRow.id,
-        taskId: taskRow.taskId,
-        name: taskRow.name,
-        description: taskRow.description,
-        input: taskRow.input,
-        output: input.output ?? taskRow.output,
-        agentId: taskRow.agentId,
-        status: "failed",
-        lifecycleStatus: input.lifecycleStatus ?? "failed",
-        error: failureText,
-        parentTaskId: taskRow.parentTaskId,
-      }, { errorChannel: "task-writeback", errorText: failureText });
+      await enqueueTaskFinalize(db, {
+        taskId: taskRow.id,
+        taskPublicId: taskRow.taskId,
+        outcome: "failed",
+        errorChannel: "task-writeback",
+        errorText: failureText,
+      });
     } catch (error) {
       // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏回写主流程
       console.warn(`[task-writeback] terminal archive failed for task ${taskRow.taskId}: ${error instanceof Error ? error.message : String(error)}`);

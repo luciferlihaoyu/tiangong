@@ -15,6 +15,7 @@
 import { eq } from "drizzle-orm";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTestDb, type TestDb } from "./helpers/test-db";
+import { runDueFinalizeActions } from "../../api/lib/finalize-actions";
 import * as schema from "@db/schema";
 
 process.env.TIANGONG_TASK_RUNNER_MODE = "command";
@@ -109,6 +110,8 @@ describe("§3-3 切片 4：task-runner 成功链的每次状态写入都递增�
     const id = await seedTask();
 
     await taskRunner.runOnce();
+    // §3-4：归档由 finalize-actions worker 执行（执行完成与归档完成分开）
+    await runDueFinalizeActions(testDb.db, new Date());
 
     expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(1);
     const row = await taskRow(id);

@@ -41,7 +41,7 @@ import {
 } from "@db/schema";
 import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
-import { finalizeFailedTask } from "../lib/task-finalize";
+import { enqueueTaskFinalize } from "../lib/finalize-actions";
 import { applyTaskTransition } from "../lib/task-transition";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
@@ -1222,19 +1222,15 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       // 于是取消的任务：教训不进记忆（检索不到）、产物不归档、协作父任务汇总永远
       // 不触发、也没有失败教训通知。终态写入在前，归档动作在后（archive 失败绝不影响
       // 终态本身——finalizeFailedTask 各步骤自带 catch）。
-      await finalizeFailedTask(db, {
-        id: task.id,
-        taskId: task.taskId,
-        name: task.name,
-        description: task.description,
-        input: task.input,
-        output: task.output,
-        agentId: task.agentId ?? null,
-        status: "failed",
-        lifecycleStatus: "cancelled",
-        error: errorText,
-        parentTaskId: task.parentTaskId,
-      }, { errorChannel: "mcp.cancel", errorText });
+      // §3-4 可靠投递：终态动作改为**持久入队**（同修订号去重），由 finalize-actions
+      // sweeper 带租约执行、失败退避重试、耗尽进死信——不再是"尽力而为、失败即丢"。
+      await enqueueTaskFinalize(db, {
+        taskId: task.id,
+        taskPublicId: task.taskId,
+        outcome: "failed",
+        errorChannel: "mcp.cancel",
+        errorText,
+      });
 
       return textResult({ success: true, taskId: params.taskId, status: "failed", reason });
     }

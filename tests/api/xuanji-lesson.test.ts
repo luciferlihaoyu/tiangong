@@ -73,6 +73,14 @@ const dbMocks = vi.hoisted(() => {
 
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
+// §3-4：终态动作改为持久入队（队列 mock；教训载荷构造由上方 sync 单测覆盖）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // ─── Mock the Xuanji connector service factory (createXuanjiClient) ───
 const xuanjiMocks = vi.hoisted(() => {
   const client = {
@@ -345,16 +353,13 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
       error: "dsh 执行体退出码 1：模型网关 502",
     });
 
-    // Then：回写主流程成功；教训恰好一次；完成记忆不触发
+    // Then：回写主流程成功；终态动作入队（载荷由 worker 展开）
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：计算 17*23");
-    expect(writeCall?.task.status).toBe("failed");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("dsh 执行体退出码 1：模型网关 502");
-    expect(String(writeCall?.memory.contentMarkdown ?? "")).toContain("dsh 执行体退出码 1：模型网关 502");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_MEMORY_ARTIFACT_TYPE)).toBe(false);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 19, outcome: "failed", errorChannel: "task-writeback", errorText: "dsh 执行体退出码 1：模型网关 502" }),
+    );
+    expect(xuanjiMocks.client.writeTaskMemory).not.toHaveBeenCalled();
   });
 
   it("Given 回写 status=failed 未附 error 但任务行已有 error, When updateProgress, Then 教训使用 tasks 行的 error", async () => {
@@ -374,10 +379,12 @@ describe("挂点：reportTaskProgress 失败回写触发失败教训", () => {
       status: "failed",
     });
 
-    // Then
+    // Then：入队携带 errorText——未附 error 时回退用任务行的 error（fallback 语义保留）
     expect(result.success).toBe(true);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(String(writeCall?.memory.summary ?? "")).toContain("行内已记录的失败原因");
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 19, outcome: "failed", errorText: "行内已记录的失败原因" }),
+    );
   });
 });
 
@@ -416,16 +423,15 @@ describe("挂点：taskboard.reject 驳回触发失败教训", () => {
       reason: "数据口径错误，需要重做",
     });
 
-    // Then：驳回主流程成功；教训含驳回语义与理由
+    // Then：驳回主流程成功；终态动作入队并携带驳回语义
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：汇总周报");
-    expect(writeCall?.task.status).toBe("failed");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("人工驳回");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("数据口径错误，需要重做");
-    expect(String(writeCall?.memory.contentMarkdown ?? "")).toContain("数据口径错误，需要重做");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 40, taskPublicId: "TG-040", outcome: "failed", errorChannel: "taskboard.reject" }),
+    );
+    const enqueueInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(enqueueInput?.errorText ?? "")).toContain("人工驳回");
+    expect(String(enqueueInput?.errorText ?? "")).toContain("数据口径错误，需要重做");
   });
 });
 
@@ -479,14 +485,13 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     // When：直接驱动私有执行入口（测试不经过周期 tick）
     await (taskRunner as unknown as { claimAndExecute(task: DbRow): Promise<void> }).claimAndExecute(runnerTask);
 
-    // Then
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：爬取外部数据源");
-    expect(writeCall?.task.status).toBe("failed");
-    // command 模式未配置命令的失败原因进入教训
-    expect(String(writeCall?.memory.summary ?? "")).toContain("not configured");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+    // Then：终态动作入队，失败原因进 errorText
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "failed", errorChannel: "task-runner.execute" }),
+    );
+    const execInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(execInput?.errorText ?? "")).toContain("not configured");
   });
 
   it("Given 自动重试未耗尽（retryCount < maxRetries）, When 执行失败, Then 不写失败教训（等待重派后的终态失败）", async () => {
@@ -527,12 +532,12 @@ describe("挂点：task-runner 终态失败触发失败教训", () => {
     expect(
       dbMocks.updateSets.some((set) => set.status === "failed" && String(set.error ?? "").includes("Runner internal error"))
     ).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：爬取外部数据源");
-    expect(writeCall?.task.status).toBe("failed");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("Runner internal error");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "failed", errorChannel: "task-runner.catch" }),
+    );
+    const catchInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(catchInput?.errorText ?? "")).toContain("Runner internal error");
   });
 
   it("Given 执行过程意外抛错但重试未耗尽, When claimAndExecute, Then 不写失败教训（等待重派）", async () => {
@@ -598,14 +603,12 @@ describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
       agentId: 16,
     });
 
-    // Then：a2a.fail 主流程成功；教训恰好一次
+    // Then：a2a.fail 主流程成功；终态动作入队并携带错误
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：a2a 任务一");
-    expect(writeCall?.task.status).toBe("failed");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("模型网关 502");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 50, outcome: "failed", errorChannel: "a2a.fail", errorText: "模型网关 502" }),
+    );
   });
 
   it("Given a2a 任务在 working 状态, When 调 a2a.timeout 附 note, Then 写入带 'a2a timeout' 标识的失败教训", async () => {
@@ -624,14 +627,14 @@ describe("挂点：a2a.fail / a2a.timeout 触发失败教训", () => {
       note: "上游 30s 无响应",
     });
 
-    // Then：a2a.timeout 主流程成功；教训含 a2a timeout 标识 + note
+    // Then：a2a.timeout 主流程成功；入队携带 a2a timeout 标识 + note
     expect(result.success).toBe(true);
-    expect(xuanjiMocks.client.writeTaskMemory).toHaveBeenCalledTimes(1);
-    const writeCall = xuanjiMocks.client.writeTaskMemory.mock.calls[0]?.[0] as WriteTaskMemoryRequest | undefined;
-    expect(writeCall?.memory.title).toBe("失败教训：a2a 任务一");
-    expect(writeCall?.task.status).toBe("failed");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("a2a timeout");
-    expect(String(writeCall?.memory.summary ?? "")).toContain("上游 30s 无响应");
-    expect(dbMocks.insertValues.some((v) => v.type === XUANJI_LESSON_ARTIFACT_TYPE)).toBe(true);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 50, outcome: "failed", errorChannel: "a2a.timeout" }),
+    );
+    const timeoutInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(timeoutInput?.errorText ?? "")).toContain("a2a timeout");
+    expect(String(timeoutInput?.errorText ?? "")).toContain("上游 30s 无响应");
   });
 });

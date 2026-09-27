@@ -9,7 +9,7 @@ import { isAgentAllowedByRouting } from "./lib/task-claim";
 import { wsManager } from "./ws-manager";
 import { sendMailboxNotification, broadcastTaskNotification, autoPromoteParentTask, checkAndUnblockDependencies } from "./lib/taskboard-notify";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval, approveTaskMetadata, getApprovalState } from "./lib/execution-gate";
-import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
+import { enqueueTaskFinalize } from "./lib/finalize-actions";
 import { applyTaskTransition } from "./lib/task-transition";
 import { recordNotification } from "./lib/notification";
 import { reportTaskProgress } from "./lib/task-writeback";
@@ -521,17 +521,11 @@ export const taskboardRouter = createRouter({
       });
       if (!boardTransition.ok) throw new Error(`Task state changed concurrently (${boardTransition.reason})`);
       if (to === "done") {
-        // 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
-        await finalizeCompletedTask(db, {
-          id: row.id,
-          taskId: row.taskId,
-          name: row.name,
-          description: row.description,
-          input: row.input,
-          output: row.output,
-          agentId: row.agentId,
-          status: "done",
-          lifecycleStatus: row.lifecycleStatus === "submitted" || row.lifecycleStatus === "reviewing" ? "completed" : row.lifecycleStatus ?? "completed",
+        // 统一归档入口。§3-4 可靠投递：改为持久入队，由 finalize-actions sweeper 执行。
+        await enqueueTaskFinalize(db, {
+          taskId: row.id,
+          taskPublicId: row.taskId,
+          outcome: "completed",
         });
       }
       await db.insert(taskMessages).values({
@@ -672,17 +666,11 @@ export const taskboardRouter = createRouter({
             extra: { ...approveExtra, completedAt: new Date() },
           });
       if (!approvedTransition.ok) throw new Error(`Task state changed concurrently (${approvedTransition.reason})`);
-      // 审批通过 → 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
-      await finalizeCompletedTask(db, {
-        id: row.id,
-        taskId: row.taskId,
-        name: row.name,
-        description: row.description,
-        input: row.input,
-        output: row.output,
-        agentId: row.agentId,
-        status: "done",
-        lifecycleStatus: row.lifecycleStatus ?? "completed",
+      // 审批通过 → 统一归档入口。§3-4 可靠投递：改为持久入队。
+      await enqueueTaskFinalize(db, {
+        taskId: row.id,
+        taskPublicId: row.taskId,
+        outcome: "completed",
       });
       // 审批通过通知（NC-5）：落库后记一条 task_approved（尽力而为，失败绝不影响审批主流程）
       try {
@@ -772,19 +760,13 @@ export const taskboardRouter = createRouter({
         ? `人工驳回：${input.reason.trim()}`
         : `人工驳回：未填写理由（agent ${input.agentId}）`;
       try {
-        await finalizeFailedTask(db, {
-          id: row.id,
-          taskId: row.taskId,
-          name: row.name,
-          description: row.description,
-          input: row.input,
-          output: row.output,
-          agentId: row.agentId,
-          status: "failed",
-          lifecycleStatus: "failed",
-          error: rejectText,
-          parentTaskId: row.parentTaskId,
-        }, { errorChannel: "taskboard.reject", errorText: rejectText });
+        await enqueueTaskFinalize(db, {
+          taskId: row.id,
+          taskPublicId: row.taskId,
+          outcome: "failed",
+          errorChannel: "taskboard.reject",
+          errorText: rejectText,
+        });
       } catch (error) {
         // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏驳回主流程
         console.warn(`[taskboard] terminal archive failed for task ${row.taskId}: ${error instanceof Error ? error.message : String(error)}`);

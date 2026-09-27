@@ -94,6 +94,14 @@ vi.mock("../../api/lib/task-finalize", () => ({
   finalizeCompletedTask: vi.fn().mockResolvedValue(undefined),
 }));
 
+// §3-4：回写路径改为持久入队（队列模块整体 mock，避免真实队列碰假 DB）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 vi.mock("../../api/lib/password", () => ({
   hashPassword: vi.fn(async (s: string) => `hashed_${s}`),
   verifyPassword: vi.fn(async (s: string, h: string) => h === `hashed_${s}`),
@@ -240,8 +248,11 @@ describe("updateProgress 外部用量记账", () => {
     expect(sqlParams(agentUpdate?.set.spentCents)).toContain(300);
     expect(sqlParams(agentUpdate?.where)).toContain(5);
 
-    // 完成路径仍走统一归档入口
-    expect(finalizeCompletedTask).toHaveBeenCalled();
+    // §3-4：完成路径入队统一归档动作（由 finalize-actions worker 执行）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "completed" }),
+    );
   });
 
   it("cachedPromptTokens 参与分层计价（缓存折扣）", async () => {
@@ -283,7 +294,10 @@ describe("updateProgress 外部用量记账", () => {
 
     expect(state.tokenUsageInsertAttempted).toBe(true); // 确实尝试过记账
     expect(result.success).toBe(true); // 失败被吞掉，完成不受影响
-    expect(finalizeCompletedTask).toHaveBeenCalled();
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "completed" }),
+    );
   });
 
   it("未完成任务带 usage 不记账（只在完成时入账）", async () => {
@@ -382,7 +396,10 @@ describe("updateProgress 长产物通道", () => {
       type: "external_output",
       name: "full-output.md",
     });
-    expect(finalizeCompletedTask).toHaveBeenCalled();
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "completed" }),
+    );
   });
 
   it("artifacts 超限被 zod 拒绝（content > 50000 或条数 > 5）", async () => {

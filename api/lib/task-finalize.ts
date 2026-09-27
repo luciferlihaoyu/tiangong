@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { tasks } from "@db/schema";
 import { syncTaskMemoryToXuanji, syncTaskLessonToXuanji, type CompletedTaskView, type Db } from "./xuanji-sync";
 import { syncTaskArtifactsToAlist } from "./alist-sync";
-import { notifyLessonRecorded } from "./notification-hooks";
+import { notifyLessonRecorded, recordNotificationOrThrow } from "./notification-hooks";
 import { autoSummarizeCollab } from "./task-validator";
 
 /**
@@ -151,4 +151,114 @@ async function maybeSummarizeParent(db: Db, task: FinalizeTaskView): Promise<voi
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * §3-4 可靠投递：各接收端失败原因的**重试分类**。
+ *
+ * 终态后动作从"进程内尽力而为（失败即丢）"升级为"持久队列 + 退避重试"的前提，
+ * 是把"这次没做成但值得再试"与"没做成的理由是永久性的"分开：
+ *  - 永久性（配置缺失/关闭/已归档过）→ 直接标记完成，不烧重试次数；
+ *  - 可重试（写失败/网络抖动/意外异常）→ 报告给 finalize-actions worker 安排退避重试。
+ */
+const XUANJI_PERMANENT_REASONS = new Set(["not_configured", "duplicate"]);
+const ALIST_PERMANENT_REASONS = new Set(["not_configured", "disabled", "duplicate", "nothing_to_upload"]);
+
+export interface FinalizeStepReport {
+  readonly step: "xuanji_memory" | "xuanji_lesson" | "alist_artifacts" | "collab_summary" | "lesson_notification";
+  /** done=已到位（含"本来就是 no-op"）；skip=永久性跳过；retry=值得重试 */
+  readonly verdict: "done" | "skip" | "retry";
+  readonly reason?: string;
+}
+
+export interface FinalizeReport {
+  readonly steps: readonly FinalizeStepReport[];
+  /** 存在 retry 步骤时为 true —— worker 应安排退避重试 */
+  readonly needsRetry: boolean;
+}
+
+function xuanjiVerdict(step: FinalizeStepReport["step"], result: { readonly synced: boolean; readonly reason: string }): FinalizeStepReport {
+  if (result.synced) return { step, verdict: "done", reason: result.reason };
+  if (XUANJI_PERMANENT_REASONS.has(result.reason)) return { step, verdict: "skip", reason: result.reason };
+  return { step, verdict: "retry", reason: result.reason };
+}
+
+function alistVerdict(result: { readonly synced: boolean; readonly reason: string }): FinalizeStepReport {
+  if (result.synced) return { step: "alist_artifacts", verdict: "done", reason: result.reason };
+  if (ALIST_PERMANENT_REASONS.has(result.reason)) return { step: "alist_artifacts", verdict: "skip", reason: result.reason };
+  return { step: "alist_artifacts", verdict: "retry", reason: result.reason };
+}
+
+/**
+ * 终态后动作的**可报告执行**（§3-4 核心）：
+ * 与 finalizeCompletedTask/finalizeFailedTask 执行完全相同的步骤，但**不吞错**——
+ * 每步按重试分类上报，供持久化队列（task_finalize_actions）决定退避重试或收档。
+ *
+ * 步骤级语义：
+ *  - 璇玑记忆/教训、AList 产物：按 sync 返回的 reason 分类；
+ *  - 协作父任务汇总：返回 null 即"本回合无事可做"（非协作/尚有兄弟未终态/已有汇总/
+ *    写回失败）——既有设计本就靠**下一个兄弟任务**的 finalize 自然重触发，计 done；
+ *    这里抛错（异常路径）才计 retry，作为兜底与自然重触发互不冲突（幂等闸挡重复）；
+ *  - 失败教训通知：recordNotification 内部吞错，改走会抛错的 recordNotificationOrThrow；
+ *    无归属（agentId=null）按既有设计跳过计 skip，写库失败计 retry。
+ */
+export async function performFinalizeSteps(
+  db: Db,
+  task: FinalizeTaskView,
+  options: { readonly outcome: "completed" | "failed"; readonly errorChannel?: string; readonly errorText?: string | null } = { outcome: "completed" },
+): Promise<FinalizeReport> {
+  const errorText = options.errorText ?? task.error ?? null;
+  const view: FinalizeTaskView = { ...task, error: errorText };
+  const steps: FinalizeStepReport[] = [];
+
+  if (options.outcome === "failed") {
+    try {
+      steps.push(xuanjiVerdict("xuanji_lesson", await syncTaskLessonToXuanji(db, view)));
+    } catch (error) {
+      steps.push({ step: "xuanji_lesson", verdict: "retry", reason: describeError(error) });
+    }
+  } else {
+    try {
+      steps.push(xuanjiVerdict("xuanji_memory", await syncTaskMemoryToXuanji(db, task)));
+    } catch (error) {
+      steps.push({ step: "xuanji_memory", verdict: "retry", reason: describeError(error) });
+    }
+  }
+
+  try {
+    steps.push(alistVerdict(await syncTaskArtifactsToAlist(db, view)));
+  } catch (error) {
+    steps.push({ step: "alist_artifacts", verdict: "retry", reason: describeError(error) });
+  }
+
+  try {
+    await maybeSummarizeParent(db, view);
+    steps.push({ step: "collab_summary", verdict: "done" });
+  } catch (error) {
+    steps.push({ step: "collab_summary", verdict: "retry", reason: describeError(error) });
+  }
+
+  try {
+    await recordNotificationOrThrow(
+      db,
+      {
+        agentId: task.agentId ?? null,
+        type: "lesson_recorded",
+        taskId: task.id,
+        title: `任务 ${task.taskId} 失败教训已归档`,
+        body: errorText ?? "（无错误详情）",
+        metadata: { channel: options.errorChannel ?? "task.failed" },
+      },
+    );
+    steps.push({ step: "lesson_notification", verdict: "done" });
+  } catch (error) {
+    const message = describeError(error);
+    if (message.includes("no assignee")) {
+      steps.push({ step: "lesson_notification", verdict: "skip", reason: "no_assignee" });
+    } else {
+      steps.push({ step: "lesson_notification", verdict: "retry", reason: message });
+    }
+  }
+
+  return { steps, needsRetry: steps.some((s) => s.verdict === "retry") };
 }

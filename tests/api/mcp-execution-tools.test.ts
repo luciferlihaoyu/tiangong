@@ -52,6 +52,14 @@ vi.mock("../../api/lib/alist-sync", () => ({
   ALIST_SYNC_ARTIFACT_TYPE: "alist_sync",
 }));
 
+// §3-4：终态动作改为持久入队（队列模块整体 mock，避免真实队列碰假 DB）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // AList 连接器（read_alist）
 const alistMocks = vi.hoisted(() => ({
   resolveAlistConfig: vi.fn(),
@@ -260,9 +268,12 @@ describe("report_progress", () => {
       mimeType: "text/markdown",
     });
 
-    // 完成路径统一走 finalizeCompletedTask → 两个归档接收端都被调
-    expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(1);
-    expect(syncMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
+    // §3-4：完成路径入队统一归档动作（接收端由 finalize-actions worker 调，
+    // 真实 SQLite 级断言见 finalize-actions.test.ts）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "completed" }),
+    );
 
     expect(db.rowsOfTable(schema.tasks).find((t) => t.id === 7)!.status).toBe("done");
   });
@@ -332,8 +343,11 @@ describe("report_progress", () => {
     expect(artifactRows).toHaveLength(1);
     expect(artifactRows[0]).toMatchObject({ taskId: 7, agentId: 17, type: "external_output" });
 
-    // 完成路径统一归档照常
-    expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(1);
+    // §3-4：完成路径统一归档照常（入队）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "completed" }),
+    );
   });
 
   it("report_progress artifacts 含超字节产物 → isError 拒绝且不落任何 artifacts/不推进终态", async () => {

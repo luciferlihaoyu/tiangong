@@ -56,6 +56,14 @@ const dbMocks = vi.hoisted(() => {
 
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
+// §3-4：父任务汇总后的**父任务归档**改为持久入队（队列 mock；链式归档由 worker 执行）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // ─── Mock 两个归档接收端：观察父任务双归档被触发，且不让真实连接器碰 mock db ───
 const syncMocks = vi.hoisted(() => ({
   syncTaskMemoryToXuanji: vi.fn(),
@@ -193,15 +201,15 @@ describe("协作任务自动汇总接线（finalizeCompletedTask → autoSummari
       expect.objectContaining({ type: "collab_summary", parentTaskId: 100, overallStatus: "done", total: 2 })
     );
 
-    // Then: 两个 sync 先子任务后父任务各一次——父任务双归档由此触发
+    // Then: §3-4 子任务自身归档各一次；父任务归档改为入队（由 worker 执行）
     for (const syncMock of [syncMocks.syncTaskMemoryToXuanji, syncMocks.syncTaskArtifactsToAlist]) {
-      expect(syncMock).toHaveBeenCalledTimes(2);
-      expect(syncMock.mock.calls[0]?.[1]?.id).toBe(101); // 先：子任务自身
-      const parentCall = syncMock.mock.calls[1];
-      expect(parentCall?.[1]?.id).toBe(100); // 后：父任务（汇总视图）
-      expect(String(parentCall?.[1]?.output ?? "")).toContain("协作任务汇总");
-      expect(parentCall?.[1]?.status).toBe("done");
+      expect(syncMock).toHaveBeenCalledTimes(1);
+      expect(syncMock.mock.calls[0]?.[1]?.id).toBe(101);
     }
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 100, taskPublicId: "TG-SUM100", outcome: "completed" }),
+    );
     // 队列全部耗尽：父任务（root）不再触发额外查询，无循环
     expect(dbMocks.pendingSelects()).toBe(0);
   });
@@ -219,9 +227,11 @@ describe("协作任务自动汇总接线（finalizeCompletedTask → autoSummari
       expect.objectContaining({ type: "collab_summary", parentTaskId: 100 })
     );
     expect(dbMocks.insertValues.some((v) => v.type === "collab_summary" && v.taskId === 100)).toBe(true);
-    // 父任务双归档被触发
-    expect(syncMocks.syncTaskMemoryToXuanji.mock.calls.some((call) => call[1]?.id === 100)).toBe(true);
-    expect(syncMocks.syncTaskArtifactsToAlist.mock.calls.some((call) => call[1]?.id === 100)).toBe(true);
+    // 父任务归档入队被触发（§3-4）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 100, outcome: "completed" }),
+    );
     expect(dbMocks.pendingSelects()).toBe(0);
   });
 
@@ -270,12 +280,16 @@ describe("协作任务自动汇总接线（finalizeCompletedTask → autoSummari
     expect(wsManager.broadcastToDashboard).toHaveBeenCalledTimes(1);
     expect(dbMocks.insertValues.filter((v) => v.type === "collab_summary")).toHaveLength(1);
     expect(dbMocks.updateSets).toHaveLength(1);
-    // Then: 该子任务自身的双归档仍正常执行。两次 finalize 的 sync 序列：
-    //   [子101, 父100(第一次汇总), 子102] —— 第二次没有父任务重复归档
-    expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(3);
-    expect(syncMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(3);
-    expect(syncMocks.syncTaskMemoryToXuanji.mock.calls.some((call) => call[1]?.id === 100 && call[1]?.taskId === "TG-SUM100")).toBe(true);
-    expect(syncMocks.syncTaskMemoryToXuanji.mock.calls[2]?.[1]?.id).toBe(102); // 第二次 finalize 只有子任务 102
+    // Then: 该子任务自身的归档仍正常执行。§3-4 后 sync 序列：[子101, 子102]——
+    // 父任务归档在两次 finalize 中都走入队（第一次汇总入队一次，第二次幂等闸拦截不再入队）
+    expect(syncMocks.syncTaskMemoryToXuanji).toHaveBeenCalledTimes(2);
+    expect(syncMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(2);
+    // 父任务归档经入队发生（§3-4）：入队针对父任务 100
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 100 }),
+    );
+    expect(syncMocks.syncTaskMemoryToXuanji.mock.calls[1]?.[1]?.id).toBe(102); // 第二次 finalize 只有子任务 102
   });
 
   it("Given 汇总过程中抛错（广播失败）, When finalize, Then 不向完成路径抛错且子任务自身双归档已完成", async () => {

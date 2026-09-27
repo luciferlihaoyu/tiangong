@@ -5,7 +5,7 @@ import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/sch
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
-import { finalizeCompletedTask, finalizeFailedTask } from "./lib/task-finalize";
+import { enqueueTaskFinalize } from "./lib/finalize-actions";
 import { LIFECYCLE_STATUSES, isValidLifecycleTransition, applyTaskTransition } from "./lib/task-transition";
 import { getInsertId } from "./lib/insert-id";
 
@@ -450,17 +450,11 @@ export const a2aRouter = createRouter({
       });
 
       if (input.approved) {
-        // 审批通过 → 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
-        await finalizeCompletedTask(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          output: task.output,
-          agentId: task.agentId,
-          status: "done",
-          lifecycleStatus: "completed",
+        // 审批通过 → 统一归档入口。§3-4 可靠投递：改为持久入队。
+        await enqueueTaskFinalize(db, {
+          taskId: task.id,
+          taskPublicId: task.taskId,
+          outcome: "completed",
         });
         wsManager.broadcastToDashboard({
           type: "a2a_complete",
@@ -513,19 +507,13 @@ export const a2aRouter = createRouter({
       // 归档 + 失败教训通知）。原先这里内联"教训 + 通知"，漏了产物归档与协作汇总归档。
       // 语义保留：errorChannel 仍标 a2a.fail，检索方仍能按"通道 + 终态"维度过滤。
       try {
-        await finalizeFailedTask(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          output: task.output,
-          agentId: task.agentId,
-          status: "failed",
-          lifecycleStatus: nextStatus,
-          error: input.error ?? task.error,
-          parentTaskId: task.parentTaskId,
-        }, { errorChannel: "a2a.fail", errorText: input.error ?? task.error ?? null });
+        await enqueueTaskFinalize(db, {
+          taskId: task.id,
+          taskPublicId: task.taskId,
+          outcome: "failed",
+          errorChannel: "a2a.fail",
+          errorText: input.error ?? task.error ?? null,
+        });
       } catch (error) {
         console.warn(`[a2a] terminal archive failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -576,19 +564,13 @@ export const a2aRouter = createRouter({
       // Phase B §3-2：同 fail 路径，统一走 finalizeFailedTask。语义保留：errorChannel 仍标
       // a2a.timeout，失败文案仍带 "a2a timeout" 通道来源。
       try {
-        await finalizeFailedTask(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          output: task.output,
-          agentId: task.agentId,
-          status: "failed",
-          lifecycleStatus: nextStatus,
-          error: timeoutText,
-          parentTaskId: task.parentTaskId,
-        }, { errorChannel: "a2a.timeout", errorText: timeoutText });
+        await enqueueTaskFinalize(db, {
+          taskId: task.id,
+          taskPublicId: task.taskId,
+          outcome: "failed",
+          errorChannel: "a2a.timeout",
+          errorText: timeoutText,
+        });
       } catch (error) {
         console.warn(`[a2a] terminal archive failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
       }

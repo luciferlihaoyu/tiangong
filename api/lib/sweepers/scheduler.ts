@@ -19,6 +19,7 @@ import { sweepTaskTimeouts } from "./task-lifecycle";
 import { sweepDispatchClaim } from "./task-dispatch-claim";
 import { sweepTaskRetry } from "./task-retry";
 import { sweepDbBackup } from "./db-backup";
+import { sweepFinalizeActions } from "./finalize-actions";
 
 type SweepFn = (db: ReturnType<typeof getDb>, now: Date, tick: number) => Promise<void>;
 
@@ -77,6 +78,7 @@ class SweeperScheduler {
         sweepAlistCompensation,
         sweepNewApiPatrol,
         sweepDbBackup,
+        sweepFinalizeActions,
       ];
 
       for (const sweep of sweepers) {

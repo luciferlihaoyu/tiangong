@@ -49,6 +49,7 @@ vi.mock("../../api/lib/task-validator", async (importOriginal) => ({
 import { getMcpServer, type McpToolContext } from "../../api/mcp/server";
 import { sweepTaskTimeouts } from "../../api/lib/sweepers/task-lifecycle";
 import { reportTaskProgress } from "../../api/lib/task-writeback";
+import { runDueFinalizeActions } from "../../api/lib/finalize-actions";
 
 const CTX: McpToolContext = { apiKeyId: 3, agentId: null, permissions: [] };
 const NOW = new Date("2026-09-23T02:00:00Z");
@@ -135,6 +136,8 @@ describe("失败/取消/超时终态动作统一", () => {
 
     const { isError } = await callTool("cancel_task", { taskId: childId, reason: "重复创建" });
     expect(isError).toBe(false);
+    // §3-4：归档由 finalize-actions worker 执行（执行完成与归档完成分开）
+    await runDueFinalizeActions(testDb.db, new Date());
 
     const row = await taskRow(childId);
     // 保留语义：仍是 failed + [cancelled] 原因前缀
@@ -166,6 +169,8 @@ describe("失败/取消/超时终态动作统一", () => {
     });
 
     await sweepTaskTimeouts(testDb.db as never, NOW);
+    // §3-4：归档由 finalize-actions worker 执行（执行完成与归档完成分开）
+    await runDueFinalizeActions(testDb.db, new Date());
 
     const row = await taskRow(id);
     // 保留语义：终态字段与租约清理不变
@@ -219,6 +224,7 @@ describe("失败/取消/超时终态动作统一", () => {
     const id = await seedTask({ taskId: "T-SOLO", status: "queued" });
 
     await callTool("cancel_task", { taskId: id, reason: "不需要了" });
+    await runDueFinalizeActions(testDb.db, new Date());
 
     expect(mocks.autoSummarizeCollab).not.toHaveBeenCalled();
     expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
@@ -243,6 +249,8 @@ describe("失败/取消/超时终态动作统一", () => {
     );
     expect(res.success).toBe(true);
     expect((await taskRow(id)).status).toBe("failed");
+    // §3-4：归档由 finalize-actions worker 执行
+    await runDueFinalizeActions(testDb.db, new Date());
 
     expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
     // 关键新增：这条路径原先**从不**归档产物，也不补父任务协作汇总
@@ -264,6 +272,8 @@ describe("失败/取消/超时终态动作统一", () => {
     const { payload } = await callTool("cancel_task", { taskId: id, reason: "流水线取消" });
     expect(payload.success).toBe(true);
     expect((await taskRow(id)).status).toBe("failed");
+    // §3-4：归档由 finalize-actions worker 执行
+    await runDueFinalizeActions(testDb.db, new Date());
 
     // 归档不受影响：教训 + 产物 + 父任务汇总照做
     expect(mocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);

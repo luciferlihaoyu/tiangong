@@ -7,7 +7,8 @@
  * 行（60s 防抖自动去重同一任务在多个失败挂点间的重复通知）。
  */
 import type { Db } from "./notification";
-import { recordNotification } from "./notification";
+import { recordNotification, recordNotificationOrThrow } from "./notification";
+export { recordNotificationOrThrow };
 
 export interface TaskForLessonNotify {
   id: number;

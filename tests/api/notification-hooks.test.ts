@@ -97,6 +97,14 @@ const dbMocks = vi.hoisted(() => {
 });
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
+// §3-4：终态动作改为持久入队（队列 mock；worker 的接收端载荷由真实 SQLite 测试覆盖）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // ─── Router 外围 side-effect mock（照抄 external-writeback / taskboard-flow / xuanji-lesson）───
 const wsMocks = vi.hoisted(() => ({
   broadcastToDashboard: vi.fn(),
@@ -254,16 +262,11 @@ describe("挂点：task-writeback 失败回写触发 lesson_recorded 通知", ()
     }, { apiKeyAgentId: -1 });
 
     expect(result.success).toBe(true);
-    // NC-5 在同一失败回写点额外记一条 task_failed → 这里只断言 lesson_recorded 那条
-    const input = notifyMocks.recordNotification.mock.calls.find((c) => c[1]?.type === "lesson_recorded")?.[1];
-    expect(input).toMatchObject({
-      agentId: 16,
-      type: "lesson_recorded",
-      taskId: 19,
-      metadata: { taskKey: "T-SYNC01", channel: "task-writeback" },
-    });
-    expect(String(input?.title ?? "")).toContain("计算 17*23");
-    expect(String(input?.body ?? "")).toContain("dsh 执行体退出码 1");
+    // §3-4：挂点 = 入队（载荷由 finalize-actions worker 展开，真实 SQLite 断言见 finalize-actions.test.ts）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 19, taskPublicId: "T-SYNC01", outcome: "failed", errorChannel: "task-writeback", errorText: "dsh 执行体退出码 1" }),
+    );
   });
 });
 
@@ -293,18 +296,14 @@ describe("挂点：taskboard.reject 触发 lesson_recorded 通知", () => {
     const result = await taskboardCaller(mockCtx()).reject({ taskId: 40, agentId: 7, reason: "数据口径错误" });
 
     expect(result.success).toBe(true);
-    // NC-5 在同一驳回点额外记一条 task_rejected → 这里只断言 lesson_recorded 那条
-    const input = notifyMocks.recordNotification.mock.calls.find((c) => c[1]?.type === "lesson_recorded")?.[1];
-    expect(input).toMatchObject({
-      agentId: 2,
-      type: "lesson_recorded",
-      taskId: 40,
-      metadata: { taskKey: "TG-040", channel: "taskboard.reject" },
-    });
-    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
-    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
-    expect(String(input?.metadata?.error ?? "")).toContain("人工驳回");
-    expect(String(input?.metadata?.error ?? "")).toContain("数据口径错误");
+    // §3-4：驳回挂点 = 入队（task_rejected 通知仍由路由自身直接记）
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 40, taskPublicId: "TG-040", outcome: "failed", errorChannel: "taskboard.reject" }),
+    );
+    const enqueueInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(enqueueInput?.errorText ?? "")).toContain("人工驳回");
+    expect(String(enqueueInput?.errorText ?? "")).toContain("数据口径错误");
   });
 });
 
@@ -337,16 +336,10 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
     const result = await a2aCaller(mockCtx()).fail({ taskId: 50, error: "模型网关 502", agentId: 16 });
 
     expect(result.success).toBe(true);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
-    expect(input).toMatchObject({
-      agentId: 16,
-      type: "lesson_recorded",
-      taskId: 50,
-      metadata: { taskKey: "T-A2A01", channel: "a2a.fail" },
-    });
-    expect(String(input?.body ?? "")).toContain("模型网关 502");
-    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
-    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 50, taskPublicId: "T-A2A01", outcome: "failed", errorChannel: "a2a.fail", errorText: "模型网关 502" }),
+    );
   });
 
   it("Given a2a 任务 working, When a2a.timeout 附 note, Then 通知 channel=a2a.timeout 且带 a2a timeout 标识", async () => {
@@ -359,17 +352,13 @@ describe("挂点：a2a.fail / a2a.timeout 触发 lesson_recorded 通知", () => 
     const result = await a2aCaller(mockCtx()).timeout({ taskId: 50, note: "上游 30s 无响应" });
 
     expect(result.success).toBe(true);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
-    expect(input).toMatchObject({
-      agentId: 16,
-      type: "lesson_recorded",
-      taskId: 50,
-      metadata: { taskKey: "T-A2A01", channel: "a2a.timeout" },
-    });
-    expect(String(input?.metadata?.error ?? "")).toContain("a2a timeout");
-    expect(String(input?.metadata?.error ?? "")).toContain("上游 30s 无响应");
-    // 区分新旧行为的观测点：统一入口带来的"产物归档"，旧的内联实现在这条路径上从不调用
-    expect(alistMocks.syncTaskArtifactsToAlist).toHaveBeenCalledTimes(1);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 50, taskPublicId: "T-A2A01", outcome: "failed", errorChannel: "a2a.timeout" }),
+    );
+    const timeoutInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(timeoutInput?.errorText ?? "")).toContain("a2a timeout");
+    expect(String(timeoutInput?.errorText ?? "")).toContain("上游 30s 无响应");
   });
 });
 
@@ -403,13 +392,12 @@ describe("挂点：task-runner 终态失败触发 lesson_recorded 通知", () =>
 
     await (taskRunner as unknown as { claimAndExecute(task: AnyRow): Promise<void> }).claimAndExecute(runnerTask);
 
-    expect(notifyMocks.recordNotification).toHaveBeenCalledTimes(1);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
-    expect(input).toMatchObject({
-      type: "lesson_recorded",
-      metadata: { channel: "task-runner.execute" },
-    });
-    expect(String(input?.metadata?.error ?? "")).toContain("not configured");
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "failed", errorChannel: "task-runner.execute" }),
+    );
+    const execInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(execInput?.errorText ?? "")).toContain("not configured");
   });
 
   it("Given 执行过程意外抛错（catch 兜底）且重试已耗尽, When claimAndExecute, Then 通知 channel=task-runner.catch", async () => {
@@ -420,13 +408,12 @@ describe("挂点：task-runner 终态失败触发 lesson_recorded 通知", () =>
 
     await (taskRunner as unknown as { claimAndExecute(task: AnyRow): Promise<void> }).claimAndExecute(runnerTask);
 
-    expect(notifyMocks.recordNotification).toHaveBeenCalledTimes(1);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
-    expect(input).toMatchObject({
-      type: "lesson_recorded",
-      metadata: { channel: "task-runner.catch" },
-    });
-    expect(String(input?.metadata?.error ?? "")).toContain("Runner internal error");
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ outcome: "failed", errorChannel: "task-runner.catch" }),
+    );
+    const catchInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(catchInput?.errorText ?? "")).toContain("Runner internal error");
   });
 
   it("Given 重试未耗尽, When 执行失败, Then 不通知（等待重派后的终态失败）", async () => {
@@ -476,15 +463,11 @@ describe("挂点：lifecycle sweeper 超时终态触发 lesson_recorded 通知",
 
     await sweepTaskTimeouts(dbMocks.db as never, now);
 
-    expect(notifyMocks.recordNotification).toHaveBeenCalledTimes(1);
-    const input = notifyMocks.recordNotification.mock.calls[0]?.[1];
-    expect(input).toMatchObject({
-      agentId: 3,
-      type: "lesson_recorded",
-      taskId: 60,
-      metadata: { taskKey: "TG-SWEEP1", channel: "lifecycle.sweeper" },
-    });
-    expect(String(input?.metadata?.error ?? "")).toContain("任务超时未响应");
-    expect(String(input?.body ?? "")).toContain("lifecycle.sweeper");
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 60, taskPublicId: "TG-SWEEP1", outcome: "failed", errorChannel: "lifecycle.sweeper" }),
+    );
+    const sweepInput = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(sweepInput?.errorText ?? "")).toContain("任务超时未响应");
   });
 });

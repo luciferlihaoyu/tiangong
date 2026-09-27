@@ -195,6 +195,27 @@ export const CREATE_TABLES_SQL: string[] = [
   `CREATE UNIQUE INDEX uq_task_outbox_task_revision ON task_outbox_events(task_id, state_revision)`,
   `CREATE INDEX idx_task_outbox_due ON task_outbox_events(next_attempt_at, delivered_at, dead_letter_at)`,
 
+  // ─── task_finalize_actions (§3-4 可靠投递) ───
+  `CREATE TABLE IF NOT EXISTS task_finalize_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    task_public_id TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('completed','failed')),
+    error_channel TEXT,
+    error_text TEXT,
+    state_revision INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL,
+    lease_expires_at INTEGER,
+    done_at INTEGER,
+    dead_letter_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  `CREATE UNIQUE INDEX uq_task_finalize_task_revision ON task_finalize_actions(task_id, state_revision)`,
+  `CREATE INDEX idx_task_finalize_due ON task_finalize_actions(next_attempt_at, done_at, dead_letter_at)`,
+
   // ─── tiangong_provider_identity ───
   `CREATE TABLE IF NOT EXISTS tiangong_provider_identity (
     provider_instance_id TEXT PRIMARY KEY,

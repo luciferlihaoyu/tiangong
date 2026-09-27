@@ -228,6 +228,39 @@ export const taskOutboxEvents = sqliteTable("task_outbox_events", {
 
 export type TaskOutboxEvent = typeof taskOutboxEvents.$inferSelect;
 
+/**
+ * §3-4 可靠投递：任务终态后的内部归档/通知动作队列。
+ *
+ * 目标架构「执行完成与归档完成分开」：终态写入路径只负责入队（同修订号去重），
+ * 实际的璇玑记忆/教训、AList 产物归档、协作父任务汇总、失败教训通知由
+ * finalize-actions sweeper 用**有期限租约**领取执行；可重试失败按退避重试，
+ * 重试耗尽进死信（dead_letter_at），不再静默丢失。
+ * 语义是至少一次：各 sync 自带幂等键（type 键/重复检查/通知防抖），
+ * 重复执行收敛。
+ */
+export const taskFinalizeActions = sqliteTable("task_finalize_actions", {
+  id: integer("id", { mode: "number" }).primaryKey(),
+  taskId: integer("task_id", { mode: "number" }).notNull(),
+  taskPublicId: text("task_public_id", { length: 20 }).notNull(),
+  outcome: text("outcome", { enum: ["completed", "failed"] }).notNull(),
+  errorChannel: text("error_channel", { length: 64 }),
+  errorText: text("error_text"),
+  stateRevision: integer("state_revision", { mode: "number" }).notNull(),
+  attempts: integer("attempts", { mode: "number" }).default(0).notNull(),
+  nextAttemptAt: integer("next_attempt_at", { mode: "timestamp" }).notNull(),
+  leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp" }),
+  doneAt: integer("done_at", { mode: "timestamp" }),
+  deadLetterAt: integer("dead_letter_at", { mode: "timestamp" }),
+  lastError: text("last_error"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
+}, (table) => ({
+  taskRevisionIdx: uniqueIndex("uq_task_finalize_task_revision").on(table.taskId, table.stateRevision),
+  dueIdx: index("idx_task_finalize_due").on(table.nextAttemptAt, table.doneAt, table.deadLetterAt),
+}));
+
+export type TaskFinalizeAction = typeof taskFinalizeActions.$inferSelect;
+
 export const tiangongProviderIdentity = sqliteTable("tiangong_provider_identity", {
   providerInstanceId: text("provider_instance_id", { length: 64 }).primaryKey(),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),

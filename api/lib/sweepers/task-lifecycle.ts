@@ -13,7 +13,7 @@ import { and, eq, gt, lte } from "drizzle-orm";
 import { tasks, taskExecutionSlots } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
-import { finalizeFailedTask } from "../task-finalize";
+import { enqueueTaskFinalize } from "../finalize-actions";
 import { applyTaskTransition } from "../task-transition";
 import type { Db } from "./db";
 
@@ -72,19 +72,15 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
       // 其它兄弟完成才发生——功能缺口，不只是少写日志）。超时文案由编排层推断，
       // 任务行的 error 可能为空，所以显式传 errorText。
       // finalizeFailedTask 各步骤已全 catch，绝不抛错打断 sweeper。
-      await finalizeFailedTask(db as never, {
-        id: task.id,
-        taskId: task.taskId,
-        name: task.name,
-        description: task.description,
-        input: task.input,
-        output: task.output,
-        agentId: task.agentId ?? 0,
-        status: "failed",
-        lifecycleStatus: "failed",
-        error: timeoutText,
-        parentTaskId: task.parentTaskId,
-      }, { errorChannel: "lifecycle.sweeper", errorText: timeoutText });
+      // §3-4 可靠投递：终态动作改为持久入队（finalize-actions sweeper 带租约执行，
+      // 失败退避重试、耗尽进死信）。原先内联尽力而为，失败即丢。
+      await enqueueTaskFinalize(db as never, {
+        taskId: task.id,
+        taskPublicId: task.taskId,
+        outcome: "failed",
+        errorChannel: "lifecycle.sweeper",
+        errorText: timeoutText,
+      });
     }
   }
 

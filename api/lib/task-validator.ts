@@ -337,11 +337,12 @@ export async function autoSummarizeCollab(parentTaskId: number): Promise<CollabS
   // finalize → validator），这里若再静态 import task-finalize 会形成加载期循环；
   // 故用动态 import 把取模块推迟到调用期——此时两个模块均已完成初始化，
   // vitest（vite-node）与 esbuild/tsc 均支持该写法。
-  const { finalizeCompletedTask } = await import("./task-finalize");
-  await finalizeCompletedTask(db, {
-    ...parent,
-    output: summary,
-    status: overallStatus,
+  // §3-4 可靠投递：改为持久入队，由 finalize-actions sweeper 执行。
+  const { enqueueTaskFinalize } = await import("./finalize-actions");
+  await enqueueTaskFinalize(db, {
+    taskId: parent.id,
+    taskPublicId: parent.taskId,
+    outcome: "completed",
   });
 
   return {

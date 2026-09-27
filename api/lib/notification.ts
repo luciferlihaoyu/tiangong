@@ -74,8 +74,28 @@ export async function recordNotification(
   db: Db,
   input: RecordNotificationInput
 ): Promise<void> {
+  // §3-4：核心逻辑拆到 recordNotificationOrThrow（会抛错、可被持久队列重试）；
+  // 本包装保持既有"吞错记日志"语义，既有调用方零改动。
   try {
-    if (input.agentId === null) return;
+    await recordNotificationOrThrow(db, input);
+  } catch (e) {
+    console.warn(
+      `[notification] failed to record: type=${input.type} agentId=${input.agentId} taskId=${input.taskId ?? "null"} error=${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}
+
+/**
+ * §3-4 可靠投递：不吞错的记录通知。抛错语义：
+ *  - agentId=null（无归属）→ Error("no assignee ...")——按设计跳过，不是故障；
+ *  - 其余（写库失败等）→ 原样抛出，由 finalize-actions worker 判定重试。
+ */
+export async function recordNotificationOrThrow(
+  db: Db,
+  input: RecordNotificationInput
+): Promise<void> {
+  {
+    if (input.agentId === null) throw new Error(`no assignee for notification: type=${input.type} taskId=${input.taskId ?? "null"}`);
     if (!input.title || !input.body) {
       console.warn(`[notification] skip empty title/body: type=${input.type} agentId=${input.agentId}`);
       return;
@@ -119,9 +139,5 @@ export async function recordNotification(
         `[notification] broadcast failed: type=${input.type} agentId=${input.agentId} taskId=${input.taskId ?? "null"} error=${e instanceof Error ? e.message : String(e)}`
       );
     }
-  } catch (e) {
-    console.warn(
-      `[notification] failed to record: type=${input.type} agentId=${input.agentId} taskId=${input.taskId ?? "null"} error=${e instanceof Error ? e.message : String(e)}`
-    );
   }
 }

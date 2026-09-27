@@ -37,7 +37,7 @@ import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, checkExecutionGate, parkTaskForApproval } from "./execution-gate";
 import { parseTaskMetadata } from "./task-metadata";
-import { finalizeCompletedTask, finalizeFailedTask } from "./task-finalize";
+import { enqueueTaskFinalize } from "./finalize-actions";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { acquireTaskSlot, releaseTaskSlot } from "./task-concurrency";
@@ -574,17 +574,12 @@ class TaskRunner {
           extra: { progress: 100 },
         });
 
-        // 完成（通过执行闸门）→ 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
-        await finalizeCompletedTask(db, {
-          id: task.id,
-          taskId: task.taskId,
-          name: task.name,
-          description: task.description,
-          input: task.input,
-          output: outputText ?? task.output,
-          agentId: task.agentId,
-          status: "done",
-          lifecycleStatus: "completed",
+        // 完成（通过执行闸门）→ 统一归档入口。§3-4 可靠投递：改为持久入队，
+        // 归档/通知由 finalize-actions sweeper 执行（失败退避重试、耗尽进死信）。
+        await enqueueTaskFinalize(db, {
+          taskId: task.id,
+          taskPublicId: task.taskId,
+          outcome: "completed",
         });
 
         await this.recordEvent(task.id, "system", "Task auto-reviewed and completed by runner", { previousStatus: "submitted", lifecycleStatus: "completed" }, task.agentId ?? undefined);
@@ -623,18 +618,13 @@ class TaskRunner {
         // （幂等标记 xuanji_lesson 亦兜底去重）。落库后尽力而为，失败不影响回写主流程。
         if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
           try {
-            await finalizeFailedTask(db, {
-              id: task.id,
-              taskId: task.taskId,
-              name: task.name,
-              description: task.description,
-              input: task.input,
-              output: outputText || null,
-              agentId: task.agentId,
-              status: "failed",
-              lifecycleStatus: "failed",
-              error: errorText ?? "Task execution failed",
-            }, { errorChannel: "task-runner.execute", errorText: errorText ?? "Task execution failed" });
+            await enqueueTaskFinalize(db, {
+              taskId: task.id,
+              taskPublicId: task.taskId,
+              outcome: "failed",
+              errorChannel: "task-runner.execute",
+              errorText: errorText ?? "Task execution failed",
+            });
           } catch (error) {
             // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -681,18 +671,13 @@ class TaskRunner {
         // error 取本兜底写入的错误文案（Runner internal error，已按 resultMaxChars 截断）。
         if ((task.retryCount ?? 0) >= (task.maxRetries ?? 3)) {
           try {
-            await finalizeFailedTask(db, {
-              id: task.id,
-              taskId: task.taskId,
-              name: task.name,
-              description: task.description,
-              input: task.input,
-              output: task.output,
-              agentId: task.agentId,
-              status: "failed",
-              lifecycleStatus: "failed",
-              error: internalError ?? "Task execution failed",
-            }, { errorChannel: "task-runner.catch", errorText: internalError ?? "Task execution failed" });
+            await enqueueTaskFinalize(db, {
+              taskId: task.id,
+              taskPublicId: task.taskId,
+              outcome: "failed",
+              errorChannel: "task-runner.catch",
+              errorText: internalError ?? "Task execution failed",
+            });
           } catch (error) {
             // finalizeFailedTask 各子步骤已全 catch；此处兜底防御未来行为变化破坏执行主流程
             console.warn(`[TaskRunner] xuanji lesson sync failed for task ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`);

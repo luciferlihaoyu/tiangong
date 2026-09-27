@@ -53,6 +53,14 @@ const dbMocks = vi.hoisted(() => {
 
 vi.mock("../../api/queries/connection", () => ({ getDb: () => dbMocks.db }));
 
+// §3-4：终态动作改为持久入队（队列模块整体 mock，避免真实队列碰假 DB）
+const finalizeQueueMocks = vi.hoisted(() => ({
+  enqueueTaskFinalize: vi.fn().mockResolvedValue({ enqueued: true }),
+}));
+vi.mock("../../api/lib/finalize-actions", () => ({
+  enqueueTaskFinalize: finalizeQueueMocks.enqueueTaskFinalize,
+}));
+
 // ─── Mock audit/notify/xuanji/newapi seams so sweepers run fully mocked ───
 const auditMocks = vi.hoisted(() => ({
   events: [] as ReadonlyArray<Readonly<Record<string, unknown>>>,
@@ -199,18 +207,20 @@ describe("sweepTaskTimeouts", () => {
     // When
     await sweepTaskTimeouts(mockDb, NOW);
 
-    // Then：落 failed 终态 + 教训恰好一次，error 带超时上下文，agentId 归任务行
+    // Then：落 failed 终态；终态动作入队（含超时上下文），由 finalize-actions worker 执行
     expect(dbMocks.updateSets[0]?.status).toBe("failed");
-    expect(xuanjiMocks.syncTaskLessonToXuanji).toHaveBeenCalledTimes(1);
-    const lessonTask = xuanjiMocks.syncTaskLessonToXuanji.mock.calls[0]?.[1] as DbRow | undefined;
-    expect(lessonTask).toMatchObject({
-      id: 2,
-      taskId: "T-EXH-1",
-      status: "failed",
-      lifecycleStatus: "failed",
-      agentId: 16,
-    });
-    expect(String(lessonTask?.error ?? "")).toContain("任务超时未响应");
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledTimes(1);
+    expect(finalizeQueueMocks.enqueueTaskFinalize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        taskId: 2,
+        taskPublicId: "T-EXH-1",
+        outcome: "failed",
+        errorChannel: "lifecycle.sweeper",
+      }),
+    );
+    const enqueueArg = finalizeQueueMocks.enqueueTaskFinalize.mock.calls[0]?.[1] as { errorText?: string } | undefined;
+    expect(String(enqueueArg?.errorText ?? "")).toContain("任务超时未响应");
   });
 
   it("skips running tasks still within their timeout", async () => {
@@ -260,7 +270,8 @@ describe("sweepTaskTimeouts", () => {
       status: "failed",
       updatedAt: new Date(NOW.getTime() - 600_000),
     }));
-    dbMocks.queueSelectResults([[staleTask], [staleTask], [], failedRows]); // running + 转移服务读行 + 通知防抖查询 + storm-check rows
+    // §3-4：终态动作改为入队（mock），原先"通知防抖查询"不再发生 → 队列少一个占位
+    dbMocks.queueSelectResults([[staleTask], [staleTask], failedRows]); // running + 转移服务读行 + storm-check rows
 
     // When
     await sweepTaskTimeouts(mockDb, NOW);

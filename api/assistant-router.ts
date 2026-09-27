@@ -12,7 +12,7 @@ import { scanTimestampRepair, applyTimestampRepair } from "./lib/timestamp-repai
 import { getSetting, setSetting } from "./lib/settings";
 import { getDb } from "./queries/connection";
 import { tasks} from "@db/schema";
-import { finalizeFailedTask } from "./lib/task-finalize";
+import { enqueueTaskFinalize } from "./lib/finalize-actions";
 
 const AUTO_APPROVE_ENABLED_KEY = "auto_approve_enabled";
 const AUTO_APPROVE_LIMIT_KEY = "auto_approve_daily_limit";
@@ -53,7 +53,12 @@ async function runArchiveFailedTasks(
   const errors: Array<{ id: number; err: string }> = [];
   for (const row of filtered) {
     try {
-      await finalizeFailedTask(db, row);
+      // §3-4 可靠投递：改为持久入队，由 finalize-actions sweeper 执行。
+      await enqueueTaskFinalize(db, {
+        taskId: row.id,
+        taskPublicId: row.taskId,
+        outcome: "failed",
+      });
       archived++;
     } catch (e) {
       errors.push({ id: row.id, err: e instanceof Error ? e.message : String(e) });

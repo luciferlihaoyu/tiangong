@@ -4,6 +4,7 @@ import { getDb } from "./queries/connection";
 import { tasks, taskDependencies } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
+import { applyTaskTransition } from "./lib/task-transition";
 
 // ─── Helpers ───
 
@@ -142,14 +143,18 @@ async function dispatchSingleTask(taskId: number): Promise<boolean> {
     }
   }
 
-  await db
-    .update(tasks)
-    .set({
-      status: "queued",
-      lifecycleStatus: "dispatched",
-      dispatchedAt: now,
-    })
-    .where(eq(tasks.id, taskId));
+  // §3-3：派发是状态变更，走转移服务递增修订号；CAS 败了（并发推进）按未派发处理
+  const dispatched = await applyTaskTransition(db, {
+    taskId,
+    status: "queued",
+    lifecycleStatus: "dispatched",
+    at: now,
+    expectedRevision: row.stateRevision,
+    extra: { dispatchedAt: now },
+  });
+  if (!dispatched.ok) {
+    return false;
+  }
 
   wsManager.broadcastToDashboard({
     type: "task_update",

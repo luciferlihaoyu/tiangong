@@ -3,6 +3,7 @@ import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
+import { applyTaskTransition } from "./lib/task-transition";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { applyRequestedAgentToInput } from "./lib/task-metadata";
@@ -72,7 +73,8 @@ async function triggerDownstream(completedTaskId: number) {
       // Check current status is pending
       const t = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, d.taskId)).then(r => r[0]);
       if (t && t.status === "pending") {
-        await db.update(tasks).set({ status: "queued" }).where(eq(tasks.id, d.taskId));
+        // §3-3：下游解锁是状态变更，走转移服务递增修订号
+        await applyTaskTransition(db, { taskId: d.taskId, status: "queued", at: new Date() });
       }
     }
   }
@@ -254,11 +256,16 @@ export const orchestrationRouter = createRouter({
           if (retryCount >= maxRetries) {
             return { success: false, error: `已达最大重试次数 (${maxRetries})` };
           }
-          await db.update(tasks).set({
+          // 终态 failed → queued 重试语义：restart 例外。现网不可达（映射表放行
+          // failed→queued 走主更新），仅随切片 7 转换保持结构不变量。
+          await applyTaskTransition(db, {
+            taskId: input.id,
             status: "queued",
-            retryCount: retryCount + 1,
-            error: null,
-          }).where(eq(tasks.id, input.id));
+            at: new Date(),
+            restart: true,
+            expectedRevision: task.stateRevision,
+            extra: { retryCount: retryCount + 1, error: null },
+          });
           wsManager.broadcastToDashboard({
             type: "task_update",
             action: "updated",
@@ -282,7 +289,20 @@ export const orchestrationRouter = createRouter({
       if (input.output !== undefined) updates.output = input.output;
       if (input.error !== undefined) updates.error = input.error;
 
-      await db.update(tasks).set(updates).where(eq(tasks.id, input.id));
+      // §3-3：主更新走转移服务；带 lifecycleStatus 时还接受状态机校验（消灭漂移写入），
+      // 工具自身的 validTransitions 映射仍是前置契约闸门
+      await applyTaskTransition(db, {
+        taskId: input.id,
+        status: input.status,
+        ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: {
+          ...(input.progress !== undefined ? { progress: input.progress } : {}),
+          ...(input.output !== undefined ? { output: input.output } : {}),
+          ...(input.error !== undefined ? { error: input.error } : {}),
+        },
+      });
 
       // Auto-trigger downstream when task completes
       if (input.status === "done") {

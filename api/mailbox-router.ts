@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
+import { applyTaskTransition } from "./lib/task-transition";
 import { agents, mailboxMessages, taskMessages, tasks } from "@db/schema";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
@@ -414,14 +415,21 @@ export const mailboxRouter = createRouter({
         throw new Error("Cannot hand off a terminal task");
       }
 
-      await db.update(tasks).set({
-        agentId: toAgent.id,
-        lifecycleStatus: "dispatched",
+      // §3-3：移交是状态变更（改派主 + dispatched + running），走转移服务递增修订号；
+      // CAS 败了说明任务刚被推进，抛错让调用方看到 handoff 未生效
+      const handedOff = await applyTaskTransition(db, {
+        taskId: task.id,
         status: "running",
-        dispatcherAgentId: fromAgent.id,
-        dispatchedAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(tasks.id, task.id));
+        lifecycleStatus: "dispatched",
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: {
+          agentId: toAgent.id,
+          dispatcherAgentId: fromAgent.id,
+          dispatchedAt: new Date(),
+        },
+      });
+      if (!handedOff.ok) throw new Error("Handoff lost race: task state just changed");
 
       const created = await createMailboxMessage({
         fromAgent,

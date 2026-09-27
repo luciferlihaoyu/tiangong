@@ -25,6 +25,7 @@ import { getSetting, setSetting } from "./settings";
 import { getApprovalState, approveTaskMetadata } from "./execution-gate";
 import { getAssistantModel, ensureAssistantAgent } from "./ai-assistant";
 import { wsManager } from "../ws-manager";
+import { applyTaskTransition } from "./task-transition";
 
 const ENABLED_KEY = "auto_approve_enabled";
 const DAILY_LIMIT_KEY = "auto_approve_daily_limit";
@@ -200,11 +201,15 @@ export function triggerAutoReview(taskId: number): void {
       }
 
       // ── 放行（复用 approve 端点逻辑）──
-      await db
-        .update(tasks)
-        .set({
-          boardStatus: "ready",
-          status: "queued",
+      // §3-3：放行与 taskboard.approve 预执行放行同构（blocked→ready+queued），
+      // 走转移服务递增修订号；CAS 败了说明已被人工处理，按未放行收场
+      const released = await applyTaskTransition(db, {
+        taskId,
+        boardStatus: "ready",
+        status: "queued",
+        at: new Date(),
+        expectedRevision: task.stateRevision,
+        extra: {
           boardNotes: task.boardNotes
             ? `${task.boardNotes} · auto-approved by 天宫助手`
             : "Auto-approved by 天宫助手",
@@ -213,9 +218,12 @@ export function triggerAutoReview(taskId: number): void {
           input: approveTaskMetadata(task.input),
           blockedAt: null,
           readyAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(tasks.id, taskId));
+        },
+      });
+      if (!released.ok) {
+        console.log(`${tag} release lost race: ${released.reason}`);
+        return;
+      }
 
       await writeReviewNote(
         taskId,

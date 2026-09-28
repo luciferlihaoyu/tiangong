@@ -255,7 +255,7 @@ TIANSHU_API_KEY=sk-xxx
 # ALIST_AUTO_UPLOAD=true                         （可选，默认开启任务产物自动上传）
 
 # 璇玑知识库联动（任务完成记忆自动写入璇玑）
-# XUANJI_BASE_URL=https://xuanjj29.zeabur.app
+# XUANJI_BASE_URL=https://xuanji.xianrealme.com
 # XUANJI_API_KEY_REF=<secret-vault 引用>
 
 # 官方定价同步源（默认 BaseLLM，可在模型中心一键同步）

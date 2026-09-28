@@ -20,6 +20,7 @@
  * 日限额防成本失控；幂等防重复扣费。
  */
 
+import { tianshuBaseUrlSafe } from "./env";
 import { eq } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { tasks, taskMessages } from "../../db/schema";
@@ -63,7 +64,7 @@ async function dailyLimit(): Promise<number> {
 }
 
 function tianshuBaseUrl(): string {
-  return (process.env.TIANSHU_BASE_URL || "https://tianshu.xianrealme.com").replace(/\/+$/, "");
+  return tianshuBaseUrlSafe();
 }
 
 /** 非 chat 模型特征：embedding/rerank/语音/图像等不能做 chat completion */

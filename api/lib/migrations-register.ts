@@ -29,3 +29,26 @@ registerSchemaMigration({
     `);
   },
 });
+
+registerSchemaMigration({
+  name: "0002-alist-password-to-vault",
+  up(db: DatabaseSync) {
+    // §4-③：把历史明文落库的 AList 密码从 system_settings 剥离（密码已迁
+    // ALIST_PASSWORD 环境变量/Vault；每日备份从此不再携带它）。幂等：没有
+    // password 字段的行原样通过；没有 alist_config 行也无害。
+    const rows = db
+      .prepare("SELECT key, value FROM system_settings WHERE key = 'alist_config'")
+      .all() as { key: string; value: string }[];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.value) as Record<string, unknown>;
+        if (!("password" in parsed)) continue;
+        delete parsed.password;
+        db.prepare("UPDATE system_settings SET value = ? WHERE key = ?")
+          .run(JSON.stringify(parsed), row.key);
+      } catch {
+        // 非 JSON 值不动（保持向后兼容，交由上层读取逻辑兜底）
+      }
+    }
+  },
+});

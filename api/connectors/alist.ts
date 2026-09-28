@@ -54,7 +54,8 @@ const ALIST_CONFIG_KEY = "alist_config";
 export interface AlistStoredConfig {
   baseUrl: string;
   username: string;
-  password: string;
+  /** §4-③ 起不再持久化：密码只存 Vault（ALIST_PASSWORD）；字段保留为可选仅为旧调用形状兼容 */
+  password?: string;
   basePath?: string;
   autoUpload?: boolean;
 }
@@ -68,7 +69,9 @@ export async function getAlistDbConfig(): Promise<AlistEnvConfig | null> {
     const parsed = JSON.parse(raw) as Partial<AlistStoredConfig>;
     const baseUrl = normalizeBaseUrl(parsed.baseUrl || "");
     const username = (parsed.username || "").trim();
-    const password = parsed.password || "";
+    // §4-③：密码一律来自 ALIST_PASSWORD（Vault）——历史落库的明文密码由版本化
+    // 迁移 0002 剥离，这里也不再读取；env 缺密码 = 配置不可用（不再有明文兜底）。
+    const password = process.env.ALIST_PASSWORD || "";
     if (!baseUrl || !username || !password) return null;
     if (!/^https?:\/\//i.test(baseUrl)) return null;
     return {
@@ -86,10 +89,13 @@ export async function getAlistDbConfig(): Promise<AlistEnvConfig | null> {
 /** 保存界面配置 */
 export async function saveAlistDbConfig(cfg: AlistStoredConfig): Promise<void> {
   const { setSetting } = await import("../lib/settings");
+  // §4-③：密码只存 Zeabur Vault（ALIST_PASSWORD 环境变量）——DB/备份永不落明文。
+  // 传入的 password 字段被**丢弃**；保存后需保证 Vault 里有 ALIST_PASSWORD 才能连通。
+  // §4-③：密码只存 Zeabur Vault（ALIST_PASSWORD 环境变量）——DB/备份永不落明文。
+  // 传入的 password 字段被丢弃；保存后需保证 Vault 里有 ALIST_PASSWORD 才能连通。
   const normalized: AlistStoredConfig = {
     baseUrl: normalizeBaseUrl(cfg.baseUrl),
     username: cfg.username.trim(),
-    password: cfg.password,
     basePath: normalizeBasePath(cfg.basePath),
     autoUpload: cfg.autoUpload !== false,
   };

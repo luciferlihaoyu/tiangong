@@ -30,6 +30,7 @@
  *   TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX  默认 tiangong
  */
 
+import { TIANSHU_DEFAULT_BASE_URL } from "./env";
 import { getDb } from "../queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, tokenUsage, type TaskMessage, type InsertTaskArtifact } from "@db/schema";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
@@ -110,7 +111,7 @@ const CONFIG = {
   gatewayModel: envStr("TIANGONG_OPENCLAW_GATEWAY_MODEL", ""),
   gatewaySessionPrefix: envStr("TIANGONG_OPENCLAW_GATEWAY_SESSION_PREFIX", "tiangong"),
   // 天枢 (Tianshu / New API) 直连模式 — OpenAI 兼容聚合网关
-  tianshuBaseUrl: envStr("TIANSHU_BASE_URL", "https://woppis1.zeabur.app"),
+  tianshuBaseUrl: TIANSHU_DEFAULT_BASE_URL,
   tianshuApiKey: tianshuApiKeyEnv,
   tianshuModel: envStr("TIANSHU_MODEL", ""),
   tianshuTimeoutMs: envInt("TIANSHU_TIMEOUT_MS", 120000, 1000),

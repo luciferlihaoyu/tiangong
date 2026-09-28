@@ -4,6 +4,7 @@
  * 提供模型列表查询、默认模型选择（持久化到 system_settings）、按智能体分配模型。
  * 任务执行器 (task-runner) 的模型解析优先级：agent.model > 默认模型(设置) > TIANSHU_MODEL 环境变量。
  */
+import { TIANSHU_DEFAULT_BASE_URL } from "./lib/env";
 import { z } from "zod";
 import { createRouter, userQuery, adminQuery, publicQuery } from "./middleware";
 import { getAssistantModel } from "./lib/ai-assistant";
@@ -13,7 +14,7 @@ import { eq } from "drizzle-orm";
 import { getSetting, setSetting } from "./lib/settings";
 import { parseTieredPricing } from "./lib/model-pricing";
 
-const DEFAULT_BASE_URL = "https://woppis1.zeabur.app";
+const DEFAULT_BASE_URL = TIANSHU_DEFAULT_BASE_URL;
 export const TIANSHU_DEFAULT_MODEL_KEY = "tianshu_default_model";
 /** 死模型兜底候选（默认模型频道下线时换这个再试一次）；空 = 回退助手模型 */
 export const TIANSHU_FALLBACK_MODEL_KEY = "tianshu_fallback_model";

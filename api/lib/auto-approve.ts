@@ -18,6 +18,7 @@
  *   - 全部决策写 taskMessages（eventType=auto_approve）+ 控制台审计日志
  */
 
+import { tianshuBaseUrlSafe } from "./env";
 import { eq } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { tasks, taskMessages } from "../../db/schema";
@@ -75,7 +76,7 @@ async function dailyLimit(): Promise<number> {
 }
 
 function tianshuBaseUrl(): string {
-  return (process.env.TIANSHU_BASE_URL || "https://tianshu.xianrealme.com").replace(/\/+$/, "");
+  return tianshuBaseUrlSafe();
 }
 
 interface ReviewDecision {

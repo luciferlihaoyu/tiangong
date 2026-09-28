@@ -18,6 +18,7 @@
  * 模型切换：trpc.assistant.getModel / setModel（system_settings key: ai_assistant_model）
  */
 
+import { tianshuBaseUrlSafe } from "./env";
 import { and, desc, eq, or } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { agents, messages } from "../../db/schema";
@@ -54,7 +55,7 @@ export const ASSISTANT_TASK_SYSTEM_PROMPT = `你是「天宫助手」，正在�
 - 不要输出任何思考过程或推理标记`;
 
 function tianshuBaseUrl(): string {
-  return (process.env.TIANSHU_BASE_URL || "https://tianshu.xianrealme.com").replace(/\/+$/, "");
+  return tianshuBaseUrlSafe();
 }
 
 function tianshuApiKey(): string | null {

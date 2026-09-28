@@ -1,6 +1,7 @@
 /**
  * P13: Model Pricing management router
  */
+import { tianshuBaseUrlSafe } from "./lib/env";
 import { z } from "zod";
 import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
@@ -80,7 +81,7 @@ export const pricingRouter = createRouter({
    * 的条目，避免误删。
    */
   syncFromTianshu: adminQuery.mutation(async () => {
-    const baseUrl = (process.env.TIANSHU_BASE_URL || "https://woppis1.zeabur.app").replace(/\/+$/, "");
+    const baseUrl = tianshuBaseUrlSafe();
     const apiKey = process.env.TIANSHU_API_KEY || "";
     if (!apiKey) {
       return { success: false as const, error: "TIANSHU_API_KEY 未配置" };

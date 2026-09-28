@@ -55,3 +55,16 @@ export const env = {
   artifactGenerationId: optional("TIANGONG_ARTIFACT_GENERATION_ID", "1"),
   tiangongProviderInstanceId: optional("TIANGONG_PROVIDER_INSTANCE_ID"),
 };
+
+/**
+ * 天枢（New API）网关基础 URL 的**唯一事实源**（§4-③ 配置收敛）。
+ * 此前 7 个文件两套硬编码默认互相打架，且 woppis1.zeabur.app 是死域名
+ * （/v1/models 404，2026-09-28 实测；Vault 未设 TIANSHU_BASE_URL）。
+ * tianshu.xianrealme.com 实测存活且返回合法 new_api payload，作为唯一默认。
+ */
+export const TIANSHU_DEFAULT_BASE_URL = "https://tianshu.xianrealme.com";
+
+/** 统一取值入口：env 覆盖（去尾斜杠）→ 默认 */
+export function tianshuBaseUrlSafe(): string {
+  return (process.env.TIANSHU_BASE_URL || TIANSHU_DEFAULT_BASE_URL).replace(/\/+$/, "");
+}

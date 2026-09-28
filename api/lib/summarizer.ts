@@ -1,3 +1,4 @@
+import { tianshuBaseUrlSafe } from "./env";
 /**
  * 任务 3.2：协作汇总报告 LLM 总结增强（可选，默认关）
  *
@@ -112,7 +113,7 @@ export async function summarizeCollabWithTianshu(
   }
 
   // 2) endpoint 构造（剥尾斜杠，与 task-runner 一致）
-  const base = (process.env.TIANSHU_BASE_URL ?? "https://woppis1.zeabur.app").replace(/\/+$/, "");
+  const base = tianshuBaseUrlSafe();
   let endpoint: URL;
   try {
     endpoint = new URL(`${base}/v1/chat/completions`);

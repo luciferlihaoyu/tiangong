@@ -1,5 +1,5 @@
-import { text, uniqueIndex, index, sqliteTable, integer, int, real, blob, primaryKey, foreignKey } from "drizzle-orm/sqlite-core";
-import { relations } from "drizzle-orm";
+import { text, uniqueIndex, index, sqliteTable, integer, int, real, blob, primaryKey, foreignKey, check } from "drizzle-orm/sqlite-core";
+import { relations, sql } from "drizzle-orm";
 
 // ─── Users (内置认证) ───
 export const users = sqliteTable("users", {
@@ -12,7 +12,10 @@ export const users = sqliteTable("users", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   lastSignInAt: integer("last_sign_in_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_users_role: check("chk_users_role", sql`role IN ('user','admin')`)
+  }));
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -52,7 +55,12 @@ export const agents = sqliteTable("agents", {
   mcpToken: text("mcp_token", { length: 100 }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_agents_status: check("chk_agents_status", sql`status IN ('online','busy','idle')`),
+  chk_agents_can_modify_tiangong_core: check("chk_agents_can_modify_tiangong_core", sql`can_modify_tiangong_core IN ('true','false')`),
+  chk_agents_can_send_external_message: check("chk_agents_can_send_external_message", sql`can_send_external_message IN ('true','false')`)
+  }));
 
 export type Agent = typeof agents.$inferSelect;
 export type InsertAgent = typeof agents.$inferInsert;
@@ -122,11 +130,6 @@ export const tasks = sqliteTable("tasks", {
   sourceUrl: text("source_url", { length: 500 }),
   lastHeartbeatAt: integer("last_heartbeat_at", { mode: "timestamp" }),
   heartbeatIntervalMs: integer("heartbeat_interval_ms", { mode: "number" }).default(300000),
-  workerLeaseToken: text("worker_lease_token", { length: 64 }),
-  workerLeaseGeneration: integer("worker_lease_generation", { mode: "number" }).default(0).notNull(),
-  workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp" }),
-  cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
-  cancelAcknowledgedAt: integer("cancel_acknowledged_at", { mode: "timestamp" }),
   reviewerId: integer("reviewer_id", {mode: "number"}),
   reviewResult: text("review_result", { length: 30 }),
   triagedAt: integer("triaged_at", { mode: "timestamp" }),
@@ -134,6 +137,11 @@ export const tasks = sqliteTable("tasks", {
   readyAt: integer("ready_at", { mode: "timestamp" }),
   reviewAt: integer("review_at", { mode: "timestamp" }),
   blockedAt: integer("blocked_at", { mode: "timestamp" }),
+  workerLeaseToken: text("worker_lease_token", { length: 64 }),
+  workerLeaseGeneration: integer("worker_lease_generation", { mode: "number" }).default(0).notNull(),
+  workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp" }),
+  cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
+  cancelAcknowledgedAt: integer("cancel_acknowledged_at", { mode: "timestamp" }),
   originSystem: text("origin_system", { length: 32 }),
   externalRef: text("external_ref", { length: 255 }),
   idempotencyKey: text("idempotency_key", { length: 128 }),
@@ -145,6 +153,8 @@ export const tasks = sqliteTable("tasks", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
+  chk_tasks_status: check("chk_tasks_status", sql`status IN ('running','pending','done','failed','queued')`),
+  chk_tasks_output_valid: check("chk_tasks_output_valid", sql`output_valid IN ('true','false','unknown')`),
   externalRefIdx: uniqueIndex("uq_tasks_origin_external_ref").on(table.originSystem, table.externalRef),
   idempotencyKeyIdx: uniqueIndex("uq_tasks_origin_idempotency_key").on(table.originSystem, table.idempotencyKey),
 }));
@@ -222,6 +232,7 @@ export const taskOutboxEvents = sqliteTable("task_outbox_events", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
+  chk_task_outbox_events_event_type: check("chk_task_outbox_events_event_type", sql`event_type IN ('state','approval','terminal')`),
   taskRevisionIdx: uniqueIndex("uq_task_outbox_task_revision").on(table.taskId, table.stateRevision),
   dueIdx: index("idx_task_outbox_due").on(table.nextAttemptAt, table.deliveredAt, table.deadLetterAt),
 }));
@@ -255,6 +266,7 @@ export const taskFinalizeActions = sqliteTable("task_finalize_actions", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
+  chk_task_finalize_actions_outcome: check("chk_task_finalize_actions_outcome", sql`outcome IN ('completed','failed')`),
   taskRevisionIdx: uniqueIndex("uq_task_finalize_task_revision").on(table.taskId, table.stateRevision),
   dueIdx: index("idx_task_finalize_due").on(table.nextAttemptAt, table.doneAt, table.deadLetterAt),
 }));
@@ -289,7 +301,10 @@ export const stagedObjects = sqliteTable("staged_objects", {
   ownerPrincipal: text("owner_principal", { length: 255 }).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   state: text("state", { enum: ["staging", "verified", "sealed", "abandoned"] }).default("staging").notNull(),
-});
+},
+  (table) => ({
+  chk_staged_objects_state: check("chk_staged_objects_state", sql`state IN ('staging','verified','sealed','abandoned')`)
+  }));
 
 export const sealedArtifactDescriptors = sqliteTable("sealed_artifact_descriptors", {
   id: integer("id", { mode: "number" }).primaryKey(),
@@ -363,6 +378,8 @@ export const messages = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   },
   (table) => ({
+  chk_messages_type: check("chk_messages_type", sql`type IN ('command','response','broadcast','system','ack')`),
+  chk_messages_status: check("chk_messages_status", sql`status IN ('sent','delivered','read','acked','expired')`),
     // Idempotency: same fromAgent + idempotencyKey → same message
     idempotencyIdx: uniqueIndex("uq_messages_idempotency").on(
       table.fromAgent,
@@ -383,7 +400,10 @@ export const systems = sqliteTable("systems", {
   config: text("config"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_systems_status: check("chk_systems_status", sql`status IN ('connected','syncing','disconnected')`)
+  }));
 
 export type System = typeof systems.$inferSelect;
 export type InsertSystem = typeof systems.$inferInsert;
@@ -437,7 +457,10 @@ export const mcpApiKeys = sqliteTable("mcp_api_keys", {
   active: text("active", { enum: ["true", "false"] }).default("true"),
   lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_mcp_api_keys_active: check("chk_mcp_api_keys_active", sql`active IN ('true','false')`)
+  }));
 
 export type McpApiKey = typeof mcpApiKeys.$inferSelect;
 export type InsertMcpApiKey = typeof mcpApiKeys.$inferInsert;
@@ -494,7 +517,10 @@ export const serviceKeyAuditLog = sqliteTable("service_key_audit_log", {
   decision: text("decision", { enum: ["authenticated", "denied"] }).notNull(),
   reason: text("reason", { length: 100 }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_service_key_audit_log_decision: check("chk_service_key_audit_log_decision", sql`decision IN ('authenticated','denied')`)
+  }));
 
 export type ServiceKeyAuditEntry = typeof serviceKeyAuditLog.$inferSelect;
 export type InsertServiceKeyAuditEntry = typeof serviceKeyAuditLog.$inferInsert;
@@ -569,7 +595,10 @@ export const tokenUsage = sqliteTable("token_usage", {
   // Phase 2: 高价模型标记
   highCostModel: text("high_cost_model", { enum: ["true", "false"] }).default("false"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_token_usage_high_cost_model: check("chk_token_usage_high_cost_model", sql`high_cost_model IN ('true','false')`)
+  }));
 
 export type TokenUsage = typeof tokenUsage.$inferSelect;
 export type InsertTokenUsage = typeof tokenUsage.$inferInsert;
@@ -597,7 +626,10 @@ export const highCostModelAuth = sqliteTable("high_cost_model_auth", {
   expiresAt: integer("expires_at", { mode: "timestamp" }),
   active: text("active", { enum: ["true", "false"] }).default("true"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_high_cost_model_auth_active: check("chk_high_cost_model_auth_active", sql`active IN ('true','false')`)
+  }));
 
 export type HighCostModelAuth = typeof highCostModelAuth.$inferSelect;
 export type InsertHighCostModelAuth = typeof highCostModelAuth.$inferInsert;
@@ -611,7 +643,10 @@ export const githubIntegrations = sqliteTable("github_integrations", {
   active: text("active", { enum: ["true", "false"] }).default("true"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_github_integrations_active: check("chk_github_integrations_active", sql`active IN ('true','false')`)
+  }));
 
 export type GithubIntegration = typeof githubIntegrations.$inferSelect;
 export type InsertGithubIntegration = typeof githubIntegrations.$inferInsert;
@@ -626,7 +661,10 @@ export const githubRepos = sqliteTable("github_repos", {
   active: text("active", { enum: ["true", "false"] }).default("true"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_github_repos_active: check("chk_github_repos_active", sql`active IN ('true','false')`)
+  }));
 
 export type GithubRepo = typeof githubRepos.$inferSelect;
 export type InsertGithubRepo = typeof githubRepos.$inferInsert;
@@ -639,7 +677,11 @@ export const githubRepoPermissions = sqliteTable("github_repo_permissions", {
   active: text("active", { enum: ["true", "false"] }).default("true"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_github_repo_permissions_permission_level: check("chk_github_repo_permissions_permission_level", sql`permission_level IN ('read','push','admin')`),
+  chk_github_repo_permissions_active: check("chk_github_repo_permissions_active", sql`active IN ('true','false')`)
+  }));
 
 export type GithubRepoPermission = typeof githubRepoPermissions.$inferSelect;
 export type InsertGithubRepoPermission = typeof githubRepoPermissions.$inferInsert;
@@ -660,7 +702,10 @@ export const githubPullRequests = sqliteTable("github_pull_requests", {
   mergedAt: integer("merged_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_github_pull_requests_status: check("chk_github_pull_requests_status", sql`status IN ('pending','approved','rejected','merged','closed')`)
+  }));
 
 export type GithubPullRequest = typeof githubPullRequests.$inferSelect;
 export type InsertGithubPullRequest = typeof githubPullRequests.$inferInsert;
@@ -672,7 +717,10 @@ export const githubAuditLog = sqliteTable("github_audit_log", {
   agentId: integer("agent_id", {mode: "number"}),
   reason: text("reason"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_github_audit_log_action: check("chk_github_audit_log_action", sql`action IN ('approve','reject','merge','register','revoke')`)
+  }));
 
 export type GithubAuditLogEntry = typeof githubAuditLog.$inferSelect;
 export type InsertGithubAuditLogEntry = typeof githubAuditLog.$inferInsert;
@@ -689,7 +737,11 @@ export const conversations = sqliteTable("conversations", {
   archivedAt: integer("archived_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_conversations_type: check("chk_conversations_type", sql`type IN ('mission','meeting','test','ad_hoc')`),
+  chk_conversations_status: check("chk_conversations_status", sql`status IN ('active','archived')`)
+  }));
 
 export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = typeof conversations.$inferInsert;
@@ -702,7 +754,10 @@ export const taskThreads = sqliteTable("task_threads", {
   status: text("status", { enum: ["open", "closed", "archived"] }).default("open").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_task_threads_status: check("chk_task_threads_status", sql`status IN ('open','closed','archived')`)
+  }));
 
 export type TaskThread = typeof taskThreads.$inferSelect;
 export type InsertTaskThread = typeof taskThreads.$inferInsert;
@@ -730,7 +785,10 @@ export const taskMessages = sqliteTable("task_messages", {
   // defaultNow() 在 drizzle sqlite 里写 epoch 毫秒但 timestamp 模式按秒读（×1000 → 58669 年 bug），
     // 改 $defaultFn 由 JS 端写 Date，mapToDriverValue 正确落秒；历史毫秒脏行由读取侧归一化兜底
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_task_messages_event_type: check("chk_task_messages_event_type", sql`event_type IN ('dispatch','ack','progress','working','result','error','timeout','cancel','system')`)
+  }));
 
 export type TaskMessage = typeof taskMessages.$inferSelect;
 export type InsertTaskMessage = typeof taskMessages.$inferInsert;
@@ -771,7 +829,11 @@ export const mailboxMessages = sqliteTable("mailbox_messages", {
   repliedAt: integer("replied_at", { mode: "timestamp" }),
   resolvedAt: integer("resolved_at", { mode: "timestamp" }),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_mailbox_messages_mailbox_type: check("chk_mailbox_messages_mailbox_type", sql`mailbox_type IN ('direct','mention','question','review_request','subtask','handoff','result_notice')`),
+  chk_mailbox_messages_mailbox_status: check("chk_mailbox_messages_mailbox_status", sql`mailbox_status IN ('unread','acknowledged','working','replied','resolved','failed')`)
+  }));
 
 export type MailboxMessage = typeof mailboxMessages.$inferSelect;
 export type InsertMailboxMessage = typeof mailboxMessages.$inferInsert;
@@ -843,6 +905,7 @@ export const workspaceMemberships = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
+  chk_workspace_memberships_role: check("chk_workspace_memberships_role", sql`role IN ('owner','admin','member','viewer')`),
     membershipIdx: uniqueIndex("uq_workspace_memberships").on(table.workspaceId, table.userId),
   })
 );
@@ -938,6 +1001,8 @@ export const connectorRegistry = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
+  chk_connector_registry_connector_type: check("chk_connector_registry_connector_type", sql`connector_type IN ('opencode','xuanji','s3')`),
+  chk_connector_registry_status: check("chk_connector_registry_status", sql`status IN ('draft','active','disabled')`),
     workspaceProjectSlugIdx: uniqueIndex("uq_connector_registry_workspace_project_slug").on(
       table.workspaceId,
       table.projectId,
@@ -976,6 +1041,9 @@ export const artifactRegistry = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
   },
   (table) => ({
+  chk_artifact_registry_artifact_type: check("chk_artifact_registry_artifact_type", sql`artifact_type IN ('file','image','document','log','data')`),
+  chk_artifact_registry_status: check("chk_artifact_registry_status", sql`status IN ('draft','active','archived','deleted')`),
+  chk_artifact_registry_storage_backref_type: check("chk_artifact_registry_storage_backref_type", sql`storage_backref_type IN ('connector','inline','external')`),
     workspaceProjectSlugIdx: uniqueIndex("uq_artifact_registry_workspace_project_slug").on(
       table.workspaceId,
       table.projectId,
@@ -1004,7 +1072,11 @@ export const sharedSessions = sqliteTable("shared_sessions", {
   createdBy: integer("created_by", {mode: "number"}),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_shared_sessions_type: check("chk_shared_sessions_type", sql`type IN ('collaboration','handoff','meeting','review','adhoc')`),
+  chk_shared_sessions_status: check("chk_shared_sessions_status", sql`status IN ('active','archived')`)
+  }));
 
 export type SharedSession = typeof sharedSessions.$inferSelect;
 export type InsertSharedSession = typeof sharedSessions.$inferInsert;
@@ -1019,7 +1091,10 @@ export const sessionMessages = sqliteTable("session_messages", {
   content: text("content").notNull(),
   metadata: text("metadata"), // JSON
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
-});
+},
+  (table) => ({
+  chk_session_messages_role: check("chk_session_messages_role", sql`role IN ('user','assistant','system')`)
+  }));
 
 export type SessionMessage = typeof sessionMessages.$inferSelect;
 export type InsertSessionMessage = typeof sessionMessages.$inferInsert;
@@ -1035,6 +1110,7 @@ export const agentMemories = sqliteTable("agent_memories", {
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
 }, (table) => ({
+  chk_agent_memories_type: check("chk_agent_memories_type", sql`type IN ('personal','shared','company')`),
   agentKeyIdx: uniqueIndex("uq_agent_memories_key").on(table.agentId, table.key),
 }));
 
@@ -1055,7 +1131,11 @@ export const externalAgents = sqliteTable("external_agents", {
   lastHeartbeat: integer("last_heartbeat", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull().$onUpdate(() => new Date()),
-});
+},
+  (table) => ({
+  chk_external_agents_platform: check("chk_external_agents_platform", sql`platform IN ('hermes','opencode','codex','arkclaw','openai','custom')`),
+  chk_external_agents_status: check("chk_external_agents_status", sql`status IN ('online','offline','error')`)
+  }));
 
 export type ExternalAgent = typeof externalAgents.$inferSelect;
 export type InsertExternalAgent = typeof externalAgents.$inferInsert;
@@ -1082,6 +1162,7 @@ export const notifications = sqliteTable("notifications", {
   readAt: integer("read_at", { mode: "timestamp" }),  // null = 未读
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 }, (table) => ({
+  chk_notifications_type: check("chk_notifications_type", sql`type IN ('task_approved','task_rejected','task_completed','task_failed','lesson_recorded','budget_exhausted')`),
   // 索引：list API 高效分页 + 防抖查询
   agentReadIdx: index("idx_notifications_agent_read").on(table.agentId, table.readAt),
   createdAtIdx: index("idx_notifications_created_at").on(table.createdAt),

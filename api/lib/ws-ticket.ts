@@ -10,8 +10,11 @@
 import { randomBytes } from "node:crypto";
 
 export interface WsTicketPayload {
-  userId: number;
-  role: string;
+  /** dashboard ticket：登录用户（dashboard 侧守卫必须存在） */
+  userId?: number;
+  role?: string;
+  /** agent ticket：绑定的执行代理（agent 侧守卫必须存在，§4-④） */
+  agentId?: number;
 }
 
 interface TicketEntry extends WsTicketPayload {
@@ -38,7 +41,7 @@ export class WsTicketStore {
     this.now = options.now ?? Date.now;
   }
 
-  issue(payload: WsTicketPayload): string {
+  issue(payload: WsTicketPayload): string {  // 两种形态：{userId,role} | {agentId}
     // 签发前顺手清理过期项：进程里没有任何定时任务会调用 pending()，
     // 用户签票后直接关页面就会留下永不消费的条目，长跑容器里会慢慢堆积。
     this.prune();
@@ -71,7 +74,7 @@ export class WsTicketStore {
     if (!entry) return null;
     this.tickets.delete(ticket);
     if (entry.expiresAt <= this.now()) return null;
-    return { userId: entry.userId, role: entry.role };
+    return { userId: entry.userId, role: entry.role, agentId: entry.agentId };
   }
 
   /** 未消费 ticket 数量；顺手清理过期项，避免 Map 只增不减 */

@@ -354,6 +354,12 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
 
 ```text
 wss://tiangg.zeabur.app/ws?agentId=16&token=tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+> **⚠️ 弃用通知（2026-09-28）**：`token=` 长寿命密钥直挂 URL 的握手方式已进入弃用期——
+> URL 中的凭据会进代理/网关访问日志。请迁移到一次性 ticket 流程：
+> 1. `POST/GET /api/agent-ws-ticket`，头 `Authorization: Bearer <MCP Key>` → 返回 `{ ticket, agentId, expiresIn: 60 }`；
+> 2. `wss://tiangg.zeabur.app/ws?agentId=16&ticket=<60s 一次性>`。
+> 迁移完成前 `token=` 仍可用（服务端日志会记 deprecated 警告）。
 ```
 
 用途：

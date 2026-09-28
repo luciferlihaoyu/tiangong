@@ -17,6 +17,7 @@ import { serveStaticFiles } from "./lib/vite";
 import { wsManager } from "./ws-manager";
 import { verifyMcpKey } from "./mcp/auth";
 import { wsTicketStore, isAllowedWsOrigin, WS_TICKET_TTL_MS } from "./lib/ws-ticket";
+import { issueAgentWsTicket, resolveAgentWsAuth } from "./lib/agent-ws-auth";
 import { getDb } from "./queries/connection";
 import { taskRunner } from "./lib/task-runner";
 import { sweeperScheduler } from "./lib/sweepers/scheduler";
@@ -290,6 +291,26 @@ app.get("/api/ws-ticket", async (c) => {
   return c.json({ ticket, expiresIn: WS_TICKET_TTL_MS / 1000 });
 });
 
+// Agent WS 一次性 ticket（§4-④ 长寿命查询密钥淘汰通道）：MCP Key 只进
+// Authorization 头，不进 URL；换出的 ticket 60s 一次性、绑定该 agent。
+app.get("/api/agent-ws-ticket", async (c) => {
+  const authHeader = c.req.header("authorization");
+  const key = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  if (!key) {
+    return c.json({ error: "缺少 Bearer MCP Key" }, 401);
+  }
+  const auth = await verifyMcpKey(key);
+  if (!auth.valid) {
+    return c.json({ error: auth.error || "认证失败" }, (auth.statusCode || 401) as 401);
+  }
+  const agentId = auth.agent?.id;
+  if (agentId == null) {
+    return c.json({ error: "该 Key 未绑定 Agent" }, 403);
+  }
+  const ticket = issueAgentWsTicket(agentId);
+  return c.json({ ticket, agentId, expiresIn: WS_TICKET_TTL_MS / 1000 });
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 // ═══════════════════════════════════════════════════════════════
@@ -308,31 +329,20 @@ app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
  * 5. 断开时更新 Agent 状态为 idle
  */
 app.get("/ws", async (c) => {
-  const agentIdStr = c.req.query("agentId");
-  const token = c.req.query("token");
-
-  if (!agentIdStr || !token) {
-    return c.json({ error: "缺少 agentId 或 token 参数" }, 400);
+  // §4-④：首选一次性 ticket（/api/agent-ws-ticket 用 Bearer 头换取）；
+  // token= 长寿命 Key 保留为弃用通道（外部 openclaw 连接器迁移窗口）。
+  const auth = await resolveAgentWsAuth({
+    agentId: c.req.query("agentId"),
+    ticket: c.req.query("ticket"),
+    token: c.req.query("token"),
+  });
+  if ("error" in auth) {
+    return c.json({ error: auth.error }, auth.status);
   }
-
-  const agentId = parseInt(agentIdStr, 10);
-  if (isNaN(agentId)) {
-    return c.json({ error: "agentId 必须是数字" }, 400);
+  if (auth.via === "token-deprecated") {
+    console.warn("[WS] agent handshake used deprecated token= query (migrate to /api/agent-ws-ticket)");
   }
-
-  // 验证 token
-  const authResult = await verifyMcpKey(token);
-  if (!authResult.valid) {
-    return new Response(JSON.stringify({ error: authResult.error || "认证失败" }), {
-      status: authResult.statusCode || 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // 验证 token 关联的 agent 与请求的 agentId 一致
-  if (authResult.agent && authResult.agent.id !== agentId) {
-    return c.json({ error: "Token 与 Agent 不匹配" }, 403);
-  }
+  const agentId = auth.agentId;
 
   const db = getDb();
 
@@ -493,7 +503,8 @@ app.get("/ws/dashboard", async (c) => {
   // 再消费一次性 ticket：缺失/过期/重放一律拒绝（日志不含凭据本身）
   const ticket = c.req.query("ticket");
   const ticketPayload = ticket ? wsTicketStore.consume(ticket) : null;
-  if (!ticketPayload) {
+  if (!ticketPayload || ticketPayload.userId == null) {
+    // §4-④：agent ticket（无 userId）不得开 dashboard 连接
     console.warn("[WS] dashboard handshake rejected: no_ticket");
     return c.json({ error: "缺少或失效的 WS 凭据" }, 401);
   }

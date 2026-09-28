@@ -17,6 +17,7 @@ import { env } from "./env";
 import * as schema from "../../db/schema";
 import { generateAllDdl } from "./ddl";
 import { runSchemaMigrations } from "./schema-migrations";
+import "./migrations-register"; // side-effect：注册版本化迁移（须先于 runSchemaMigrations 调用）
 
 /**
  * 建库 DDL：**从 db/schema.ts 派生**（api/lib/ddl.ts），不再是手写副本。

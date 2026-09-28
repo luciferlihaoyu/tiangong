@@ -21,6 +21,7 @@ import { tasks } from "@db/schema";
 import { syncTaskMemoryToXuanji, syncTaskLessonToXuanji, type CompletedTaskView, type Db } from "./xuanji-sync";
 import { syncTaskArtifactsToAlist } from "./alist-sync";
 import { notifyLessonRecorded, recordNotificationOrThrow } from "./notification-hooks";
+import { resolveSystemNotifyAgentId } from "./notification";
 import { autoSummarizeCollab } from "./task-validator";
 
 /**
@@ -123,7 +124,7 @@ export async function finalizeFailedTask(
         // 传 null 至少让它变成"按设计跳过"而不是"报错被吞"。
         // 真正的修法（未做，需产品决策）：给系统通知一个归属——要么新建"系统"agent 行，
         // 要么把 agent_id 改成可空（SQLite 不能直接改可空性，需重建表，属 §4 版本化迁移范畴）。
-        agentId: task.agentId ?? null,
+        agentId: task.agentId ?? resolveSystemNotifyAgentId(db),
         error: errorText,
       },
       options.errorChannel ?? "task.failed",
@@ -242,7 +243,7 @@ export async function performFinalizeSteps(
     await recordNotificationOrThrow(
       db,
       {
-        agentId: task.agentId ?? null,
+        agentId: task.agentId ?? resolveSystemNotifyAgentId(db),
         type: "lesson_recorded",
         taskId: task.id,
         title: `任务 ${task.taskId} 失败教训已归档`,

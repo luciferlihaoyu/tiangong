@@ -90,6 +90,20 @@ export async function recordNotification(
  *  - agentId=null（无归属）→ Error("no assignee ...")——按设计跳过，不是故障；
  *  - 其余（写库失败等）→ 原样抛出，由 finalize-actions worker 判定重试。
  */
+/**
+ * 系统通知归属解析（§4-②）：agentId 为 null 的系统任务回落到"系统"代理行
+ * （版本化迁移 0001 创建，agent_id='system'）。行不存在（迁移尚未跑）返回
+ * null——调用方维持既有"无归属即跳过"语义，不抛错。
+ */
+export function resolveSystemNotifyAgentId(db: Db): number | null {
+  try {
+    const rows = db.all<{ id: number }>(sql`SELECT id FROM agents WHERE agent_id = 'system' LIMIT 1`);
+    return rows.length > 0 ? rows[0]!.id : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function recordNotificationOrThrow(
   db: Db,
   input: RecordNotificationInput

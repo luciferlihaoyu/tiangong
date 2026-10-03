@@ -626,7 +626,10 @@ export function MessagePanel({
   const [loadingConv, setLoadingConv] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // 消息列表容器 ref：自动滚底只在容器内进行（scrollTo）。
+  // 勿用 scrollIntoView——它会滚动包括 window 在内的所有可滚动祖先，
+  // 页面一打开就整页平滑滑向消息面板（2026-10 事故：打开天宫自动滑页）。
+  const msgListRef = useRef<HTMLDivElement>(null);
 
   // 「天宫助手」agent 的数字 id（通过 agentId 字符串 key 识别）
   const assistantAgentId = useMemo(
@@ -748,9 +751,11 @@ export function MessagePanel({
       .finally(() => setLoadingConv(false));
   }, [selectedAgentId, myId]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom（仅容器内滚动，不影响页面滚动位置）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = msgListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [conversationMsgs, aiThinking]);
 
   const handleSend = useCallback(async () => {
@@ -1031,7 +1036,7 @@ export function MessagePanel({
               </div>
 
               {/* Messages */}
-              <div className="tg-msg-list flex-1 overflow-y-auto custom-scrollbar mb-2 space-y-2" style={{ maxHeight: "300px" }}>
+              <div ref={msgListRef} className="tg-msg-list flex-1 overflow-y-auto custom-scrollbar mb-2 space-y-2" style={{ maxHeight: "300px" }}>
                 {loadingConv ? (
                   <div className="text-center text-xs font-mono py-4" style={{ color: "var(--text-muted)" }}>
                     加载中...
@@ -1106,7 +1111,6 @@ export function MessagePanel({
                     </div>
                   </div>
                 )}
-                <div ref={messagesEndRef} />
               </div>
 
               {/* Send input */}

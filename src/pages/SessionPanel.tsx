@@ -426,7 +426,9 @@ export default function SessionPanel() {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [inputText, setInputText] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // 消息列表容器 ref：自动滚底只在容器内（scrollTo），不用 scrollIntoView——
+  // 后者会连带滚动整个页面（打开页面自动滑页事故的同款根因）。
+  const msgListRef = useRef<HTMLDivElement>(null);
 
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
@@ -455,9 +457,11 @@ export default function SessionPanel() {
     },
   });
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages（仅容器内滚动，不影响页面滚动位置）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = msgListRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
   // WebSocket: invalidate on new session or message events
@@ -636,7 +640,7 @@ export default function SessionPanel() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-5">
+            <div ref={msgListRef} className="flex-1 overflow-y-auto custom-scrollbar p-5">
               {messagesQuery.isLoading && (
                 <div className="text-xs font-mono text-center py-8" style={{ color: "var(--text-muted)" }}>
                   加载消息...
@@ -657,7 +661,6 @@ export default function SessionPanel() {
               {messages.map((msg) => (
                 <MessageBubble key={msg.id} msg={msg} agents={agents} />
               ))}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}

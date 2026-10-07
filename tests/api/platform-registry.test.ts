@@ -17,6 +17,12 @@ const ENV_KEYS = [
   "S4API_BASE_URL",
   "OPENCODE_BASE_URL",
   "FUSHENG_BASE_URL",
+  "ZEABUR_BASE_URL",
+  "DEEPSEEK_BASE_URL",
+  "LIBLIB_BASE_URL",
+  "AUTODL_BASE_URL",
+  "LIBLIBTV_BASE_URL",
+  "MINIMAX_AUDIO_BASE_URL",
 ] as const;
 
 /** 按 key 取注册项；缺失直接断言失败，避免后续 undefined 取值噪音 */
@@ -113,5 +119,84 @@ describe("浮生若梦卡片", () => {
   it("排在既有平台卡之后（首页网格顺序稳定）", () => {
     const keys = getPlatformServices().map((s) => s.key);
     expect(keys.indexOf("fusheng")).toBeGreaterThan(keys.indexOf("xuanji"));
+  });
+});
+
+/**
+ * 第二批外部工具站（Zeabur / DeepSeek / LiblibAI / AutoDL / LibTV / MiniMax 音频）。
+ * 均为第三方 SaaS，没有可用的自建健康端点，故沿用 kind="external"（可达即健康）。
+ * 注意其中一个坑：MiniMax 的入口是子路径 /audio，stripTrailingSlash 只该吃「尾斜杠」，
+ * 不能把路径段当尾斜杠一起吃掉 —— 本文件用显式断言把它钉住。
+ */
+describe("外部工具卡片（第二批）", () => {
+  const TOOLS = [
+    { key: "zeabur", label: "Zeabur", url: "https://zeabur.com" },
+    { key: "deepseek", label: "DeepSeek", url: "https://platform.deepseek.com" },
+    { key: "liblib", label: "LiblibAI", url: "https://www.liblib.art" },
+    { key: "autodl", label: "AutoDL", url: "https://www.autodl.com" },
+    { key: "liblibtv", label: "LibTV", url: "https://www.liblib.tv" },
+    { key: "minimaxaudio", label: "MiniMax 音频", url: "https://www.minimax.cn/audio" },
+  ] as const;
+
+  it("六个工具站均已注册且 kind 为 external", () => {
+    for (const t of TOOLS) {
+      expect(byKey(t.key).kind).toBe("external");
+    }
+  });
+
+  it("label 与卡片标题一致", () => {
+    for (const t of TOOLS) {
+      expect(byKey(t.key).label).toBe(t.label);
+    }
+  });
+
+  it("未配置 env 时使用内置默认网址（尾斜杠已 strip）", () => {
+    for (const k of ENV_KEYS) delete process.env[k];
+    for (const t of TOOLS) {
+      expect(byKey(t.key).url).toBe(t.url);
+    }
+  });
+
+  it("MiniMax 的子路径 /audio 不被 stripTrailingSlash 吃掉", () => {
+    delete process.env.MINIMAX_AUDIO_BASE_URL;
+    const url = byKey("minimaxaudio").url;
+    expect(url).toContain("/audio");
+    expect(url.endsWith("/")).toBe(false);
+  });
+
+  it("env 覆盖生效且尾斜杠仍被 strip", () => {
+    process.env.ZEABUR_BASE_URL = "https://z.example.com/";
+    process.env.DEEPSEEK_BASE_URL = "https://d.example.com//";
+    process.env.LIBLIB_BASE_URL = "https://l.example.com";
+    process.env.AUTODL_BASE_URL = "https://a.example.com/";
+    process.env.LIBLIBTV_BASE_URL = "https://lt.example.com/";
+    process.env.MINIMAX_AUDIO_BASE_URL = "https://mm.example.com/audio/";
+    expect(byKey("zeabur").url).toBe("https://z.example.com");
+    expect(byKey("deepseek").url).toBe("https://d.example.com");
+    expect(byKey("liblib").url).toBe("https://l.example.com");
+    expect(byKey("autodl").url).toBe("https://a.example.com");
+    expect(byKey("liblibtv").url).toBe("https://lt.example.com");
+    // 覆盖值带子路径 + 尾斜杠：只去尾斜杠、保留 /audio
+    expect(byKey("minimaxaudio").url).toBe("https://mm.example.com/audio");
+  });
+
+  it("env 显式设为空串时回退内置默认", () => {
+    for (const k of ENV_KEYS) process.env[k] = "";
+    for (const t of TOOLS) {
+      expect(byKey(t.key).url).toBe(t.url);
+    }
+  });
+
+  it("排在第一批外部应用之后（首页网格顺序稳定）", () => {
+    const keys = getPlatformServices().map((s) => s.key);
+    for (const t of TOOLS) {
+      expect(keys.indexOf(t.key)).toBeGreaterThan(keys.indexOf("opencode"));
+    }
+  });
+
+  it("与既有 MCP 插件 key 不重名（minimax 插件在册，故用 minimaxaudio 而非 minimax）", () => {
+    const keys = getPlatformServices().map((s) => s.key);
+    expect(keys).not.toContain("minimax");
+    expect(keys).toContain("minimaxaudio");
   });
 });

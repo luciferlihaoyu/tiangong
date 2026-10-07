@@ -19,6 +19,13 @@ const APP_META: Record<string, { description: string }> = {
   openclaw: { description: "OpenClaw 网页控制台" },
   "4sapi": { description: "API 聚合中转站" },
   opencode: { description: "OpenCode 网页终端" },
+  // 第三方工具站（个人常用入口）
+  zeabur: { description: "云部署平台" },
+  deepseek: { description: "开放平台 · API 与用量" },
+  liblib: { description: "AI 绘画创作平台" },
+  autodl: { description: "GPU 算力云" },
+  liblibtv: { description: "视频创作工具" },
+  minimaxaudio: { description: "语音与音乐生成" },
 };
 
 /** 仅这些平台有 SSO /sso/launch 接收端：点击先调 launch 签票，成功后再开窗免登进入 */

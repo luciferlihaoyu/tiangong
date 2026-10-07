@@ -18,25 +18,47 @@ const APP_HUB_PATH = path.resolve(import.meta.dirname, "../../src/sections/AppHu
 const source = readFileSync(APP_HUB_PATH, "utf-8");
 
 /** 首页外部/新接入卡片：这些站点没有 /sso/launch 接收端，必须直开外链 */
-const DIRECT_OPEN_KEYS = ["openclaw", "4sapi", "opencode", "fusheng"] as const;
+const DIRECT_OPEN_KEYS = [
+  "openclaw",
+  "4sapi",
+  "opencode",
+  "fusheng",
+  "zeabur",
+  "deepseek",
+  "liblib",
+  "autodl",
+  "liblibtv",
+  "minimaxaudio",
+] as const;
+
+/** key → 卡片描述（缺失会回退 label，导致标题与描述重复） */
+const EXPECTED_DESCRIPTIONS: Record<string, string> = {
+  openclaw: "OpenClaw 网页控制台",
+  "4sapi": "API 聚合中转站",
+  opencode: "OpenCode 网页终端",
+  fusheng: "AI 影视创作工作台",
+  zeabur: "云部署平台",
+  deepseek: "开放平台 · API 与用量",
+  liblib: "AI 绘画创作平台",
+  autodl: "GPU 算力云",
+  liblibtv: "视频创作工具",
+  minimaxaudio: "语音与音乐生成",
+};
 
 describe("首页卡片前端契约（AppHub.tsx）", () => {
   it("新卡都有专属中文描述（缺失会回退 label 造成标题/描述重复）", () => {
-    for (const description of [
-      "OpenClaw 网页控制台",
-      "API 聚合中转站",
-      "OpenCode 网页终端",
-      "AI 影视创作工作台",
-    ]) {
+    for (const description of Object.values(EXPECTED_DESCRIPTIONS)) {
       expect(source).toContain(description);
     }
   });
 
   it("APP_META 覆盖所有新 key", () => {
-    expect(source).toMatch(/^\s*openclaw:\s*\{/m);
-    expect(source).toMatch(/^\s*"4sapi":\s*\{/m);
-    expect(source).toMatch(/^\s*opencode:\s*\{/m);
-    expect(source).toMatch(/^\s*fusheng:\s*\{/m);
+    for (const key of Object.keys(EXPECTED_DESCRIPTIONS)) {
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(source, `APP_META 缺 ${key}`).toMatch(
+        new RegExp(`^\\s*"?${escaped}"?:\\s*\\{`, "m"),
+      );
+    }
   });
 
   it("新 key 不在 SSO_KEYS 白名单里（应直开外链，不误走 platform.launch 签票）", () => {

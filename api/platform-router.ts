@@ -75,6 +75,20 @@ export function getPlatformServices(): PlatformService[] {
     { key: "openclaw", label: "OpenClaw", url: stripTrailingSlash(process.env.OPENCLAW_BASE_URL || "https://ttrssa.xianrealme.com"), kind: "external" },
     { key: "4sapi", label: "4sapi", url: stripTrailingSlash(process.env.S4API_BASE_URL || "https://4sapi.org"), kind: "external" },
     { key: "opencode", label: "OpenCode", url: stripTrailingSlash(process.env.OPENCODE_BASE_URL || "https://ccood.dpdns.org"), kind: "external" },
+    // 第三方工具站（个人常用入口，同为 external：「可达即健康」）。
+    // 注意两点实测事实：
+    //  1) platform.deepseek.com 对无浏览器 UA 的请求由 CloudFront 直接返 403 ——
+    //     external 分支把 401/403 视为「服务在响应」，故健康灯不会误报红灯；
+    //  2) AutoDL 首包实测约 2.0s，逼近 3s 探活超时，网络抖动时健康灯可能短暂转红，
+    //     这是探活口径的已知限制（与全站服务同一 3s 口径）。
+    //  3) MiniMax 入口是子路径 /audio —— stripTrailingSlash 只去尾斜杠，不会吃掉路径段。
+    { key: "zeabur", label: "Zeabur", url: stripTrailingSlash(process.env.ZEABUR_BASE_URL || "https://zeabur.com"), kind: "external" },
+    { key: "deepseek", label: "DeepSeek", url: stripTrailingSlash(process.env.DEEPSEEK_BASE_URL || "https://platform.deepseek.com"), kind: "external" },
+    { key: "liblib", label: "LiblibAI", url: stripTrailingSlash(process.env.LIBLIB_BASE_URL || "https://www.liblib.art"), kind: "external" },
+    { key: "autodl", label: "AutoDL", url: stripTrailingSlash(process.env.AUTODL_BASE_URL || "https://www.autodl.com"), kind: "external" },
+    { key: "liblibtv", label: "LibTV", url: stripTrailingSlash(process.env.LIBLIBTV_BASE_URL || "https://www.liblib.tv"), kind: "external" },
+    // 用 minimaxaudio（而非 minimax）避免与在册 MCP 插件 minimax 的 key 撞名
+    { key: "minimaxaudio", label: "MiniMax 音频", url: stripTrailingSlash(process.env.MINIMAX_AUDIO_BASE_URL || "https://www.minimax.cn/audio"), kind: "external" },
   ];
 }
 

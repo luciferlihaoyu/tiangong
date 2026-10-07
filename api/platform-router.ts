@@ -2,7 +2,8 @@
  * 平台注册 + 健康聚合路由（P1-1：天宫升级为统一主平台的地基）
  *
  * - registry: 返回全平台服务注册清单（天宫自身 + 北斗 + 璇玑 + 浮生若梦 + 天枢 +
- *   AList + DSH + 外部应用卡 OpenClaw / 4sapi / OpenCode），
+ *   AList + DSH + 外部入口 OpenClaw / 4sapi / OpenCode / Zeabur / DeepSeek /
+ *   LiblibAI / AutoDL / LibTV / MiniMax 音频），
  *   各服务 base url 从环境变量读取（BEIDOU_BASE_URL / XUANJI_BASE_URL /
  *   TIANSHU_BASE_URL / ALIST_BASE_URL），未配置则留空字符串；
  *   外部应用卡（kind=external）的 url 另有内置默认值，未配环境变量也直接可用。
@@ -76,7 +77,7 @@ export function getPlatformServices(): PlatformService[] {
     { key: "4sapi", label: "4sapi", url: stripTrailingSlash(process.env.S4API_BASE_URL || "https://4sapi.org"), kind: "external" },
     { key: "opencode", label: "OpenCode", url: stripTrailingSlash(process.env.OPENCODE_BASE_URL || "https://ccood.dpdns.org"), kind: "external" },
     // 第三方工具站（个人常用入口，同为 external：「可达即健康」）。
-    // 注意两点实测事实：
+    // 注意三点实测事实：
     //  1) platform.deepseek.com 对无浏览器 UA 的请求由 CloudFront 直接返 403 ——
     //     external 分支把 401/403 视为「服务在响应」，故健康灯不会误报红灯；
     //  2) AutoDL 首包实测约 2.0s，逼近 3s 探活超时，网络抖动时健康灯可能短暂转红，

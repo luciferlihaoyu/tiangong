@@ -1,12 +1,15 @@
 /**
- * 天宫首页「平台入口」外部应用卡（OpenClaw / 4sapi / OpenCode）注册表单测。
+ * 天宫首页卡片注册表单测（平台/外部应用/外部工具站）。
  *
- * 需求：首页卡片网格由 platform.registry 驱动，把用户给的三个网址加成卡片，
+ * 需求：首页卡片网格由 platform.registry 驱动，把用户给的网址加成卡片，
  * 与天宫/北斗/天枢/DSH 等平台卡同构（同样的健康灯 + 点击开窗行为）。
+ * 覆盖三批：① OpenClaw / 4sapi / OpenCode（external）；
+ *          ② 浮生若梦（自带 /api/health，走 app）；
+ *          ③ Zeabur / DeepSeek / LiblibAI / AutoDL / LibTV / MiniMax 音频（external）。
  * 本测试锁定注册表的可观察契约：
- *   1) 三项 key 已注册且 kind === "external"（外部应用，走「可达即健康」探活）；
- *   2) 未配置环境变量时使用内置默认网址，且尾斜杠已 strip；
- *   3) 配置环境变量时被覆盖，尾斜杠仍被 strip；
+ *   1) 各 key 已注册且 kind 正确（external 走「可达即健康」；app 探真实健康端点）；
+ *   2) 未配置环境变量时使用内置默认网址，且尾斜杠已 strip（子路径不受影响）；
+ *   3) 配置环境变量时被覆盖，尾斜杠仍被 strip、显式空串回退默认；
  *   4) 既有平台项与顺序契约未被破坏（首页网格顺序稳定）。
  */
 import { afterEach, describe, expect, it } from "vitest";

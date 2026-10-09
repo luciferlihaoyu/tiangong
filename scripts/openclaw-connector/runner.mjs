@@ -39,6 +39,18 @@ const MCP_KEY = process.env.TIANGONG_MCP_KEY || "";
 const WAIT_TOTAL_MS = Math.max(60_000, Number(process.env.TIANGONG_WAIT_TOTAL_MS || "3420000"));
 const WAIT_SLICE_MS = Math.min(25_000, WAIT_TOTAL_MS);
 
+// v2.2（2026-10-09，#106 教训）：完成判定双闸门——完成哨兵 + 防抖。
+//   v2/v2.1 的"双保险"（有新 assistant 文本 + hasActiveRun=false 即收账）会被
+//   多轮执行流里的进度播报骗过：云霄写完 character-v2.md 播报"已落盘，现在生成
+//   第 1 张…"，那一刻恰好空闲帧 → 被当最终结果收走，3 张图未生成就判完成。
+//   v2.2：send 前给 prompt 包裹执行协议（完成时须以「任务完成」开头），收账只认
+//   哨兵；无哨兵的候选文本必须连续两个轮询周期无更新（防抖）才收，且 stderr 警告。
+const COMPLETION_SENTINEL = "任务完成";
+
+function wrapPromptWithProtocol(prompt) {
+  return `${prompt}\n\n---\n[天宫执行协议] 完成全部交付物后，最终回复必须以「${COMPLETION_SENTINEL}」四字开头，并附交付清单摘要（文件路径/大小/关键结果）。在此之前发出的任何文本（如"已落盘，现在继续…"）都会被视作进度播报而非完成信号，不会被收账。`;
+}
+
 async function main() {
   const tiangongAgentId = process.env.TIANGONG_AGENT_ID || "0";
   const displayName = process.env.TIANGONG_AGENT_NAME || "助手";
@@ -107,10 +119,10 @@ function extractJson(text) {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-/** 从 chat.history 结果里提取 sinceMs 之后最后一条 assistant 纯文本回复 */
-function extractFinalText(historyPayload, sinceMs) {
+/** 从 chat.history 结果里提取 sinceMs 之后的 assistant 纯文本消息（按时序，含时间戳） */
+function extractAssistantTexts(historyPayload, sinceMs) {
   const msgs = Array.isArray(historyPayload?.messages) ? historyPayload.messages : [];
-  let finalText = "";
+  const out = [];
   for (const m of msgs) {
     if (!m || m.role !== "assistant") continue;
     const ts = Number(m.timestamp ?? 0);
@@ -119,22 +131,25 @@ function extractFinalText(historyPayload, sinceMs) {
     const textParts = blocks
       .filter((b) => b && b.type === "text" && typeof (b.text ?? b.content) === "string" && (b.text ?? b.content).trim().length > 0)
       .map((b) => (b.text ?? b.content).trim());
-    if (textParts.length > 0) finalText = textParts.join("\n"); // 取最后一条含文本的 assistant 消息
+    if (textParts.length > 0) out.push({ text: textParts.join("\n"), ts });
   }
-  return finalText;
+  return out;
 }
 
 /**
  * 通过 OpenClaw gateway 投递任务并等待 Agent 完整回复。
  *
- * v2：send → agent.wait（分段轮询）→ chat.history 收最终文本。
- * 双保险：wait 未到终态但 history 已出现新 assistant 文本且 session 空闲 → 也算完成。
+ * v2.2：send（包裹执行协议）→ agent.wait 分段轮询 → chat.history 收最终文本。
+ * 完成判定双闸门：
+ *   ① 哨兵：assistant 文本含「任务完成」→ 立即收账；
+ *   ② 防抖：无哨兵文本须连续两个轮询周期保持"最新一条无变化 + session 空闲"
+ *      才收账（stderr 打警告），挡住"播报后被误收"的窗口期。
  */
 async function callGatewayWithReply(sessionKey, prompt) {
   const sendAt = Date.now();
 
-  // 1) 投递，拿 runId
-  const sendOut = gatewayCall("sessions.send", { key: sessionKey, message: prompt }, 30_000);
+  // 1) 投递（包裹执行协议），拿 runId
+  const sendOut = gatewayCall("sessions.send", { key: sessionKey, message: wrapPromptWithProtocol(prompt) }, 30_000);
   const sendPayload = extractJson(sendOut);
   const runId = sendPayload?.runId;
 
@@ -147,9 +162,11 @@ async function callGatewayWithReply(sessionKey, prompt) {
     return sendOut || "[无输出]";
   }
 
-  // 2) agent.wait 分段轮询至终态或总期限
+  // 2) agent.wait 分段轮询至终态或总期限；history 双闸门判定
   const deadline = sendAt + WAIT_TOTAL_MS;
   let finalState = null;
+  let candidate = null; // 防抖候选 {text, ts}：上轮见过的最新文本
+  let noSentinelWarn = false;
   while (Date.now() < deadline) {
     const slice = Math.min(WAIT_SLICE_MS, deadline - Date.now());
     const waitPayload = extractJson(gatewayCall("agent.wait", { runId, timeoutMs: Math.floor(slice) }, slice + 5_000));
@@ -158,20 +175,38 @@ async function callGatewayWithReply(sessionKey, prompt) {
       finalState = waitPayload; // 成功终态（字面值宽松判定）
       break;
     }
-    // 双保险：wait 仍在等，但 history 已有新 assistant 文本且 session 已空闲
+    // history 判定：哨兵优先，其次防抖
     const histMid = extractJson(gatewayCall("chat.history", { sessionKey, limit: 50 }, 30_000));
-    const earlyText = extractFinalText(histMid, sendAt);
-    if (earlyText && histMid?.sessionInfo && histMid.sessionInfo.hasActiveRun === false) {
-      finalState = { status: "done-by-history", earlyExit: true };
+    const texts = extractAssistantTexts(histMid, sendAt);
+    const latest = texts.length > 0 ? texts[texts.length - 1] : null;
+    if (latest && latest.text.includes(COMPLETION_SENTINEL)) {
+      finalState = { status: "done-by-sentinel" };
       break;
+    }
+    if (latest && histMid?.sessionInfo && histMid.sessionInfo.hasActiveRun === false) {
+      if (candidate && candidate.ts === latest.ts) {
+        // 同一候选连续两个周期无更新且 session 空闲 → 防抖通过（无哨兵兜底收账）
+        finalState = { status: "done-by-debounce" };
+        noSentinelWarn = true;
+        break;
+      }
+      candidate = { text: latest.text, ts: latest.ts }; // 记下候选，下轮再验
+    } else {
+      candidate = null; // 有新活动，重置防抖
     }
   }
 
-  // 3) 收账：chat.history 提取最终 assistant 文本
+  // 3) 收账：chat.history 提取最终 assistant 文本（优先哨兵消息）
   const hist = extractJson(gatewayCall("chat.history", { sessionKey, limit: 50 }, 30_000));
-  const finalText = extractFinalText(hist, sendAt);
+  const texts = extractAssistantTexts(hist, sendAt);
+  const sentinelHit = [...texts].reverse().find((t) => t.text.includes(COMPLETION_SENTINEL));
+  const finalText = sentinelHit ? sentinelHit.text : (texts.length > 0 ? texts[texts.length - 1].text : "");
+  if (!sentinelHit && finalText) noSentinelWarn = true;
 
   if (finalText) {
+    if (noSentinelWarn) {
+      process.stderr.write(`[runner] ⚠️ 未检测到「${COMPLETION_SENTINEL}」哨兵，按防抖规则收账（可能是中间态）\n`);
+    }
     process.stderr.write(`[runner] ✅ 已收到最终回复 (${finalText.length} chars, state=${finalState?.status ?? "history-only"})\n`);
     return finalText;
   }

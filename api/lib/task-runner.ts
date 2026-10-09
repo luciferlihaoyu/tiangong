@@ -507,6 +507,20 @@ class TaskRunner {
       const outputText = this.truncate(result.output, CONFIG.resultMaxChars);
       const errorText = result.error ? this.truncate(result.error, CONFIG.resultMaxChars) : null;
 
+      // P4 加固（2026-10-09，#101/#102 假完成教训）：本 runner 的 tianshu 模式是单次
+      // LLM 调用，没有工具执行循环——若 output 含未执行的 DSML 工具调用块
+      // （<｜｜DSML｜｜ calls> / <｜｜DSML｜｜ invoke ...> 形态），说明模型只产出了
+      // "调用意图"而非"结果"。宁可真失败（走既有失败分支：重试/教训/finalize），
+      // 不可假完成（auto-review 无条件 completed 会把意图文本当交付物）。
+      if (result.success && outputText && /[｜|]{2}\s*DSML\s*[｜|]{2}/i.test(outputText)) {
+        result = {
+          output: outputText,
+          error:
+            "Auto-review 拒绝：output 含未执行的 DSML 工具调用块（调用意图而非结果；单次调用模式无工具循环，无法兑现这些调用）",
+          success: false,
+        };
+      }
+
       if (result.awaitingResult) {
         // A2A-lite: gateway 只返回 started，进入 awaiting_result
         await applyTaskTransition(db, {

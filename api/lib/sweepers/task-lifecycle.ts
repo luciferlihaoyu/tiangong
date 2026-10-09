@@ -42,7 +42,10 @@ export async function sweepTaskTimeouts(db: Db, now: Date): Promise<void> {
         at: now,
         clearLease: true,
         alsoWhere: eq(tasks.workerLeaseGeneration, task.workerLeaseGeneration ?? 0),
-        extra: { retryCount: retryCount + 1, error: null, agentId: null },
+        // 2026-10-09（#103 教训）：不再清空 agentId——重派必须保住路由归属；清空后
+        // 任务变"通用任务"，TaskRunner 会越过 externalClaimSources 隔离抢走并假完成。
+        // 保留 agentId 则任务回到原 agent 的 connector（真身重试）。
+        extra: { retryCount: retryCount + 1, error: null },
       });
       if (!requeued.ok) continue;
     } else {

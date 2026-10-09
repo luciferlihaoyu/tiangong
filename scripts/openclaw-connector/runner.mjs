@@ -1,19 +1,27 @@
 #!/usr/bin/env node
-/**
- * 天宫 Connector Runner - 通过 OpenClaw Gateway 真实执行任务
- *
- * connector 从 stdin 传入天宫任务 prompt;本 runner 将 prompt 转发给对应
- * OpenClaw agent 的 main session,并把 gateway 调用结果输出给天宫。
- */
-
 //
 // 天宫 Connector Runner — 通过 OpenClaw Gateway 真实执行任务
 //
 // connector 从 stdin 传入天宫任务 prompt；本 runner 将 prompt 转发给对应
 // OpenClaw agent 的 main session，等待 Agent 回复后把结果输出给天宫。
 //
-// 升级：调用 sessions_send 等待 reply（非 sessions.send 仅投递）
-// prompt 末尾附带指令让 Agent 执行完后回写结果到天宫 API。
+// v2（2026-10-09 碧霄补丁）：修复"投完即逃"缺陷。
+//   旧版只调 sessions.send，gateway 永远秒回 {status:"started"}，runner 把
+//   started 当中间态 exit(2) → connector 置 awaiting_result → 回复烂在
+//   session 里没人收 → 任务超时重派（且 agentId 被 sweeper 清空）→
+//   TaskRunner 抢走假完成（#101/#102/#103 三案同因）。
+//
+//   v2 流程（基于 2026-10-09 婉儿接口核验报告）：
+//     1. sessions.send {key, message}        → {runId, status, messageSeq}
+//     2. agent.wait {runId, timeoutMs} 分段轮询 → 终态 {runId, status, ...}
+//        （成功终态字面值未知——宽松判定：非 started/running/queued/timeout 即终态）
+//     3. chat.history {sessionKey, limit}    → messages[] + sessionInfo
+//        提取 send 时刻之后、role=assistant、content 含 type=text 的最后一条。
+//        心跳消息（heartbeat_respond）全是 toolCall，天然被 text 过滤排除。
+//     4. 兜底：总期限耗尽仍无文本 → 返回 "started" → 外层 exit(2) 保持旧
+//        awaiting_result 语义（今后几乎不会再走到）。
+//   注意：agent.wait 的 runId 只在 gateway terminal cache 里短期有效，
+//   必须 send 后立即 wait，不能事后补查（婉儿实测旧 runId 会 timeout 失效）。
 //
 
 import { execSync } from "node:child_process";
@@ -24,12 +32,15 @@ const GATEWAY_TOKEN = process.env.TIANGONG_OPENCLAW_GATEWAY_TOKEN || process.env
 const TIANGONG_HTTP_BASE = process.env.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
 const MCP_KEY = process.env.TIANGONG_MCP_KEY || "";
 
+// 等待总期限：默认 280s，略小于 connector 侧 300s 执行超时，留出收尾余量
+const WAIT_TOTAL_MS = Math.max(60_000, Number(process.env.TIANGONG_WAIT_TOTAL_MS || "280000"));
+const WAIT_SLICE_MS = Math.min(25_000, WAIT_TOTAL_MS);
+
 async function main() {
   const tiangongAgentId = process.env.TIANGONG_AGENT_ID || "0";
   const displayName = process.env.TIANGONG_AGENT_NAME || "助手";
   const openclawAgent = process.env.TIANGONG_OPENCLAW_AGENT_NAME || displayName;
   const sessionKey = process.env.TIANGONG_OPENCLAW_SESSION_KEY || `agent:${openclawAgent}:main`;
-  const taskId = parseInt(process.env.TIANGONG_TASK_ID || "0", 10);
 
   const prompt = await readStdin();
   if (!prompt || prompt.trim().length === 0) {
@@ -49,17 +60,13 @@ async function main() {
       process.exit(2);
     }
 
-    // 2. 用量上报（不管结果怎么样都报）
-    if (process.env.TIANGONG_REPORT_USAGE === "true") {
-      await reportUsage(prompt, result, true);
-    }
+    // 2. 用量上报（内部有 MCP_KEY 空值守卫，与旧行为一致）
+    await reportUsage(prompt, result, true);
 
     // 3. 输出实际结果给天宫
     console.log(result);
   } catch (err) {
-    if (process.env.TIANGONG_REPORT_USAGE === "true") {
-      await reportUsage(prompt, err.message, false);
-    }
+    await reportUsage(prompt, err.message, false);
     process.stderr.write(`[${displayName}/tg#${tiangongAgentId}/${openclawAgent}] 执行失败: ${err.message}\n`);
     process.exit(1);
   }
@@ -79,41 +86,100 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'"'"'`)}'`;
 }
 
+/** 调一个 gateway 方法，返回 stdout 原文（失败返回空串，不抛错） */
+function gatewayCall(method, params, timeoutMs) {
+  const cmd = `openclaw gateway call --token ${shellQuote(GATEWAY_TOKEN)} --params ${shellQuote(JSON.stringify(params))} --timeout ${Math.floor(timeoutMs)} ${method} 2>/dev/null`;
+  try {
+    return execSync(cmd, { timeout: Math.floor(timeoutMs) + 5000, encoding: "utf-8" }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/** 从命令输出尾部提取最后一个 JSON 对象（gateway call 输出前有 "Gateway call: ..." 行） */
+function extractJson(text) {
+  if (!text) return null;
+  const match = text.match(/\{[\s\S]*\}\s*$/);
+  if (!match) return null;
+  try { return JSON.parse(match[0]); } catch { return null; }
+}
+
+/** 从 chat.history 结果里提取 sinceMs 之后最后一条 assistant 纯文本回复 */
+function extractFinalText(historyPayload, sinceMs) {
+  const msgs = Array.isArray(historyPayload?.messages) ? historyPayload.messages : [];
+  let finalText = "";
+  for (const m of msgs) {
+    if (!m || m.role !== "assistant") continue;
+    const ts = Number(m.timestamp ?? 0);
+    if (sinceMs && ts && ts <= sinceMs) continue; // 只要 send 之后的新消息
+    const blocks = Array.isArray(m.content) ? m.content : [];
+    const textParts = blocks
+      .filter((b) => b && b.type === "text" && typeof (b.text ?? b.content) === "string" && (b.text ?? b.content).trim().length > 0)
+      .map((b) => (b.text ?? b.content).trim());
+    if (textParts.length > 0) finalText = textParts.join("\n"); // 取最后一条含文本的 assistant 消息
+  }
+  return finalText;
+}
+
 /**
- * 通过 OpenClaw sessions_send 投递任务并等待 Agent 完整回复。
- * 不再使用仅投递的 sessions.send（它只返回 "started"）。
+ * 通过 OpenClaw gateway 投递任务并等待 Agent 完整回复。
+ *
+ * v2：send → agent.wait（分段轮询）→ chat.history 收最终文本。
+ * 双保险：wait 未到终态但 history 已出现新 assistant 文本且 session 空闲 → 也算完成。
  */
 async function callGatewayWithReply(sessionKey, prompt) {
-  const params = JSON.stringify({ key: sessionKey, message: prompt });
-  // 调用 sessions.send — Gateway 会在 Agent 回复超时后超时返回
-  // 我们依赖 sessions.send 的 `timeout` 参数来等 reply
-  // 注意：这里用 send 但加了 300s timeout，agent 应该能完成
-  const cmd = `openclaw gateway call --token ${shellQuote(GATEWAY_TOKEN)} --params ${shellQuote(params)} --timeout 300000 sessions.send 2>/dev/null`;
-  const output = execSync(cmd, { timeout: 310000, encoding: "utf-8" });
+  const sendAt = Date.now();
 
-  const trimmed = output.trim();
-  if (!trimmed) return "[无输出]";
+  // 1) 投递，拿 runId
+  const sendOut = gatewayCall("sessions.send", { key: sessionKey, message: prompt }, 30_000);
+  const sendPayload = extractJson(sendOut);
+  const runId = sendPayload?.runId;
 
-  // 尝试从 JSON 响应中提取实际消息
-  const match = trimmed.match(/\{[\s\S]*\}\s*$/);
-  if (match) {
-    try {
-      const payload = JSON.parse(match[0]);
-      if (isOnlyStarted(payload)) {
-        return "started";
-      }
-      // 如果有 message/text/content 字段，用 Agent 的回复内容
-      const replyText = payload.message || payload.text || payload.content || "";
-      if (replyText && replyText.length > 0) {
-        return replyText.trim();
-      }
-    } catch {
-      // 不是 JSON，就当普通文本处理
+  if (!runId) {
+    // 拿不到 runId（旧版 gateway 或异常）：维持旧解析行为
+    const legacyText = sendPayload && (sendPayload.message || sendPayload.text || sendPayload.content);
+    if (legacyText && String(legacyText).trim() && !isOnlyStarted(sendPayload)) {
+      return String(legacyText).trim();
+    }
+    return sendOut || "[无输出]";
+  }
+
+  // 2) agent.wait 分段轮询至终态或总期限
+  const deadline = sendAt + WAIT_TOTAL_MS;
+  let finalState = null;
+  while (Date.now() < deadline) {
+    const slice = Math.min(WAIT_SLICE_MS, deadline - Date.now());
+    const waitPayload = extractJson(gatewayCall("agent.wait", { runId, timeoutMs: Math.floor(slice) }, slice + 5_000));
+    const st = waitPayload?.status;
+    if (st && !["started", "running", "queued", "timeout"].includes(st)) {
+      finalState = waitPayload; // 成功终态（字面值宽松判定）
+      break;
+    }
+    // 双保险：wait 仍在等，但 history 已有新 assistant 文本且 session 已空闲
+    const histMid = extractJson(gatewayCall("chat.history", { sessionKey, limit: 50 }, 30_000));
+    const earlyText = extractFinalText(histMid, sendAt);
+    if (earlyText && histMid?.sessionInfo && histMid.sessionInfo.hasActiveRun === false) {
+      finalState = { status: "done-by-history", earlyExit: true };
+      break;
     }
   }
 
-  // 如果没有提取到内容，返回原始输出
-  return trimmed;
+  // 3) 收账：chat.history 提取最终 assistant 文本
+  const hist = extractJson(gatewayCall("chat.history", { sessionKey, limit: 50 }, 30_000));
+  const finalText = extractFinalText(hist, sendAt);
+
+  if (finalText) {
+    process.stderr.write(`[runner] ✅ 已收到最终回复 (${finalText.length} chars, state=${finalState?.status ?? "history-only"})\n`);
+    return finalText;
+  }
+  if (finalState) {
+    process.stderr.write(`[runner] ⚠️ run 已终态(${finalState.status})但会话内无文本回复\n`);
+    return `[任务已到终态(${finalState.status})，但会话内无文本回复。runId=${runId}]`;
+  }
+
+  // 总期限耗尽：返回 started → 外层 isOnlyStarted → exit(2) → awaiting_result（旧行为兜底）
+  process.stderr.write(`[runner] wait 期限(${WAIT_TOTAL_MS}ms)耗尽，runId=${runId} 未见终态\n`);
+  return "started";
 }
 
 function isOnlyStarted(value) {

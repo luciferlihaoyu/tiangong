@@ -243,7 +243,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       input: z.string().optional().describe("输入数据 (JSON 字符串)"),
       requestedAgentId: z.string().min(1).max(100).optional().describe("期望执行 Agent 的 agentId（如 \"dsh\"）。指定后此任务只允许该 agent 认领，防止被其他空闲 agent 抢走。不指定 = 通用任务，任意 agent 可认领。"),
       maxRetries: z.number().min(0).max(10).optional().default(3).describe("最大重试次数"),
-      timeoutMs: z.number().min(1000).max(3600000).optional().default(300000).describe("超时毫秒"),
+      timeoutMs: z.number().min(1000).max(3600000).optional().default(1800000).describe("超时毫秒（上限 3600000=60 分钟）。按任务类型参考：连通性/问答 300000(5min)；文本写作/翻译/分析 900000(15min)；代码/数据处理/图像生成(≤5张) 1800000(30min)；图像批量+自检/复杂多步骤 3600000(60min)。openclaw 侧执行链路全局窗口 57 分钟，超过 60 分钟的任务需先与碧霄确认异步方案。默认 1800000(30min)。"),
     },
     async (params) => {
       const db = getDb();
@@ -258,7 +258,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         priority: params.priority ?? 0,
         input: routedInput,
         maxRetries: params.maxRetries ?? 3,
-        timeoutMs: params.timeoutMs ?? 300000,
+        timeoutMs: params.timeoutMs ?? 1800000,
       });
 
       const created = await db

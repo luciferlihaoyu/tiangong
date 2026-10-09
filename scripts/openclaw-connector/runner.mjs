@@ -32,8 +32,11 @@ const GATEWAY_TOKEN = process.env.TIANGONG_OPENCLAW_GATEWAY_TOKEN || process.env
 const TIANGONG_HTTP_BASE = process.env.TIANGONG_HTTP_BASE || "https://tiangg.zeabur.app";
 const MCP_KEY = process.env.TIANGONG_MCP_KEY || "";
 
-// 等待总期限：默认 280s，略小于 connector 侧 300s 执行超时，留出收尾余量
-const WAIT_TOTAL_MS = Math.max(60_000, Number(process.env.TIANGONG_WAIT_TOTAL_MS || "280000"));
+// 等待总期限：默认 3420s（57 分钟），略小于 connector 侧 60 分钟执行超时与
+// 任务默认 timeoutMs（30 分钟起，按任务类型见 create_task 说明），留出收尾余量。
+// v2.1（2026-10-09）：默认从 280s 放宽到 57min——写作/图像生成类任务真实执行
+// 远超 5 分钟，旧默认值会把正常长任务打成 awaiting_result。
+const WAIT_TOTAL_MS = Math.max(60_000, Number(process.env.TIANGONG_WAIT_TOTAL_MS || "3420000"));
 const WAIT_SLICE_MS = Math.min(25_000, WAIT_TOTAL_MS);
 
 async function main() {

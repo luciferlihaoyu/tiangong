@@ -17,12 +17,20 @@
  *   防止 MCP 工具面与 tRPC 面漂移
  * - 知识面：read_alist（路径约束在配置 basePath 内防穿越）/ search_xuanji ——
  *   与只读 ops 工具同权限级别（任何有效 Key 可用）
+ *
+ * 接入面扩展（任务 B1 —— 通用接入体系）：
+ * - register_agent：管理级 Key 注册新外部 Agent，一次调用交付「mcpToken + 一行 connector
+ *   启动命令 + 自检/闭环验证指引」。注册即写 agents 表并令其 source 进入 TaskRunner
+ *   外部认领白名单（B2 动态派生），杜绝"注册了但 Runner 抢单"的缝隙。
+ *   权限：admin 权限 + Key 未绑定 Agent（agent 绑定的 Key 不得自行拉新成员入场）。
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { randomBytes } from "node:crypto";
 import { getDb } from "../queries/connection";
+import { getInsertId } from "../lib/insert-id";
 import {
   agents,
   tasks,
@@ -36,6 +44,8 @@ import {
   auditEvents,
   taskMessages,
   taskArtifacts,
+  mcpApiKeys,
+  type InsertAgent,
   type InsertHighCostModelAuth,
   type InsertModelAllowlist,
 } from "@db/schema";
@@ -214,6 +224,126 @@ async function triggerDownstream(completedTaskId: number) {
       }
     }
   }
+}
+
+// ─── Agent 接入体系（任务 B1：register_agent） ───
+
+/** 内部保留的 agents.source 取值。
+ * 这三类代表「天宫自身/内部自建」的 agent，不算外部接入系统：
+ *   - register_agent 一律拒绝（B1）；
+ *   - TaskRunner 派生外部认领白名单时同样排除（B2，见 api/lib/task-runner.ts）。
+ * 两处各留一份常量（跨模块共享反而绕），改这里必须同步改那边。
+ */
+const RESERVED_AGENT_SOURCES = ["custom", "system", "internal"] as const;
+
+/** 接入包里的固定文案：connector 位置 + 自检命令 */
+const UNIVERSAL_CONNECTOR_PATH = "scripts/universal-connector/connector.mjs";
+
+/** connector 所在的公开仓库（任务 A 产物落这里） */
+const TIANGONG_REPO_URL = "https://github.com/luciferlihaoyu/tiangong.git";
+
+/**
+ * 接入包里对外自称的天宫 base URL。私有部署/本地联调用 TIANGONG_PUBLIC_BASE_URL 覆盖，
+ * 否则对端照着 https://tiangong.xianrealme.com 抄命令会打到生产上去。
+ */
+const TIANGONG_SELF_BASE_URL = (
+  process.env.TIANGONG_PUBLIC_BASE_URL || "https://tiangong.xianrealme.com"
+).replace(/\/+$/, "");
+
+type RegisterAgentMode = "http" | "cli" | "callback" | "mcp";
+
+/**
+ * 按 mode 生成「一行启动命令」。
+ * 约定（任务 A）：connector 零依赖、Node≥18，配置优先级 flag > env > 默认；
+ * 凭据一律走 env（TIANGONG_MCP_KEY / TIANGONG_AGENT_ID），避免落进 shell 历史里的
+ * 命令行参数被 ps 看到 —— 这里用 `VAR=x node ...` 前缀形式，同样一眼可复制。
+ */
+function buildStartCommand(p: {
+  mode: RegisterAgentMode;
+  baseUrl: string;
+  mcpToken: string;
+  agentDbId: number;
+  endpoint?: string;
+}): string {
+  const envPrefix = `TIANGONG_BASE_URL=${p.baseUrl} TIANGONG_MCP_KEY=${p.mcpToken} TIANGONG_AGENT_ID=${p.agentDbId}`;
+  switch (p.mode) {
+    case "http":
+      return `${envPrefix} node ${UNIVERSAL_CONNECTOR_PATH} --mode http --endpoint ${p.endpoint || "<你的HTTP端点，如 http://10.0.0.5:8000/tiangong/run>"}`;
+    case "cli":
+      return `${envPrefix} node ${UNIVERSAL_CONNECTOR_PATH} --mode cli --cmd '<你的命令，prompt 走 stdin，stdout=结果>'`;
+    case "callback":
+      return `${envPrefix} node ${UNIVERSAL_CONNECTOR_PATH} --mode callback`;
+    case "mcp":
+      return "";
+  }
+}
+
+/**
+ * 组装 register_agent 的接入包文本：凭据 + 启动命令 + 自检 + 闭环验证指引。
+ * 目标是「一次调用交付齐」——接入方不用再翻文档，把这一段转给对方就能跑起来。
+ */
+function buildAgentOnboardingPackage(p: {
+  agentDbId: number;
+  agentId: string;
+  name: string;
+  source: string;
+  mode: RegisterAgentMode;
+  endpoint?: string;
+  description?: string;
+  mcpToken: string;
+  baseUrl: string;
+  repoUrl: string;
+}): string {
+  const lines: string[] = [];
+  const idLabel = p.agentDbId > 0 ? String(p.agentDbId) : "(见返回 JSON)";
+  lines.push("════════ 天宫接入包 · " + p.agentId + " ════════");
+  lines.push(`agentId(字符串)：${p.agentId}`);
+  lines.push(`Agent ID(数字，connector 的 TIANGONG_AGENT_ID / MCP claim_task 用)：${idLabel}`);
+  lines.push(`名称：${p.name}    source：${p.source}    mode：${p.mode}`);
+  if (p.description) lines.push(`说明：${p.description}`);
+  lines.push("");
+  lines.push("【凭据 · 仅此一次，请立即妥善保存】");
+  lines.push(`mcpToken = ${p.mcpToken}`);
+  lines.push("用法：HTTP 头 `x-mcp-key: " + p.mcpToken + "`（tRPC /api/trpc/* 与 POST /mcp 都认这一把）。");
+  lines.push("遗失不补：该 Token 不返显第二次，只能由管理级 Key 重新 register_agent 或由管理员改库。");
+  lines.push("");
+
+  if (p.mode === "mcp") {
+    lines.push("【接入方式 · mcp 直连（不跑 universal-connector）】");
+    lines.push(`  你的系统自身实现 MCP server 侧调用：POST ${p.baseUrl}/mcp`);
+    lines.push(`  头：x-mcp-key: ${p.mcpToken}   （Content-Type: application/json）`);
+    lines.push("  标准 MCP 流程：initialize → tools/list → tools/call。核心闭环三件套：");
+    lines.push(`    claim_task      { "agentId": ${idLabel} }                       // 认领下一个可执行任务`);
+    lines.push("    report_progress { \"id\": <taskId>, \"progress\": 100, \"status\": \"done\", \"output\": \"...\" } // 回写结果");
+    lines.push(`    heartbeat       { "agentId": ${idLabel}, "status": "online" }   // 每 60s 一次`);
+  } else {
+    lines.push(`【启动命令 · 一行接入（在能访问 ${p.baseUrl} 的目标机器上执行）】`);
+    lines.push(`  ${buildStartCommand(p)}`);
+    lines.push("");
+    lines.push("  取 connector（零依赖，单文件，Node≥18）：");
+    lines.push(`    git clone ${p.repoUrl} tiangong && cd tiangong   # 文件路径：${UNIVERSAL_CONNECTOR_PATH}`);
+    lines.push(`    # 只要这一个文件：curl -fsSL https://raw.githubusercontent.com/luciferlihaoyu/tiangong/main/${UNIVERSAL_CONNECTOR_PATH} -o connector.mjs`);
+  }
+  lines.push("");
+  lines.push("【自检（先本地跑，不联网）】");
+  lines.push("  node connector.mjs --selftest    # 打印解析到的配置与 mode 后退出；缺 Key/AgentID 会明确报错");
+  lines.push(`  curl -s ${p.baseUrl}/mcp/health  # 对端网络可达性（应返回 ok）`);
+  lines.push("");
+  lines.push("【闭环验证】");
+  lines.push(`  1) 管理级 Key 发一枚测试任务并指名给它：create_task { "name": "接入自检", "requestedAgentId": "${p.agentId}" }`);
+  lines.push("  2) 观察认领：connector 日志出现认领行；天宫侧 agent 状态转 busy");
+  lines.push("  3) 查结果：list_tasks / 前端任务详情看 output 与 status=done");
+  lines.push("");
+  lines.push("【白名单】");
+  lines.push(`  source "${p.source}" 已自动进入 TaskRunner 外部认领白名单（B2 动态派生，注册即生效），`);
+  lines.push("  无需再配 TIANGONG_EXTERNAL_CLAIM_SOURCES —— 天宫内置 Runner 不会抢走它的任务。");
+  lines.push("");
+  lines.push("【注意】");
+  lines.push(`  · Token 即时生效：已写入 mcp_api_keys（按请求查库，tRPC /api/trpc/* 与 POST /mcp 双面同认），`);
+  lines.push("    无需重启天宫服务。归属已绑定本 Agent（最小权限：认领/回写/心跳，无管理写权限）。");
+  lines.push("  · 天宫 base URL 若与上面不同（私有部署），把命令里的 TIANGONG_BASE_URL 换成实际地址即可。");
+  lines.push("════════════════════════════════════════════");
+  return lines.join("\n");
 }
 
 // ─── Server factory (new instance per session for stateless MCP HTTP) ───
@@ -1562,6 +1692,146 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         if (error instanceof XuanjiConnectorError) return errorResult(error.message);
         throw error;
       }
+    }
+  );
+
+  // Tool 28: 注册外部 Agent（任务 B1 —— 通用接入体系入口）
+  server.tool(
+    "register_agent",
+    "[天宫] 注册一个新外部 Agent 并返回接入包（mcpToken + 按 mode 的一行启动命令 + 自检指引）。仅管理级 Key 可调用（需 admin 权限且未绑定 Agent）；注册后该 source 自动进入 TaskRunner 外部认领白名单，内置 Runner 不再抢它的任务",
+    {
+      agentId: z.string().min(2).max(64).describe("Agent 唯一标识（字符串，如 \"my-system-bot\"）；已被占用则拒绝"),
+      name: z.string().min(1).max(50).describe("Agent 显示名（≤50 字）"),
+      source: z.string().min(2).max(50).describe("接入系统标识（如 \"my-ci\"、\"dsh-runner\"）。不得为内部保留值 custom/system/internal，否则 TaskRunner 认不出它是外部认领型"),
+      mode: z.enum(["http", "cli", "callback", "mcp"]).describe("执行模式：http=把任务 POST 给对端 HTTP 服务；cli=对端 spawn shell 命令；callback=对端认领后自行异步回写；mcp=对端直接以 MCP 客户端接入（不跑 connector）"),
+      endpoint: z.string().max(500).optional().describe("对端地址（http 模式应给：收到任务 JSON 的 URL；其他模式可选，仅登记备查）"),
+      description: z.string().max(2000).optional().describe("Agent 说明（写入 agents.description）"),
+    },
+    async (params) => {
+      // 权限（B1）：注册 Agent 等于签发一把新 Key，是平台入口级写操作。
+      // 管理级 = permissions 含 admin/*，且 Key 未绑定任何 Agent（ctx.agentId === null，
+      // 与 claim_task/report_progress 里"env/admin Key"同一判定）。agent 绑定的 Key
+      // 即便被误授 admin 也不得自行拉新成员入场，防横向扩权。
+      const denied = requireAdmin();
+      if (denied) return denied;
+      if (ctx.agentId !== null) {
+        return failResult(
+          `此 MCP Key 绑定了 Agent（agentId=${ctx.agentId}），不能注册新 Agent。请改用管理级 Key（mcp_api_keys.agent_id 为空 + permissions 含 "admin"）。`
+        );
+      }
+
+      const agentId = params.agentId.trim();
+      const source = params.source.trim();
+      if (!agentId || !source) return failResult("agentId / source 不能为空（去空格后为空串）");
+
+      if ((RESERVED_AGENT_SOURCES as readonly string[]).includes(source.toLowerCase())) {
+        return failResult(
+          `source="${source}" 是内部保留值（${RESERVED_AGENT_SOURCES.join(" / ")}），不能用作外部接入标识；请换成系统名，例如 "${agentId}"。`
+        );
+      }
+
+      const db = getDb();
+      const existed = await db
+        .select({ id: agents.id, name: agents.name, source: agents.source })
+        .from(agents)
+        .where(eq(agents.agentId, agentId))
+        .then((r) => r[0]);
+      if (existed) {
+        return failResult(
+          `agentId "${agentId}" 已被占用（id=${existed.id}, name="${existed.name}", source=${existed.source ?? "null"}）。请换一个标识；确需接管旧 Agent，请管理员先处置既有记录。`
+        );
+      }
+
+      // tgk_ + 32 位 hex（16 字节随机）。mcp_api_keys.key 列 length 64，余量充足。
+      const mcpToken = `tgk_${randomBytes(16).toString("hex")}`;
+
+      const values = {
+        agentId,
+        name: params.name,
+        // system 列 notNull、length 30，历史上是"所属系统"。接入体系里用它登记执行模式
+        // （http/cli/callback/mcp 四值，最长 8 字），查询侧一眼可辨，无需新加列。
+        system: params.mode,
+        status: "idle",
+        source,
+        description: params.description ?? null,
+        sourceEndpoint: params.endpoint ?? null,
+        // 不写 agents.mcpToken：该列在服务启动时载入 _globalApiKeys 内存白名单，
+        // 命中后 boundAgentId=null → tRPC 侧视为管理级（apiKeyAgentId=-1），会把
+        // agent 绑定 key 重启后升格成管理 key（权限放大）。本工具签发的 key 只走
+        // mcp_api_keys（按请求查库、即时生效、归属精确绑定）。
+        mcpToken: null,
+      } satisfies InsertAgent;
+
+      const inserted = await db.insert(agents).values(values);
+      // 自增主键统一走 lib/insert-id：node:sqlite 返回 lastInsertRowid，
+      // 直接读 (result as any).insertId 会静默拿到 undefined（2026-09-13 事故根因）
+      const agentDbId = getInsertId(inserted);
+
+      const created = await db
+        .select({ id: agents.id, status: agents.status })
+        .from(agents)
+        .where(eq(agents.agentId, agentId))
+        .then((r) => r[0]);
+      const finalId = created?.id ?? agentDbId;
+
+      // 即时生效：写入 mcp_api_keys（verifyMcpKey 按请求查库，tRPC 与 MCP 双面同认）。
+      // permissions=null → 空权限集：只有认领/回写/心跳等执行工具，无管理写权限（最小权限）。
+      await db.insert(mcpApiKeys).values({
+        key: mcpToken,
+        agentId: finalId,
+        name: `register_agent:${agentId}`,
+        permissions: null,
+        rateLimit: 10,
+        active: "true",
+      });
+
+      const onboarding = buildAgentOnboardingPackage({
+        agentDbId: finalId,
+        agentId,
+        name: params.name,
+        source,
+        mode: params.mode,
+        endpoint: params.endpoint,
+        description: params.description,
+        mcpToken,
+        baseUrl: TIANGONG_SELF_BASE_URL,
+        repoUrl: TIANGONG_REPO_URL,
+      });
+
+      const warnings: string[] = [];
+      if (params.mode === "http" && !params.endpoint) {
+        warnings.push("mode=http 未提供 endpoint：启动命令里的端点是占位符，实跑前必须替换（connector 会因缺 endpoint 拒启动）。");
+      }
+      // Token 写入 mcp_api_keys（按请求查库）——即时生效，无需重启天宫服务。
+
+      return {
+        content: [
+          // 第一段：接入包纯文本（原样转给接入系统即可开工）
+          { type: "text" as const, text: onboarding },
+          // 第二段：结构化结果（供调用方程序取用）
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                agent: {
+                  id: finalId,
+                  agentId,
+                  name: params.name,
+                  source,
+                  mode: params.mode,
+                  endpoint: params.endpoint ?? null,
+                  status: created?.status ?? "idle",
+                },
+                mcpToken,
+                warnings,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
     }
   );
 

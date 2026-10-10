@@ -20,7 +20,13 @@
  *   TIANGONG_AUTO_DISPATCH_BATCH         默认 10：每轮最多自动派发的任务数
  *   TIANGONG_EXTERNAL_CLAIM_SOURCES      默认 "dsh-runner"：外部认领型 agent 来源（逗号分隔），
  *                                        这些 agent 的任务 Runner 不执行，留给外部执行体经
- *                                        agent.claimTask / agent.updateHeartbeat（MCP Key 鉴权）认领
+ *                                        agent.claimTask / agent.updateHeartbeat（MCP Key 鉴权）认领。
+ *                                        ⚠️ B2 起本 env 只是**兜底基线**：每轮 tick 还会并入本轮
+ *                                        agentRows 出现的 distinct source（排除 custom/system/internal），
+ *                                        即「注册即入白名单」，不再要求人工同步本 env —— 历史教训是
+ *                                        新系统注册后没人记得改 env，Runner 把外部任务抢去自己跑掉
+ *                                        （#101-#103 假完成案同一类缝隙）。派生规则见
+ *                                        deriveExternalClaimSources()。
  *
  * P7 Gateway 模式（远程 OpenClaw Gateway HTTP，不要求生产容器安装 openclaw CLI）：
  *   TIANGONG_OPENCLAW_GATEWAY_URL          OpenClaw Gateway URL，如 https://gw.example.com
@@ -118,7 +124,10 @@ const CONFIG = {
   // 中枢化：自动派发新建的 pending 任务（经审批闸门过滤）→ queued
   autoDispatch: envBool("TIANGONG_AUTO_DISPATCH", true),
   autoDispatchBatch: envInt("TIANGONG_AUTO_DISPATCH_BATCH", 10, 1, 50),
-  // 外部认领型 agent 来源：这些 agent 的任务 Runner 不抢，留给外部执行体（如 dsh）经 claimTask/heartbeat 认领
+  // 外部认领型 agent 来源：这些 agent 的任务 Runner 不抢，留给外部执行体（如 dsh）经 claimTask/heartbeat 认领。
+  // B2：这里只是 env 兜底基线；每轮 tick 的实际生效集 = 本集合 ∪ 本轮 agentRows 的 distinct source
+  //     （见 deriveExternalClaimSources）。保留 env 的意义：空库/首启时有默认值、以及需要临时
+  //     显式点名某个来源时还能用（env 只能加，不能减——DB 派生优先）。
   externalClaimSources: new Set(
     envStr("TIANGONG_EXTERNAL_CLAIM_SOURCES", "dsh-runner")
       .split(",")
@@ -128,6 +137,46 @@ const CONFIG = {
 };
 
 // ─── Helpers ───
+
+/**
+ * 内部保留的 agents.source 取值：这三类是天宫自身/内部自建的 agent，不属于"外部执行体"，
+ * 因此绝不能进入外部认领白名单（否则内置 Runner 会把自家内部 agent 的任务也当成外部任务让出去）。
+ * 与 api/mcp/server.ts 的 RESERVED_AGENT_SOURCES（register_agent 拒收这三值）成对维护，改一处必改另一处。
+ */
+const RESERVED_AGENT_SOURCES = ["custom", "system", "internal"] as const;
+
+/**
+ * B2：外部认领白名单派生（单一规则，导出以便脱离 DB 直接验证）。
+ *
+ * 规则：生效集合 = env(TIANGONG_EXTERNAL_CLAIM_SOURCES) ∪ 本轮 agentRows 出现的 distinct source，
+ *      DB 侧排除 null / 空串 / 内部保留值（custom、system、internal）。
+ *
+ * 动机：原先白名单只认 env，新系统注册后没人记得同步改 env + 重启，TaskRunner 就把它该外部
+ * 认领的任务抢走，用自己那套执行体跑完并回写 done —— 对端根本没执行，产出是假的
+ * （#101-#103 假完成案同属一类缝隙）。改成"注册即入白名单"后，这条人工遗漏路径被结构性堵掉。
+ *
+ * 零额外查询：调用点在 tick 内、本轮 agentRows 已查出之后，派生只是对已有行做一次遍历。
+ */
+export function deriveExternalClaimSources(
+  envSources: Iterable<string>,
+  agentRows: readonly { readonly source: string | null }[],
+  reservedSources: readonly string[] = RESERVED_AGENT_SOURCES
+): Set<string> {
+  const out = new Set<string>();
+  // env 基线原样收下（保留原大小写；生效判断按精确串匹配，与旧行为一致）
+  for (const raw of envSources) {
+    const v = String(raw).trim();
+    if (v) out.add(v);
+  }
+  const reserved = new Set(reservedSources.map((v) => String(v).toLowerCase()));
+  for (const row of agentRows) {
+    const v = (row.source ?? "").trim();
+    if (!v) continue;
+    if (reserved.has(v.toLowerCase())) continue;
+    out.add(v);
+  }
+  return out;
+}
 
 function hasValidArgvCommand(): boolean {
   return CONFIG.execFile.length > 0 && CONFIG.execArgs !== null && CONFIG.execArgsValid;

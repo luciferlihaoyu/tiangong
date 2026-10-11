@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { trpc } from "@/providers/trpc";
+import { summarizeTodayTasks, type TodayTaskLike } from "@/lib/todayTasks";
 import { useDataSource, type MockAgent, type MockOrg } from "@/hooks/useDataSource";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useAuth } from "@/hooks/useAuth";
@@ -445,24 +446,15 @@ function StatsRow({ agents, tasks, totalMsgs, orgs, todayCostCents }: {
   agents: MockAgent[]; tasks: { status: string }[]; totalMsgs: number; orgs: number; todayCostCents?: number;
 }) {
   const onlineCount = agents.filter(a => a.status === 'online' || a.status === 'busy').length;
-  const doneCount = tasks.filter(t => t.status === 'done').length;
-  const failedCount = tasks.filter(t => t.status === 'failed').length;
-  const todayTasks = tasks.filter(t => {
-    const updated = "updatedAt" in t && typeof t.updatedAt === "string"
-      ? t.updatedAt
-      : "createdAt" in t && typeof t.createdAt === "string"
-        ? t.createdAt
-        : null;
-    if (!updated) return false;
-    const d = new Date(updated);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
+  // 今日任务口径（碧霄 2026-02 定）：主数值只数今日活跃（pending/queued/running），
+  // 完成/失败进副标题；今天没任务就显示 0，禁止用全量任务数兜底。
+  const { active: todayActive, done: todayDone, failed: todayFailed } =
+    summarizeTodayTasks(tasks as TodayTaskLike[]);
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
       {[
         { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
-        { label: '今日任务', value: String(todayTasks || tasks.length), sub: `完成 ${doneCount}` },
+        { label: '今日任务', value: String(todayActive), sub: `完成 ${todayDone} / 失败 ${todayFailed}` },
         { label: '今日成本', value: todayCostCents !== undefined ? `¥${(todayCostCents / 100).toFixed(2)}` : '—', sub: '元' },
         { label: '消息总量', value: totalMsgs >= 1000 ? `${(totalMsgs / 1000).toFixed(1)}K` : String(totalMsgs), sub: '实时同步' },
         { label: '组织', value: String(orgs), sub: '个公司' },

@@ -747,8 +747,8 @@ export default function OpsPanel() {
             />
             <StatCard
               label="今日任务"
-              value={String(overview.tasks.done + overview.tasks.running + overview.tasks.pending)}
-              sub={`${overview.tasks.done} 完成 / ${overview.tasks.failed} 失败`}
+              value={String(overview.tasks.pending + overview.tasks.queued + overview.tasks.running)}
+              sub={`${overview.tasks.done} 今日完成 / ${overview.tasks.failed} 今日失败`}
               color="var(--accent-cyan)"
               icon={<Activity size={16} />}
             />

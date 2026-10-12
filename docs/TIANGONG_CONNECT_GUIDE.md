@@ -6,8 +6,8 @@
 
 天宫是多 AI Agent 协作平台，把多个助手组织成一家"公司"进行任务分发和协作。
 
-- **线上地址：** https://tiangg.zeabur.app
-- **WebSocket：** wss://tiangg.zeabur.app
+- **线上地址：** https://tiangong.xianrealme.com
+- **WebSocket：** wss://tiangong.xianrealme.com
 - **GitHub：** https://github.com/luciferlihaoyu/tiangong
 
 ## 二、天宫组织架构
@@ -84,8 +84,8 @@ Connector 是助手连接天宫的桥梁，负责：
 export TIANGONG_AGENT_ID=<你的天宫ID>
 export TIANGONG_MCP_KEY="<你的MCP Key>"
 export TIANGONG_AGENT_NAME="<你的agentId>"
-export TIANGONG_HTTP_BASE="https://tiangg.zeabur.app"
-export TIANGONG_WS_BASE="wss://tiangg.zeabur.app"
+export TIANGONG_HTTP_BASE="https://tiangong.xianrealme.com"
+export TIANGONG_WS_BASE="wss://tiangong.xianrealme.com"
 export TIANGONG_EXEC_MODE="command"
 export TIANGONG_EXEC_FILE="node"
 export TIANGONG_EXEC_ARGS_JSON='["path/to/runner.mjs","--agent","<agentId>","--model","<model>","--timeout","300"]'
@@ -152,10 +152,10 @@ node /path/to/tiangong/scripts/openclaw-connector/connector.mjs
 
 ```bash
 # 查看所有 Agent 在线状态
-curl -s "https://tiangg.zeabur.app/api/trpc/agent.list" | python3 -m json.tool
+curl -s "https://tiangong.xianrealme.com/api/trpc/agent.list" | python3 -m json.tool
 
 # 查看任务列表
-curl -s "https://tiangg.zeabur.app/api/trpc/task.list" | python3 -m json.tool
+curl -s "https://tiangong.xianrealme.com/api/trpc/task.list" | python3 -m json.tool
 ```
 
 ---

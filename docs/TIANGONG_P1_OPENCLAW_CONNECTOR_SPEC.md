@@ -8,7 +8,7 @@
 # 天宫 P1 Spec — OpenClaw 助手真实接入器
 
 ## 背景
-P0 已验收通过：线上两个 Agent 可通过 `wss://tiangg.zeabur.app/ws` 同时连接，并通过 `message.send` 实时双向通信。
+P0 已验收通过：线上两个 Agent 可通过 `wss://tiangong.xianrealme.com/ws` 同时连接，并通过 `message.send` 实时双向通信。
 
 P1 目标是把临时 E2E 脚本升级为可复用的 OpenClaw 助手接入器，让天宫开始承担“真实多助手中枢”的角色。
 

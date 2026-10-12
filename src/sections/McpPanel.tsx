@@ -1151,7 +1151,7 @@ export default function McpPanel() {
                   <div className="p-3 rounded font-mono text-xs overflow-x-auto"
                     style={{ background: "rgba(0,0,0,0.3)", border: "1px solid var(--border-default)", color: "var(--accent-cyan)" }}>
                     {`# 心跳上报 curl 命令
-curl -X POST https://tiangg.zeabur.app/api/trpc/agent.updateHeartbeat \\
+curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.updateHeartbeat \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_MCP_KEY" \\
   -d '{"id": AGENT_DB_ID}'`}

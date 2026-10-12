@@ -7,8 +7,8 @@ set -e
 CONNECTOR_DIR="/home/node/.openclaw/workspace-meizhizi/tiangong/scripts/openclaw-connector"
 CONFIG="$CONNECTOR_DIR/agents.json"
 LOG_DIR="/home/node/.openclaw/workspace-meizhizi/logs/tiangong"
-HTTP_BASE="https://tiangg.zeabur.app"
-WS_BASE="wss://tiangg.zeabur.app"
+HTTP_BASE="https://tiangong.xianrealme.com"
+WS_BASE="wss://tiangong.xianrealme.com"
 
 mkdir -p "$LOG_DIR"
 

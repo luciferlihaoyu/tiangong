@@ -80,8 +80,8 @@ node scripts/openclaw-connector/connector.mjs
 ```bash
 node scripts/openclaw-connector/connector.mjs \
   --config agents.json --agent-name meizhizi \
-  --http-base https://tiangg.zeabur.app \
-  --ws-base wss://tiangg.zeabur.app
+  --http-base https://tiangong.xianrealme.com \
+  --ws-base wss://tiangong.xianrealme.com
 ```
 
 ## P2: 执行模式
@@ -203,8 +203,8 @@ node connector.mjs --config agents.json -n my-agent
       "agentId": 1,
       "token": "tg-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "label": "美智子",
-      "httpBase": "https://tiangg.zeabur.app",
-      "wsBase": "wss://tiangg.zeabur.app"
+      "httpBase": "https://tiangong.xianrealme.com",
+      "wsBase": "wss://tiangong.xianrealme.com"
     },
     {
       "name": "codemaster",

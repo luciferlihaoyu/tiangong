@@ -54,8 +54,8 @@ exec node scripts/openclaw-connector/connector.mjs \
   --agent-id "$AGENT_ID" \
   --token "$MCP_KEY" \
   --agent-name "$DISPLAY" \
-  --http-base "https://tiangg.zeabur.app" \
-  --ws-base "wss://tiangg.zeabur.app" \
+  --http-base "https://tiangong.xianrealme.com" \
+  --ws-base "wss://tiangong.xianrealme.com" \
   --exec-mode "command" \
   --exec-file "$RUNNER_PATH" \
   --heartbeat 30000 \

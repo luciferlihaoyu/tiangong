@@ -297,7 +297,7 @@ TIANSHU_API_KEY=sk-xxx
 - **dsh 接入**：`scripts/dsh-poller.mjs` 是零依赖轮询器，在 dsh 所在机器运行即可让 DeepSeek Harness 自动认领并执行天宫任务：
 
 ```bash
-TIANGONG_BASE_URL=https://tiangg.zeabur.app \
+TIANGONG_BASE_URL=https://tiangong.xianrealme.com \
 TIANGONG_MCP_KEY=<dsh助手的MCP Key> \
 TIANGONG_AGENT_ID=17 \
 DSH_CMD='dsh -p "$(cat {file})"' \

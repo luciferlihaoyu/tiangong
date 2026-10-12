@@ -104,7 +104,7 @@ npm run build
 线上必须验证：
 
 1. GitHub `origin/main` 包含 P5 commit。
-2. `https://tiangg.zeabur.app` 正常返回。
+2. `https://tiangong.xianrealme.com` 正常返回。
 3. `/mcp/health` build 不再是硬编码旧值。
 4. 创建/排队一个测试任务后，Runner 可自动把它从 `queued` 推进到 `running` 再到 `done` 或 `failed`。
 5. 任务详情里能看到 output 或 error。

@@ -72,7 +72,7 @@
 - 可以放在现有的 Tab 导航中
 
 ## 技术参考
-- 天宫 API: `https://tiangg.zeabur.app/api/trpc/{router}.{method}`
+- 天宫 API: `https://tiangong.xianrealme.com/api/trpc/{router}.{method}`
 - 所有源码在 `/home/node/.openclaw/workspace-meizhizi/tiangong/` 目录
 - 前端在 `src/` 目录，后端在 `api/` 目录
 - 数据库 schema 在 `db/schema.ts`

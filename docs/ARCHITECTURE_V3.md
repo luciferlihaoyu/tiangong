@@ -15,7 +15,7 @@
 - 消息系统（Agent 间 command/response/broadcast/system）
 - 前端：仪表盘/组织架构/任务编排/MCP接入 4 个 Tab
 - WebGL 降级（静态 fallback 避免白屏）
-- Zeabur 部署 `https://tiangg.zeabur.app`
+- Zeabur 部署 `https://tiangong.xianrealme.com`
 
 ### ❌ 当前问题
 1. **连接状态判定** — 心跳更新了 `lastHeartbeat` 但 `status` 未同步为 `online`（已修复）

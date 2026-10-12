@@ -9,7 +9,7 @@
 
 > **当前基线：** commit `62eeae3`（2026-06-30）
 > **代码量：** API ~14.5K 行 + 前端 ~23.5K 行 + Connector 脚本
-> **线上：** https://tiangg.zeabur.app ✅
+> **线上：** https://tiangong.xianrealme.com ✅
 
 ---
 

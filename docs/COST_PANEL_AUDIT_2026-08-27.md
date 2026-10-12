@@ -4,7 +4,7 @@
 - 范围：`src/pages/UsagePanel.tsx` (871 行) + `src/pages/PricingPanel.tsx` (305 行)
 - 对照：`api/usage-router.ts` (477 行) + `api/pricing-router.ts` (153 行)
 - 路由：`/usage`、`/pricing`（`src/App.tsx` L89-90）
-- 部署：https://tiangg.zeabur.app（已活 prod）
+- 部署：https://tiangong.xianrealme.com（已活 prod）
 
 > 任务 C-cost-panel-audit 的产物：本报告 + 修复 critical/高 项的代码改动。
 > 纪律：只修 critical/高；中/低项只记录不修；不加 `any` / `@ts-expect-error`；不跑全量 vitest。
@@ -34,7 +34,7 @@
 
 ## 1. 部署活检（curl 200）
 
-`https://tiangg.zeabur.app`（2026-08-27 实测）：
+`https://tiangong.xianrealme.com`（2026-08-27 实测）：
 
 | proc | 状态 | 备注 |
 |------|------|------|

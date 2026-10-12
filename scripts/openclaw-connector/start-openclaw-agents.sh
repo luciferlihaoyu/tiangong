@@ -16,8 +16,8 @@ SECRETS="$HOME/.openclaw/secrets/tiangong-openclaw-agents.json"
 RUN_DIR="$HOME/.openclaw/run/tiangong-connectors"
 LOG_DIR="$HOME/.openclaw/logs/tiangong-connectors"
 
-HTTP_BASE="${TIANGONG_HTTP_BASE:-https://tiangg.zeabur.app}"
-WS_BASE="${TIANGONG_WS_BASE:-wss://tiangg.zeabur.app}"
+HTTP_BASE="${TIANGONG_HTTP_BASE:-https://tiangong.xianrealme.com}"
+WS_BASE="${TIANGONG_WS_BASE:-wss://tiangong.xianrealme.com}"
 
 # ─── P9.1 Cost Guard defaults ───
 # 安全默认：不自动认领执行任务，仅维持心跳 + inbox 在线

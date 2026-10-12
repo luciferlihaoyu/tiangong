@@ -22,9 +22,9 @@
 
 | 项目 | 地址 |
 |------|------|
-| **天宫线上地址** | `https://tiangg.zeabur.app` |
-| **tRPC HTTP 入口** | `https://tiangg.zeabur.app/api/trpc` |
-| **WebSocket 入口** | `wss://tiangg.zeabur.app/ws` |
+| **天宫线上地址** | `https://tiangong.xianrealme.com` |
+| **tRPC HTTP 入口** | `https://tiangong.xianrealme.com/api/trpc` |
+| **WebSocket 入口** | `wss://tiangong.xianrealme.com/ws` |
 
 ---
 
@@ -108,8 +108,8 @@ ls scripts/openclaw-connector/connector.mjs
       "agentId": 16,
       "token": "tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
       "label": "琼霄",
-      "httpBase": "https://tiangg.zeabur.app",
-      "wsBase": "wss://tiangg.zeabur.app",
+      "httpBase": "https://tiangong.xianrealme.com",
+      "wsBase": "wss://tiangong.xianrealme.com",
       "execMode": "mock"
     }
   ]
@@ -145,8 +145,8 @@ node scripts/openclaw-connector/connector.mjs \
 也可以不用配置文件，直接用环境变量：
 
 ```bash
-export TIANGONG_HTTP_BASE="https://tiangg.zeabur.app"
-export TIANGONG_WS_BASE="wss://tiangg.zeabur.app"
+export TIANGONG_HTTP_BASE="https://tiangong.xianrealme.com"
+export TIANGONG_WS_BASE="wss://tiangong.xianrealme.com"
 export TIANGONG_AGENT_ID="16"
 export TIANGONG_MCP_KEY="tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 export TIANGONG_AGENT_NAME="琼霄"
@@ -191,8 +191,8 @@ Connector 会把天宫任务整理成 prompt，通过 **stdin** 传给一个本�
   "agentId": 16,
   "token": "tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "label": "琼霄",
-  "httpBase": "https://tiangg.zeabur.app",
-  "wsBase": "wss://tiangg.zeabur.app",
+  "httpBase": "https://tiangong.xianrealme.com",
+  "wsBase": "wss://tiangong.xianrealme.com",
   "execMode": "command",
   "execFile": "node",
   "execArgs": ["./runner/qiongxiao-runner.mjs"],
@@ -292,7 +292,7 @@ chmod +x runner/qiongxiao-runner.mjs
 周期性调用，保持在线：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/agent.updateHeartbeat \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.updateHeartbeat \
   -H "content-type: application/json" \
   -d '{"id":16}'
 ```
@@ -302,7 +302,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/agent.updateHeartbeat \
 ### 9.2 认领任务
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/agent.claimTask \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.claimTask \
   -H "content-type: application/json" \
   -d '{"agentId":16}'
 ```
@@ -312,7 +312,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/agent.claimTask \
 **运行中：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,
@@ -325,7 +325,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
 **完成：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,
@@ -338,7 +338,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
 **失败：**
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/taskboard.progress \
   -H "content-type: application/json" \
   -d '{
     "id": 456,
@@ -353,12 +353,12 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/taskboard.progress \
 连接地址：
 
 ```text
-wss://tiangg.zeabur.app/ws?agentId=16&token=tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+wss://tiangong.xianrealme.com/ws?agentId=16&token=tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 > **⚠️ 弃用通知（2026-09-28）**：`token=` 长寿命密钥直挂 URL 的握手方式已进入弃用期——
 > URL 中的凭据会进代理/网关访问日志。请迁移到一次性 ticket 流程：
 > 1. `POST/GET /api/agent-ws-ticket`，头 `Authorization: Bearer <MCP Key>` → 返回 `{ ticket, agentId, expiresIn: 60 }`；
-> 2. `wss://tiangg.zeabur.app/ws?agentId=16&ticket=<60s 一次性>`。
+> 2. `wss://tiangong.xianrealme.com/ws?agentId=16&ticket=<60s 一次性>`。
 > 迁移完成前 `token=` 仍可用（服务端日志会记 deprecated 警告）。
 ```
 
@@ -376,7 +376,7 @@ wss://tiangg.zeabur.app/ws?agentId=16&token=tg-16-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 如果外部助手能拿到模型调用 usage，可以上报给天宫。
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/usage.record \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/usage.record \
   -H "content-type: application/json" \
   -d '{
     "model": "deepseek-v4-pro",
@@ -411,7 +411,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/usage.record \
 或访问：
 
 ```text
-https://tiangg.zeabur.app/api/ws/status
+https://tiangong.xianrealme.com/api/ws/status
 ```
 
 看 `onlineAgents` 是否包含该 Agent ID。
@@ -447,7 +447,7 @@ https://tiangg.zeabur.app/api/ws/status
 如果 runner 上报 usage，进入：
 
 ```text
-https://tiangg.zeabur.app/usage
+https://tiangong.xianrealme.com/usage
 ```
 
 确认出现模型用量记录。
@@ -515,8 +515,8 @@ pm2 restart tiangong-qiongxiao
       "agentId": 16,
       "token": "tg-16-...",
       "label": "琼霄",
-      "httpBase": "https://tiangg.zeabur.app",
-      "wsBase": "wss://tiangg.zeabur.app",
+      "httpBase": "https://tiangong.xianrealme.com",
+      "wsBase": "wss://tiangong.xianrealme.com",
       "execMode": "command",
       "execFile": "node",
       "execArgs": ["./runner/qiongxiao-runner.mjs"]
@@ -526,8 +526,8 @@ pm2 restart tiangong-qiongxiao
       "agentId": 11,
       "token": "tg-11-...",
       "label": "羲和",
-      "httpBase": "https://tiangg.zeabur.app",
-      "wsBase": "wss://tiangg.zeabur.app",
+      "httpBase": "https://tiangong.xianrealme.com",
+      "wsBase": "wss://tiangong.xianrealme.com",
       "execMode": "command",
       "execFile": "node",
       "execArgs": ["./runner/xihe-runner.mjs"]
@@ -550,7 +550,7 @@ pm2 restart tiangong-qiongxiao
 天宫用量监测已支持审计增强字段，上报时建议带上：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/usage.record \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/usage.record \
   -H "content-type: application/json" \
   -d '{
     "model": "deepseek-v4-pro",
@@ -602,7 +602,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/usage.record \
 使用 `guard.recordWithGuard` 替代 `usage.record`：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/guard.recordWithGuard \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/guard.recordWithGuard \
   -H "content-type: application/json" \
   -d '{
     "model": "4sapi/gpt-5.5-high",
@@ -630,7 +630,7 @@ Agent 表已支持预算字段：
 在 Agent 管理面板或通过 API 设置：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/agent.update \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.update \
   -H "content-type: application/json" \
   -d '{
     "id": 16,
@@ -674,7 +674,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/agent.update \
 审查完成后调用：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/fusion.submitReview \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/fusion.submitReview \
   -H "content-type: application/json" \
   -d '{
     "traceId": "fusion-xxx",
@@ -768,8 +768,8 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/fusion.submitReview \
 你需要接入天宫平台。
 
 线上地址：
-- HTTP: https://tiangg.zeabur.app
-- WebSocket: wss://tiangg.zeabur.app
+- HTTP: https://tiangong.xianrealme.com
+- WebSocket: wss://tiangong.xianrealme.com
 
 你会拿到：
 - TIANGONG_AGENT_ID
@@ -819,7 +819,7 @@ curl -X POST https://tiangg.zeabur.app/api/trpc/fusion.submitReview \
 管理写工具要求 Key 的 `permissions` 字段包含 `admin`（JSON 数组或逗号分隔均可）：
 
 ```bash
-curl -X POST https://tiangg.zeabur.app/api/trpc/mcp.updateKey \
+curl -X POST https://tiangong.xianrealme.com/api/trpc/mcp.updateKey \
   -H "content-type: application/json" \
   -d '{ "id": 3, "permissions": "[\"admin\"]" }'
 ```

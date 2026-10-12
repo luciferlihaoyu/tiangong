@@ -1,7 +1,7 @@
 # 天宫科技 — 公司架构与助手信息
 
 > 备份日期：2026-06-23
-> 来源：天宫线上平台 `https://tiangg.zeabur.app`
+> 来源：天宫线上平台 `https://tiangong.xianrealme.com`
 
 ## 组织架构
 
@@ -95,4 +95,4 @@
 - OpenClaw 运行在 Zeabur `openclaw` 项目
 - 天宫运行在 Zeabur `tiangg` 项目
 - 数据库：tiangg 项目的 MySQL（跨项目内部网络连接）
-- 线上地址：`https://tiangg.zeabur.app`
+- 线上地址：`https://tiangong.xianrealme.com`

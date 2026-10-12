@@ -34,7 +34,7 @@
 ## 接收端验签（璇玑 `api/sso-router.ts`）
 
 1. 读 token header 的 `alg` 与 `kid`；
-2. `alg==="EdDSA"`：按 `TIANGONG_JWKS_URL`（默认 `https://tiangg.zeabur.app/api/sso/jwks.json`）
+2. `alg==="EdDSA"`：按 `TIANGONG_JWKS_URL`（默认 `https://tiangong.xianrealme.com/api/sso/jwks.json`）
    拉取 JWKS（模块级缓存 10 分钟，超时 5s）；`kid` 未命中时强制刷新一次（防轮换窗口误杀），
    用对应公钥 `jose importJWK + jwtVerify`；
 3. `alg==="HS256"`：回退共享密钥 `TIANGONG_SSO_SECRET` 验签（部署顺序错位与回滚的安全网）；

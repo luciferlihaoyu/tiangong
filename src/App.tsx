@@ -10,8 +10,8 @@ import { useAuth } from './hooks/useAuth'
 /* ═══════════════════════════════════════════
    路由级代码分割（碧霄 2026-02 P0 首屏减负）
    - 静态依赖只留：Starfield 背景、Login、NotFound、AppLayout 壳
-   - 首页各 section 与全部管理面板一律 lazy()：
-     此前 App 静态引 28 页，MatrixNodes/FooterTerminal 把
+   - 首页 6 个 section 与全部管理面板（共 24 个组件）一律 lazy()：
+     此前 App 静态引 24 个业务组件，MatrixNodes/FooterTerminal 把
      three.js（1.1MB three-vendor chunk）拖进全站 modulepreload，
      现在仅首页真正挂载时才拉对应 chunk。
    ═══════════════════════════════════════════ */

@@ -6,7 +6,8 @@ import { useWebSocket } from "@/hooks/useWebSocket";
  * 通知中心 Hook（NC-6 UI）
  *
  * 数据源：trpc.agent.notifications.list（游标分页，返回 { items, nextCursor }）
- * 轮询：后端无 WebSocket 通知推送，用 refetchInterval 30s 自动拉新。
+ * 拉新：以 WebSocket 推送（notification_created）为主即时 invalidate；
+ *       refetchInterval 30s 仅作 WS 断开/漏推时的兜底，非唯一实时来源。
  * 已读：markRead / markAllRead，成功后 invalidate list 刷新。
  */
 export const NOTIFICATIONS_LIMIT = 50;

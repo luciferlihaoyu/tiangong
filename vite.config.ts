@@ -39,7 +39,10 @@ export default defineConfig(async ({ mode }) => {
             "react-vendor": ["react", "react-dom", "react-router"],
             "trpc-vendor": ["@trpc/client", "@trpc/react-query", "@trpc/server", "@tanstack/react-query"],
             "ui-vendor": ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tabs", "@radix-ui/react-tooltip", "@radix-ui/react-select"],
-            "three-vendor": ["three", "@react-three/fiber", "@react-three/drei"],
+            // three-vendor 不再手动钉块（碧霄 2026-02 P0 首屏减负）：
+            // 此前 manualChunks 使 rollup 把共享 __vitePreload helper 放进了 three-vendor chunk，
+            // 入口为拿 helper 静态 import 这 1.1MB——每个页面都被迫 modulepreload three。
+            // 去掉后 three 跟随 lazy 的 MatrixNodes/FooterTerminal 自然成块，仅首页按需加载。
           },
         },
       },

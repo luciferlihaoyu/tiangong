@@ -1,33 +1,60 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, Outlet } from 'react-router'
-import AppHub from './sections/AppHub'
 import Starfield from './sections/Starfield'
-import Dashboard from './sections/Dashboard'
-import MatrixNodes from './sections/MatrixNodes'
-import ExecutionCore from './sections/ExecutionCore'
-import FAQ from './sections/FAQ'
-import FooterTerminal from './sections/FooterTerminal'
-import AccountSettings from './sections/AccountSettings'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
-import UsagePanel from './pages/UsagePanel'
-import ModelsPanel from './pages/ModelsPanel'
-import AlistPanel from './pages/AlistPanel'
-import OpsPanel from './pages/OpsPanel'
-import EventStream from './pages/EventStream'
-import GitHubPanel from './pages/GitHubPanel'
-import MailboxPanel from './pages/MailboxPanel'
-import ChatPanel from './pages/ChatPanel'
-import Tasks from './pages/Tasks'
-import TaskDetail from './pages/TaskDetail'
-import NotificationsPanel from './pages/NotificationsPanel'
-import AgentList from './pages/AgentList'
-import AgentDetail from './pages/AgentDetail'
-import SessionPanel from './pages/SessionPanel'
-import ConsolePanel from './pages/ConsolePanel'
-import PluginCenter from './pages/PluginCenter'
 import { AppLayout } from './sections/Navigation'
 import { Toaster } from './components/ui/sonner'
 import { useAuth } from './hooks/useAuth'
+
+/* ═══════════════════════════════════════════
+   路由级代码分割（碧霄 2026-02 P0 首屏减负）
+   - 静态依赖只留：Starfield 背景、Login、NotFound、AppLayout 壳
+   - 首页各 section 与全部管理面板一律 lazy()：
+     此前 App 静态引 28 页，MatrixNodes/FooterTerminal 把
+     three.js（1.1MB three-vendor chunk）拖进全站 modulepreload，
+     现在仅首页真正挂载时才拉对应 chunk。
+   ═══════════════════════════════════════════ */
+
+// 首页 sections（FAQ 极轻也一并分割，保持策略一致）
+const AppHub = lazy(() => import('./sections/AppHub'))
+const Dashboard = lazy(() => import('./sections/Dashboard'))
+const MatrixNodes = lazy(() => import('./sections/MatrixNodes'))
+const ExecutionCore = lazy(() => import('./sections/ExecutionCore'))
+const FAQ = lazy(() => import('./sections/FAQ'))
+const FooterTerminal = lazy(() => import('./sections/FooterTerminal'))
+
+// 业务页面
+const AccountSettings = lazy(() => import('./sections/AccountSettings'))
+const UsagePanel = lazy(() => import('./pages/UsagePanel'))
+const ModelsPanel = lazy(() => import('./pages/ModelsPanel'))
+const AlistPanel = lazy(() => import('./pages/AlistPanel'))
+const OpsPanel = lazy(() => import('./pages/OpsPanel'))
+const EventStream = lazy(() => import('./pages/EventStream'))
+const GitHubPanel = lazy(() => import('./pages/GitHubPanel'))
+const MailboxPanel = lazy(() => import('./pages/MailboxPanel'))
+const ChatPanel = lazy(() => import('./pages/ChatPanel'))
+const Tasks = lazy(() => import('./pages/Tasks'))
+const TaskDetail = lazy(() => import('./pages/TaskDetail'))
+const NotificationsPanel = lazy(() => import('./pages/NotificationsPanel'))
+const AgentList = lazy(() => import('./pages/AgentList'))
+const AgentDetail = lazy(() => import('./pages/AgentDetail'))
+const SessionPanel = lazy(() => import('./pages/SessionPanel'))
+const ConsolePanel = lazy(() => import('./pages/ConsolePanel'))
+const PluginCenter = lazy(() => import('./pages/PluginCenter'))
+
+function PageFallback() {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="text-sm font-mono" style={{ color: 'var(--text-muted)' }}>加载中...</div>
+    </div>
+  )
+}
+
+/** 首页分块占位：给固定高度，chunk 陆续到达时逐块填充，减少 CLS */
+function SectionFallback({ minHeight }: { minHeight: number }) {
+  return <div style={{ minHeight }} />
+}
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -51,12 +78,24 @@ function ProtectedLayout({ children }: { children: React.ReactNode }) {
 function HomePage() {
   return (
     <>
-      <AppHub />
-      <Dashboard />
-      <MatrixNodes />
-      <ExecutionCore />
-      <FAQ />
-      <FooterTerminal />
+      <Suspense fallback={<SectionFallback minHeight={0} />}>
+        <AppHub />
+      </Suspense>
+      <Suspense fallback={<SectionFallback minHeight={420} />}>
+        <Dashboard />
+      </Suspense>
+      <Suspense fallback={<SectionFallback minHeight={560} />}>
+        <MatrixNodes />
+      </Suspense>
+      <Suspense fallback={<SectionFallback minHeight={480} />}>
+        <ExecutionCore />
+      </Suspense>
+      <Suspense fallback={<SectionFallback minHeight={400} />}>
+        <FAQ />
+      </Suspense>
+      <Suspense fallback={<SectionFallback minHeight={220} />}>
+        <FooterTerminal />
+      </Suspense>
     </>
   )
 }
@@ -74,7 +113,9 @@ export default function App() {
         <Route element={
           <ProtectedLayout>
             <AppLayout>
-              <Outlet />
+              <Suspense fallback={<PageFallback />}>
+                <Outlet />
+              </Suspense>
             </AppLayout>
           </ProtectedLayout>
         }>

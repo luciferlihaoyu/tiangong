@@ -17,9 +17,12 @@ import { enqueueTaskFinalize } from "./lib/finalize-actions";
 const AUTO_APPROVE_ENABLED_KEY = "auto_approve_enabled";
 const AUTO_APPROVE_LIMIT_KEY = "auto_approve_daily_limit";
 const OPEN_WEBUI_URL_KEY = "openwebui_url";
-/** 默认与首页 AppHub 外部应用卡片「Open Web UI」同地址（AppHub.tsx 硬编码，
- *  改动时两处同步）；system_settings(openwebui_url) 可覆盖 */
-const DEFAULT_OPEN_WEBUI_URL = "https://oll199h.zeabur.app/";
+/** 默认与首页 AppHub 外部应用卡片「Open Web UI」同地址（改动时两处同步）；
+ *  system_settings(openwebui_url) 可覆盖。
+ *  2026-11 服务迁移后旧 Zeabur 地址(oll199h.zeabur.app)已 502 下线，
+ *  默认值置空（空 = 未配置，iframe 不渲染），新地址就绪后填回此处或走设置页配置 */
+// const DEFAULT_OPEN_WEBUI_URL = "https://oll199h.zeabur.app/";
+const DEFAULT_OPEN_WEBUI_URL = "";
 
 /** 批量归档 failed 任务的实现：写璇玑 lesson + AList + 协作汇总（幂等由各 sync 自持） */
 async function runArchiveFailedTasks(

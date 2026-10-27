@@ -172,13 +172,16 @@ export default function AppHub() {
                   internalHref="/plugins"
                 />
               ))}
-            {/* 外部应用卡片：Open Web UI（Ollama 的聊天界面） */}
+            {/* 外部应用卡片：Open Web UI（Ollama 的聊天界面）
+                2026-11 服务迁移后旧 Zeabur 地址(oll199h.zeabur.app)已 502 下线，暂隐藏此卡；
+                新地址就绪后取消注释并替换 url 即可恢复
             <AppCard
               label="Open Web UI"
               description="Ollama Web 对话界面"
               status="ok"
               url="https://oll199h.zeabur.app/"
             />
+            */}
           </div>
         )}
       </div>

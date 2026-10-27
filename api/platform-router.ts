@@ -69,11 +69,11 @@ export function getPlatformServices(): PlatformService[] {
     { key: "fusheng", label: "浮生若梦", url: stripTrailingSlash(process.env.FUSHENG_BASE_URL || "https://fusheng-ruomeng.xianrealme.com"), healthPath: "/api/health", kind: "app" },
     { key: "tianshu", label: "天枢", url: stripTrailingSlash(process.env.TIANSHU_BASE_URL || ""), kind: "gateway" },
     { key: "alist", label: "AList", url: stripTrailingSlash(process.env.ALIST_BASE_URL || ""), kind: "storage" },
-    { key: "dsh", label: "DSH", url: stripTrailingSlash(process.env.DSH_BASE_URL || ""), kind: "gateway" },
+    { key: "dsh", label: "DSH", url: stripTrailingSlash(process.env.DSH_BASE_URL || "https://lingxiao.xianrealme.com"), kind: "gateway" },
     // 外部应用入口（首页卡片）：这些站点没有自建 /health，探活退化为「base 地址可达即健康」。
     // url 支持环境变量覆盖，未配置时用内置网址 —— 改卡片文案/地址不改代码，
     // 且无需在 Zeabur 侧补环境变量即可上线。
-    { key: "openclaw", label: "OpenClaw", url: stripTrailingSlash(process.env.OPENCLAW_BASE_URL || "https://ttrssa.xianrealme.com"), kind: "external" },
+    { key: "openclaw", label: "OpenClaw", url: stripTrailingSlash(process.env.OPENCLAW_BASE_URL || "https://ergyzwa.xianrealme.com"), kind: "external" },
     { key: "4sapi", label: "4sapi", url: stripTrailingSlash(process.env.S4API_BASE_URL || "https://4sapi.org"), kind: "external" },
     { key: "opencode", label: "OpenCode", url: stripTrailingSlash(process.env.OPENCODE_BASE_URL || "https://ccood.dpdns.org"), kind: "external" },
     // 第三方工具站（个人常用入口，同为 external：「可达即健康」）。

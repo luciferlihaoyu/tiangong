@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tiangong.local/contracts/passport_spend_ledger.v1.schema.json",
+  "title": "passport_spend_ledger.v1 — 任务护照花费账本条目（副作用账本视图字段）",
+  "description": "Canonical spend-ledger entry schema for 万流归一·统一智能中枢 WP-H 最小钱治理。花费账本是「任务护照」的视图字段，并入天宫副作用账本（状态权威在天宫），不另立独立存储。每条记录对应一次付费副作用（模型调用/外部 API 调用/时长计费）。金额换算约定：天枢 quota 单位换算为 USD 采用 one-api 约定 $1 = 500000 quota（P1 实测校准），USD→CNY 汇率见 breaker-config.json（粗值）。",
+  "type": "object",
+  "required": ["type", "target", "hash", "cost", "status", "task_id", "actor", "model", "created_at"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["llm_call", "external_api_call", "media_generation", "compute_time", "other"],
+      "description": "副作用类型：llm_call=大模型调用；external_api_call=外部付费 API；media_generation=图/视频生成；compute_time=按秒计费算力；other=其他（需在 note 注明）。",
+      "example": "llm_call"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "计费目标标识，格式 <channel>:<endpoint-or-resource>。例：tianshu:/v1/chat/completions、aliyun:oss-put、ollama:local(qwen3:8b)。",
+      "example": "tianshu:/v1/chat/completions"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "副作用内容指纹（SHA-256，hex，64 字符）。对 llm_call 为 canonical request hash（rfc8785-jcs-v1）；对外发为 payload hash。与副作用账本去重键一致。",
+      "example": "<hash: 32-byte SHA-256 hex; not committed>"
+    },
+    "cost": {
+      "type": "object",
+      "required": ["amount", "currency", "quantity", "quantity_unit"],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "折算后金额。换算链：计价单位 → 原始计费单位（如天枢 quota）→ USD → currency。"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO-4217 币种，中枢统一记账币种为 CNY；原始币种留 raw 字段。",
+          "example": "CNY"
+        },
+        "quantity": {
+          "type": "number",
+          "minimum": 0,
+          "description": "计价单位数量：token 数 / 调用次数 / 秒。"
+        },
+        "quantity_unit": {
+          "type": "string",
+          "enum": ["token", "call", "second"],
+          "description": "计价单位：token=token 数；call=调用次数；second=秒。"
+        },
+        "raw": {
+          "type": "object",
+          "description": "可选：原始计费侧读数，便于对账。如 {\"quota\": 675, \"quota_per_usd\": 500000}。",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": ["recorded", "pending_billing", "settled", "disputed", "waived"],
+      "description": "账单状态：recorded=已记账；pending_billing=待上游出账（fallback 期间本地计数，待天枢恢复补记）；settled=对账平；disputed=对账差异挂起；waived=豁免（重试/免单）。",
+      "example": "recorded"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "归属任务护照 id（天宫任务 id），对账三方之一「护照账本」的聚合键。",
+      "example": "<task_id: tianGong task id; not committed>"
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "发起主体：dsh / tianGong-worker / 女娲 / opencode 等执行者标识，配合 service key 审计。",
+      "example": "dsh"
+    },
+    "model": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "模型名（llm_call 必填，其余可为 null）。与天枢 log 的 model_name 对齐，对账按模型分列。",
+      "example": "deepseek-v4.1-flash"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 记账时刻（UTC）。"
+    },
+    "envelope_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "可选：预授权策略包花费信封 id；越界熔断事件回溯用。"
+    },
+    "note": {
+      "type": ["string", "null"],
+      "maxLength": 500,
+      "description": "可选备注（type=other 时必填说明）。"
+    }
+  },
+  "additionalProperties": false,
+  "bindingNotes": [
+    "状态权威在天宫：花费账本条目是任务护照的视图字段，由天宫副作用账本派生投影；不另立独立数据库。fallback 期间 dsh 侧本地计数文件（breaker-counter.json）仅作熔断兜底，天枢恢复后异步补记天宫并标记 pending_billing→settled。",
+    "hash 与 tiangong_external_task_identity.v1 的 canonical_request_hash 共用 rfc8785-jcs-v1 规范，保证副作用去重键与幂等键一致。",
+    "月度安全熔断（breaker）与本账本对账（reconcile）均按 task_id/model/created_at 聚合，不要求账本实时落库即可运行（reconcile 侧允许天宫数据为空占位）。"
+  ]
+}

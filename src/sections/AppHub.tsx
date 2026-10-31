@@ -19,6 +19,7 @@ const APP_META: Record<string, { description: string }> = {
   openclaw: { description: "OpenClaw 网页控制台" },
   "4sapi": { description: "API 聚合中转站" },
   opencode: { description: "OpenCode 网页终端" },
+  vault: { description: "Vaultwarden · 密码管理器" },
   // 第三方工具站（个人常用入口）
   zeabur: { description: "云部署平台" },
   deepseek: { description: "开放平台 · API 与用量" },

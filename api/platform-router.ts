@@ -76,6 +76,9 @@ export function getPlatformServices(): PlatformService[] {
     { key: "openclaw", label: "OpenClaw", url: stripTrailingSlash(process.env.OPENCLAW_BASE_URL || "https://ergyzwa.xianrealme.com"), kind: "external" },
     { key: "4sapi", label: "4sapi", url: stripTrailingSlash(process.env.S4API_BASE_URL || "https://4sapi.org"), kind: "external" },
     { key: "opencode", label: "OpenCode", url: stripTrailingSlash(process.env.OPENCODE_BASE_URL || "https://ccood.dpdns.org"), kind: "external" },
+    // 密码管理器（自托管 Vaultwarden，Bitwarden 兼容）：无自建 /health，
+    // 走 external「可达即健康」口径；url 支持环境变量覆盖。
+    { key: "vault", label: "密码库", url: stripTrailingSlash(process.env.VAULT_BASE_URL || "https://vault.xianrealme.com"), kind: "external" },
     // 第三方工具站（个人常用入口，同为 external：「可达即健康」）。
     // 注意三点实测事实：
     //  1) platform.deepseek.com 对无浏览器 UA 的请求由 CloudFront 直接返 403 ——

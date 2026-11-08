@@ -291,7 +291,7 @@ export const orchestrationRouter = createRouter({
 
       // §3-3：主更新走转移服务；带 lifecycleStatus 时还接受状态机校验（消灭漂移写入），
       // 工具自身的 validTransitions 映射仍是前置契约闸门
-      await applyTaskTransition(db, {
+      const transition = await applyTaskTransition(db, {
         taskId: input.id,
         status: input.status,
         ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
@@ -303,6 +303,17 @@ export const orchestrationRouter = createRouter({
           ...(input.error !== undefined ? { error: input.error } : {}),
         },
       });
+      // 2026-11-05 碧霄修复：转移服务校验失败原先被静默吞掉——调用方看到 success:true
+      // 但 DB 未变（S2 飞书记账实测踩中：working→completed 非法转换报成功却不落库）。
+      // 照 a2a-router.ts 同款 pattern 接住返回值，失败如实上报。
+      if (!transition.ok) {
+        const reasonText = transition.reason === "invalid_transition"
+          ? `状态/生命周期转移非法: ${task.status}/${task.lifecycleStatus ?? "created"} → ${input.status}${input.lifecycleStatus ? "/" + input.lifecycleStatus : ""}`
+          : transition.reason === "revision_conflict"
+            ? "并发冲突：任务刚被别处修改，请重试"
+            : "任务不存在（转移层）";
+        return { success: false, error: reasonText };
+      }
 
       // Auto-trigger downstream when task completes
       if (input.status === "done") {

@@ -262,7 +262,13 @@ export const a2aRouter = createRouter({
         lifecycleStatus: nextStatus,
         at: new Date(),
         expectedRevision: task.stateRevision,
-        extra: { progress: input.progress ?? task.progress ?? 0 },
+        // 2026-11-09 碧霄修复：进度上报必须续租——此前 reportWorking 不动
+        // workerLeaseExpiresAt，长任务即使一直在报进度也会被清扫器 requeue
+        // 空耗 retry（#130 父任务、#133 薇子子任务实证）。
+        extra: {
+          progress: input.progress ?? task.progress ?? 0,
+          workerLeaseExpiresAt: new Date(Date.now() + (task.timeoutMs ?? 300_000)),
+        },
       });
       if (!transition.ok) {
         return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };

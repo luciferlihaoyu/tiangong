@@ -31,7 +31,7 @@ export interface ClaimedTask {
   approvalRequired: boolean;
 }
 
-export type ClaimNextReason = "budget_exhausted" | "agent_not_found" | "already_claimed" | "not_ready";
+export type ClaimNextReason = "budget_exhausted" | "agent_not_found" | "already_claimed" | "not_ready" | "agent_busy";
 
 /**
  * 路由归属判定（认领保护，P-claim-routing）：
@@ -154,6 +154,21 @@ export async function claimNextTask(
   // 3. 查找可认领的任务：状态为 queued，且 agentId 匹配此 Agent 或为 null（通用任务）。
   //    执行审批闸门在此拦截高风险任务（停放待审批），只有低风险或已批准的任务才会被认领。
   //    归属保护：通用任务若在 routing metadata 声明期望执行者，仅匹配 agent 可认领。
+  // 2.5 单飞闸（2026-11-09 碧霄）：agent 已有在跑任务（status=running 非终态）时不再派新单。
+  //     缺口实证：busy 标志只写不查——重复 connector 进程、租约回收重认都绕过
+  //     进程内串行叠加执行（#133 双执行、#136 三代执行器并存白烧 token）。
+  //     以 tasks 表真实在跑数为准（agents.status=busy 可能因异常残留不可信）；
+  //     卡死在跑的任务由租约清扫器回收（续租修复 b763bda 后活跃任务不会被误收），
+  //     回收后即自动恢复可认领，无新增死锁路径。
+  const inflight = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.agentId, agentId), eq(tasks.status, "running")))
+    .limit(1);
+  if (inflight.length > 0) {
+    return { task: null, reason: "agent_busy" };
+  }
+
   const task = await findClaimableTask(db, agentId, agent.agentId);
 
   if (!task) {

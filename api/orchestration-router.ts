@@ -74,7 +74,9 @@ async function triggerDownstream(completedTaskId: number) {
       const t = await db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, d.taskId)).then(r => r[0]);
       if (t && t.status === "pending") {
         // §3-3：下游解锁是状态变更，走转移服务递增修订号
-        await applyTaskTransition(db, { taskId: d.taskId, status: "queued", at: new Date() });
+        const unlock = await applyTaskTransition(db, { taskId: d.taskId, status: "queued", at: new Date() });
+        // 2026-11-09 碧霄修复：解锁失败不再无声（下游会卡 pending 无人知）
+        if (!unlock.ok) console.error(`[triggerDownstream] 下游任务 ${d.taskId} 解锁失败: ${unlock.reason}`);
       }
     }
   }
@@ -258,7 +260,7 @@ export const orchestrationRouter = createRouter({
           }
           // 终态 failed → queued 重试语义：restart 例外。现网不可达（映射表放行
           // failed→queued 走主更新），仅随切片 7 转换保持结构不变量。
-          await applyTaskTransition(db, {
+          const retryTransition = await applyTaskTransition(db, {
             taskId: input.id,
             status: "queued",
             at: new Date(),
@@ -266,6 +268,10 @@ export const orchestrationRouter = createRouter({
             expectedRevision: task.stateRevision,
             extra: { retryCount: retryCount + 1, error: null },
           });
+          // 2026-11-09 碧霄修复：转移失败不得静默 success
+          if (!retryTransition.ok) {
+            return { success: false, error: `重试转移失败: ${retryTransition.reason}` };
+          }
           wsManager.broadcastToDashboard({
             type: "task_update",
             action: "updated",

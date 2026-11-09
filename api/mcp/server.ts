@@ -220,7 +220,9 @@ async function triggerDownstream(completedTaskId: number) {
         .then(r => r[0]);
       if (t && t.status === "pending") {
         // §3-3：下游解锁是状态变更，走转移服务递增修订号
-        await applyTaskTransition(db, { taskId: d.taskId, status: "queued", at: new Date() });
+        const unlock = await applyTaskTransition(db, { taskId: d.taskId, status: "queued", at: new Date() });
+        // 2026-11-09 碧霄修复：解锁失败不再无声（下游会卡 pending 无人知）
+        if (!unlock.ok) console.error(`[triggerDownstream] 下游任务 ${d.taskId} 解锁失败: ${unlock.reason}`);
       }
     }
   }
@@ -480,7 +482,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
           // 终态 failed → queued 是重试语义：显式开 restart（状态机"终态不可逆"的有意例外）。
           // 注意：本工具的 statusTransitions 映射把 failed→queued 列为合法走向，此分支现网不可达，
           // 仅随切片 7 一并转换以保持"全部写入走服务"的结构不变量。
-          await applyTaskTransition(db, {
+          const retryTransition = await applyTaskTransition(db, {
             taskId: params.taskId,
             status: "queued",
             at: new Date(),
@@ -488,6 +490,17 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
             expectedRevision: task.stateRevision,
             extra: { retryCount: retryCount + 1, error: null },
           });
+          // 2026-11-09 碧霄修复：转移失败不得静默 success
+          if (!retryTransition.ok) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ success: false, error: `重试转移失败: ${retryTransition.reason}` }),
+                },
+              ],
+            };
+          }
           return {
             content: [
               {
@@ -522,7 +535,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
 
       // §3-3：主更新走转移服务（工具自身的 statusTransitions 映射仍是前置契约闸门；
       // 服务层面生命周期不在此改动，status 单写不带漂移）
-      await applyTaskTransition(db, {
+      const mainTransition = await applyTaskTransition(db, {
         taskId: params.taskId,
         status: params.status,
         at: new Date(),
@@ -533,6 +546,17 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
           ...(params.error !== undefined ? { error: params.error } : {}),
         },
       });
+      // 2026-11-09 碧霄修复：转移服务失败不得静默成功（九助手回写主路径）
+      if (!mainTransition.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ success: false, error: `状态转移失败: ${mainTransition.reason}` }),
+            },
+          ],
+        };
+      }
 
       // Auto-trigger downstream
       if (params.status === "done") {

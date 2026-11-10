@@ -1244,28 +1244,25 @@ export default function Dashboard() {
   })();
 
   /**
-   * 助手筛选（2026-11-10 修复）：此前只有 running 分支生效，其余 tab 一律
-   * 返回全部助手 → 点「审核中」「已归档」看起来毫无反应。现在四个 tab 各司其职：
-   *   全部    = 在用助手（未归档），归档的不混进首页
-   *   运行中  = 有心跳且未归档（online/busy）
-   *   审核中  = 名下挂着待审核任务（pending/queued）的在用助手
-   *   已归档  = archivedAt 非空（迁入不活跃归档）的助手
+   * 助手分桶（2026-11-10 修复）：此前 filteredAgents 只有 running 分支生效，
+   * 其余 tab 一律返回全部助手 → 点「审核中」「已归档」看起来毫无反应。
+   * 现在四个桶各自算清，并把条数挂到 tab 上——否则「审核中=0」和「筛选坏了」
+   * 在界面上长得一模一样，用户没法分辨。
    */
-  const filteredAgents = (() => {
+  const agentBuckets = (() => {
     const active = agentsWithWS.filter(a => !a.archivedAt);
-    switch (filterTab) {
-      case 'running': return active.filter(a => a.status === 'online' || a.status === 'busy');
-      case 'review': {
-        // 不依赖 filteredTasks（那是任务列表的筛选结果），直接按任务表算，避免耦合
-        const pendingByAgent = new Set(
-          data.tasks.filter(t => t.status === 'pending' || t.status === 'queued').map(t => t.agentId)
-        );
-        return active.filter(a => pendingByAgent.has(a.id));
-      }
-      case 'archived': return agentsWithWS.filter(a => !!a.archivedAt);
-      default: return active;
-    }
+    // 不依赖 filteredTasks（那是任务列表的筛选结果），直接按任务表算，避免耦合
+    const pendingByAgent = new Set(
+      data.tasks.filter(t => t.status === 'pending' || t.status === 'queued').map(t => t.agentId)
+    );
+    return {
+      all: active,
+      running: active.filter(a => a.status === 'online' || a.status === 'busy'),
+      review: active.filter(a => pendingByAgent.has(a.id)),
+      archived: agentsWithWS.filter(a => !!a.archivedAt),
+    } as Record<string, MockAgent[]>;
   })();
+  const filteredAgents = agentBuckets[filterTab] ?? agentBuckets.all;
 
   const mainTabs: { key: MainTab; label: string; icon: string }[] = [
     { key: 'dashboard', label: '仪表盘', icon: '📊' },
@@ -1275,10 +1272,10 @@ export default function Dashboard() {
   ];
 
   const filterTabs = [
-    { key: 'all', label: '全部' },
-    { key: 'running', label: '运行中' },
-    { key: 'review', label: '审核中' },
-    { key: 'archived', label: '已归档' },
+    { key: 'all', label: '全部', count: agentBuckets.all.length },
+    { key: 'running', label: '运行中', count: agentBuckets.running.length },
+    { key: 'review', label: '审核中', count: agentBuckets.review.length },
+    { key: 'archived', label: '已归档', count: agentBuckets.archived.length },
   ];
 
   const handleAddAgent = (v: Record<string, string>) => { data.addAgent(v); setShowAgentForm(false); };
@@ -1363,12 +1360,20 @@ export default function Dashboard() {
               <div className="flex items-center gap-1">
                 {filterTabs.map(tab => (
                   <button key={tab.key} onClick={() => setFilterTab(tab.key)}
-                    className="px-3 py-1.5 rounded text-xs transition-all"
+                    title={`${tab.label}：${tab.count} 个助手`}
+                    className="px-3 py-1.5 rounded text-xs transition-all flex items-center gap-1.5"
                     style={{
                       background: filterTab === tab.key ? 'var(--accent-glow-red)' : 'transparent',
                       color: filterTab === tab.key ? 'var(--accent-red-bright)' : 'var(--text-muted)',
                       border: filterTab === tab.key ? '1px solid rgba(194,58,48,0.2)' : '1px solid transparent',
-                    }}>{tab.label}</button>
+                    }}>
+                    {tab.label}
+                    <span className="font-mono text-[10px] px-1 rounded"
+                      style={{
+                        background: filterTab === tab.key ? 'rgba(194,58,48,0.18)' : 'rgba(180,200,255,0.06)',
+                        color: filterTab === tab.key ? 'var(--accent-red-bright)' : 'var(--text-muted)',
+                      }}>{tab.count}</span>
+                  </button>
                 ))}
               </div>
               <div className="flex items-center gap-2">

@@ -29,6 +29,8 @@ interface Agent {
   currentTask: string | null;
   progress: number | null;
   lastHeartbeat: string | null;
+  /** 非空 = 已迁入「不活跃归档」，本列表默认不展示 */
+  archivedAt?: string | null;
 }
 
 // ═══════════════════════ Constants ═══════════════════════
@@ -129,7 +131,10 @@ function AgentCard({ agent }: { agent: Agent }) {
 
 export default function AgentList() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
-  const agents = (agentQuery.data || []) as Agent[];
+  const allAgents = (agentQuery.data || []) as Agent[];
+  // 归档语义与首页一致：本页只列在用助手，归档单独计数（归档区在首页看）
+  const agents = allAgents.filter((a) => !a.archivedAt);
+  const archivedCount = allAgents.length - agents.length;
   const utils = trpc.useUtils();
 
   const { lastMessage } = useWebSocket();
@@ -173,6 +178,11 @@ export default function AgentList() {
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--text-muted)" }} />
               空闲 {agents.filter((a) => a.status === "idle").length}
             </span>
+            {archivedCount > 0 && (
+              <span className="flex items-center gap-1" style={{ color: "var(--text-muted)" }}>
+                🗄 已归档 {archivedCount}
+              </span>
+            )}
           </div>
           <button
             onClick={refresh}

@@ -45,6 +45,13 @@ export const agents = sqliteTable("agents", {
   budgetCents: integer("budget_cents", { mode: "number" }).default(0),
   spentCents: integer("spent_cents", { mode: "number" }).default(0),
   lastHeartbeat: integer("last_heartbeat", { mode: "timestamp" }),
+  /**
+   * 归档时间：非空 = 已迁入「不活跃归档」，首页/助手列表默认不再展示。
+   * 只做显式标记，不改 status 枚举（status 的 CHECK 约束锁死 online/busy/idle，
+   * 想塞 'archived' 要重建整张表，风险远大于收益）。
+   * 老库由 autoMigrate → repairMissingColumns 自动补列。
+   */
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
   sourceApiKey: text("source_api_key", { length: 255 }),
   sourceEndpoint: text("source_endpoint", { length: 500 }),
   // ── A2A-lite v0.1: Agent Card extensibility ──

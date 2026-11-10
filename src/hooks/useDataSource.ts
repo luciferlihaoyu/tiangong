@@ -33,6 +33,8 @@ export interface MockAgent {
   currentTask?: string | null;
   budgetCents?: number; spentCents?: number;
   lastHeartbeat?: string | null;
+  /** 非空 = 已迁入「不活跃归档」（ISO 字符串）；首页默认不展示 */
+  archivedAt?: string | null;
   sourceApiKey?: string | null;
 }
 export interface MockTask {
@@ -133,6 +135,19 @@ export function useDataSource() {
       return;
     }
     setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+  }, [hasBackend, agentQuery]);
+  /**
+   * 归档 / 恢复助手。archived=true 迁入「不活跃归档」（后端存 Unix 秒），
+   * false 则清空 archivedAt 恢复活跃。首页默认只展示未归档的助手。
+   */
+  const setAgentArchived = useCallback(async (id: number, archived: boolean) => {
+    if (hasBackend) {
+      await trpcFetch("agent.update", { id, archivedAt: archived ? Math.floor(Date.now() / 1000) : null });
+      await agentQuery.refetch();
+      return;
+    }
+    const stamp = archived ? new Date().toISOString() : null;
+    setLocalAgents(prev => prev.map(a => a.id === id ? { ...a, archivedAt: stamp } : a));
   }, [hasBackend, agentQuery]);
 
   // ── Task mutations ──
@@ -247,5 +262,6 @@ export function useDataSource() {
     addTask, deleteTask,
     addOrg, updateOrg, deleteOrg,
     updateAgentStatus, updateSystemStatus, updateTaskProgress,
+    setAgentArchived,
   };
 }

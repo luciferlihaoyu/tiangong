@@ -102,19 +102,27 @@ const statusCfg: Record<string, { dot: string; color: string; label: string }> =
   idle: { dot: 'status-dot-idle', color: 'var(--text-muted)', label: '空闲' },
 };
 
-function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp }: {
+function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp, onToggleArchive }: {
   agent: MockAgent;
   onStatusChange: (id: number, s: string) => void;
   onEdit: (a: MockAgent) => void; onDelete: (id: number) => void;
   onNavigateToMcp?: () => void;
+  onToggleArchive?: (id: number, archived: boolean) => void;
 }) {
   const c = statusCfg[agent.status] || statusCfg.idle;
   const caps = useMemo(() => { try { return agent.capabilities ? JSON.parse(agent.capabilities) as string[] : []; } catch { return []; } }, [agent.capabilities]);
+  const isArchived = !!agent.archivedAt;
 
   return (
-    <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-gold)]/30">
+    <div className="glass-panel p-4 sci-border transition-all group relative hover:border-[var(--accent-gold)]/30"
+      style={isArchived ? { opacity: 0.72, borderStyle: 'dashed' } : undefined}>
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
         <button onClick={() => onEdit(agent)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(100,181,246,0.1)]" style={{ color: 'var(--accent-cyan)' }}>编辑</button>
+        {onToggleArchive && (
+          <button onClick={() => onToggleArchive(agent.id, !isArchived)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-gold)]" style={{ color: 'var(--accent-gold)' }}>
+            {isArchived ? '恢复' : '归档'}
+          </button>
+        )}
         <button onClick={() => onDelete(agent.id)} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[var(--accent-glow-red)]" style={{ color: 'var(--accent-red)' }}>删除</button>
       </div>
       <div className="flex items-center justify-between mb-3 pr-16">
@@ -126,6 +134,11 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp }:
       </div>
       {/* Source / Model / Role badges */}
       <div className="flex flex-wrap gap-1 mb-2">
+        {isArchived && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+            🗄 已归档{agent.archivedAt ? ` · ${new Date(agent.archivedAt).toLocaleDateString()}` : ''}
+          </span>
+        )}
         {agent.source && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'rgba(100,181,246,0.1)', color: 'var(--accent-cyan)' }}>{agent.source}</span>}
         {agent.model && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono truncate max-w-[120px]" style={{ background: 'rgba(201,168,76,0.1)', color: 'var(--accent-gold)' }}>{agent.model.split('/').pop()}</span>}
         {agent.role && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: 'var(--accent-glow-red)', color: 'var(--accent-red-bright)' }}>{agent.role}</span>}
@@ -1230,9 +1243,29 @@ export default function Dashboard() {
     }
   })();
 
-  const filteredAgents = filterTab === 'running'
-    ? agentsWithWS.filter(a => a.status === 'online' || a.status === 'busy')
-    : agentsWithWS;
+  /**
+   * 助手筛选（2026-11-10 修复）：此前只有 running 分支生效，其余 tab 一律
+   * 返回全部助手 → 点「审核中」「已归档」看起来毫无反应。现在四个 tab 各司其职：
+   *   全部    = 在用助手（未归档），归档的不混进首页
+   *   运行中  = 有心跳且未归档（online/busy）
+   *   审核中  = 名下挂着待审核任务（pending/queued）的在用助手
+   *   已归档  = archivedAt 非空（迁入不活跃归档）的助手
+   */
+  const filteredAgents = (() => {
+    const active = agentsWithWS.filter(a => !a.archivedAt);
+    switch (filterTab) {
+      case 'running': return active.filter(a => a.status === 'online' || a.status === 'busy');
+      case 'review': {
+        // 不依赖 filteredTasks（那是任务列表的筛选结果），直接按任务表算，避免耦合
+        const pendingByAgent = new Set(
+          data.tasks.filter(t => t.status === 'pending' || t.status === 'queued').map(t => t.agentId)
+        );
+        return active.filter(a => pendingByAgent.has(a.id));
+      }
+      case 'archived': return agentsWithWS.filter(a => !!a.archivedAt);
+      default: return active;
+    }
+  })();
 
   const mainTabs: { key: MainTab; label: string; icon: string }[] = [
     { key: 'dashboard', label: '仪表盘', icon: '📊' },
@@ -1366,13 +1399,22 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
               <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {filteredAgents.length === 0 ? (
-                  <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>暂无 Agent · 请点击「+ Agent」创建</div>
+                  <div className="col-span-full glass-panel p-8 text-center text-sm font-mono" style={{ color: 'var(--text-muted)' }}>
+                    {filterTab === 'archived'
+                      ? '归档区是空的 · 在助手卡片上点「归档」可迁入'
+                      : filterTab === 'review'
+                        ? '没有挂待审核任务的助手'
+                        : filterTab === 'running'
+                          ? '当前没有在线/忙碌的助手'
+                          : '暂无 Agent · 请点击「+ Agent」创建'}
+                  </div>
                 ) : filteredAgents.map(agent => (
                   <AgentCard key={agent.id} agent={agent}
                     onStatusChange={data.updateAgentStatus}
                     onEdit={a => setEditAgent(a)}
                     onDelete={data.deleteAgent}
-                    onNavigateToMcp={() => setMainTab('mcp')} />
+                    onNavigateToMcp={() => setMainTab('mcp')}
+                    onToggleArchive={(id, archived) => data.setAgentArchived(id, archived)} />
                 ))}
               </div>
               <div className="lg:col-span-1">

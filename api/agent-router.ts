@@ -170,6 +170,11 @@ export const agentRouter = createRouter({
         canModifyTiangongCore: z.boolean().optional(),
         canSendExternalMessage: z.boolean().optional(),
         mcpToken: z.string().max(100).optional(),
+        /**
+         * 归档标记：数字 = Unix 秒（迁入不活跃归档），null = 恢复为活跃。
+         * 语义是「首页/助手列表默认不展示」，不动 status 枚举。
+         */
+        archivedAt: z.number().nullable().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -177,7 +182,12 @@ export const agentRouter = createRouter({
       const { id, ...fields } = input;
       const updateFields: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(fields)) {
+        if (k === "archivedAt") continue; // 归一化放到下面，避免毫秒/秒语义漂移
         if (v !== undefined) updateFields[k] = v;
+      }
+      // 归档标记归一化：入参是 Unix 秒，转 Date 交给 drizzle 的 timestamp mode
+      if (input.archivedAt !== undefined) {
+        updateFields.archivedAt = input.archivedAt === null ? null : new Date(input.archivedAt * 1000);
       }
       // Normalize agentCard JSON
       if (input.agentCard !== undefined) updateFields.agentCard = JSON.stringify(input.agentCard);

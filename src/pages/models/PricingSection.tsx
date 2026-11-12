@@ -217,7 +217,18 @@ export function PricingSection() {
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.model} className="hover:bg-[rgba(180,200,255,0.02)]" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                    <td className="py-2 px-3 truncate max-w-48" style={{ color: "var(--text-primary)" }}>{r.model}</td>
+                    <td className="py-2 px-3 truncate max-w-48" style={{ color: "var(--text-primary)" }}>
+                      {r.model}
+                      {/* 0 价条目来自天枢同步占位（notes 写着「价格待人工维护」），不是真实免费。
+                          不标出来，用户会以为这些模型跑起来不要钱——实测成本也确实被算成 0。 */}
+                      {(r as { unpriced?: boolean }).unpriced && (
+                        <span className="ml-2 text-[10px] px-1 py-0.5 rounded font-mono"
+                          style={{ background: "rgba(255,170,0,0.12)", color: "var(--warning)" }}
+                          title="该模型价格为 0 是同步占位，未人工维护；用它跑出来的成本会被计为 $0">
+                          未定价
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2 px-3" style={{ color: "var(--text-muted)" }}>{r.provider}</td>
                     <td className="py-2 px-3" style={{ color: "var(--accent-cyan)" }}>{fmtPrice(r.inputPrice)}</td>
                     <td className="py-2 px-3" style={{ color: "var(--warning)" }}>{fmtPrice(r.outputPrice)}</td>

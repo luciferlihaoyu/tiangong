@@ -3,12 +3,15 @@
  * - 受保护路由 /plugins：全部插件一览（名称 / 描述 / 状态灯 / 工具数 / 启用开关）
  * - 数据源：trpc.pluginCenter.list（retry:1 + 30s 轮询）；切换走 pluginCenter.setEnable，成功后 invalidate list
  * - 状态灯复用 HealthLight，status 直接映射 ok / down / unknown
- * 注：接入与移除插件（upsert / remove）的表单 UI 由后续迭代提供，接入规范见 docs/PLUGIN_SPEC.md。
+ * - 接入 / 移除：pluginCenter.upsert（key/name/description/url/tokenEnvKey，同 key 覆盖）
+ *   与 pluginCenter.remove（幂等）；两者成功后都 invalidate list 让服务端状态回灌
+ *   注：list 故意不返回 url 与 tokenEnvKey，所以这里不预填、不支持点开改——只能按 key 重新 upsert 覆盖
  */
+import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import HealthLight from "@/components/HealthLight";
 import { Switch } from "@/components/ui/switch";
-import { Puzzle, RefreshCw } from "lucide-react";
+import { Puzzle, RefreshCw, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 type PluginStatus = "ok" | "down" | "unknown";
@@ -24,6 +27,23 @@ interface PluginInfo {
   toolCount?: number;
 }
 
+/** 接入表单（字段与后端 upsert 的 zod schema 一一对应；tokenEnvKey 可空） */
+interface PluginForm {
+  key: string;
+  name: string;
+  description: string;
+  url: string;
+  tokenEnvKey: string;
+}
+
+const emptyForm: PluginForm = { key: "", name: "", description: "", url: "", tokenEnvKey: "" };
+
+const inputStyle: React.CSSProperties = {
+  background: "rgba(10, 16, 34, 0.6)",
+  border: "1px solid var(--border-default)",
+  color: "var(--text-primary)",
+};
+
 /** status → 中文文案（灯珠颜色之外给文字语义） */
 const STATUS_LABEL: Record<PluginStatus, string> = {
   ok: "正常",
@@ -34,11 +54,15 @@ const STATUS_LABEL: Record<PluginStatus, string> = {
 function PluginCard({
   plugin,
   switchDisabled,
+  removeDisabled,
   onToggle,
+  onRemove,
 }: {
   plugin: PluginInfo;
   switchDisabled: boolean;
+  removeDisabled: boolean;
   onToggle: (enabled: boolean) => void;
+  onRemove: () => void;
 }) {
   return (
     <div className="glass-panel p-4 sci-border flex flex-col">
@@ -91,6 +115,16 @@ function PluginCard({
             disabled={switchDisabled}
             onCheckedChange={onToggle}
           />
+          {/* 移除是不可逆的（注册信息直接 delete），卡片上只放图标按钮，点击后仍要二次确认 */}
+          <button
+            onClick={onRemove}
+            disabled={removeDisabled}
+            title="移除插件"
+            className="p-1 rounded transition-colors hover:bg-[rgba(255,50,50,0.1)] disabled:opacity-40"
+            style={{ color: "var(--accent-red-bright)" }}
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       </div>
     </div>
@@ -124,6 +158,79 @@ export default function PluginCenter() {
   const isToggling = (key: string) =>
     setEnableMutation.isPending && setEnableMutation.variables?.key === key;
 
+  // ─── 接入插件（upsert）───
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState<PluginForm>(emptyForm);
+  const setField = (patch: Partial<PluginForm>) => setForm((prev) => ({ ...prev, ...patch }));
+
+  const upsertMutation = trpc.pluginCenter.upsert.useMutation({
+    onSuccess: (res, vars) => {
+      if (res.ok) {
+        toast.success(`已接入插件：${vars.name}`);
+        // 成功后收表单并清空，避免用户以为还能接着改同一个 key 的 url（list 不回 url）
+        setForm(emptyForm);
+        setFormOpen(false);
+      } else {
+        toast.error(`接入失败：${res.error ?? "未知错误"}`);
+      }
+      utils.pluginCenter.list.invalidate();
+    },
+    onError: (e) => toast.error(`接入失败：${e.message}`),
+  });
+
+  // ─── 移除插件（remove）───
+  const removeMutation = trpc.pluginCenter.remove.useMutation({
+    onSuccess: (res, vars) => {
+      if (res.ok) {
+        toast.success(`已移除插件：${vars.key}`);
+      } else {
+        toast.error(`移除失败：${res.error ?? "未知错误"}`);
+      }
+      utils.pluginCenter.list.invalidate();
+    },
+    onError: (e) => toast.error(`移除失败：${e.message}`),
+  });
+
+  /** 前端先按后端 zod 约束做一遍校验，免得用户提交后才吃 400 */
+  const handleUpsert = () => {
+    const key = form.key.trim();
+    const name = form.name.trim();
+    const description = form.description.trim();
+    const url = form.url.trim();
+    const tokenEnvKey = form.tokenEnvKey.trim();
+    if (!key) return toast.error("请填写插件 key");
+    if (key.length > 50) return toast.error("插件 key 最多 50 字符");
+    if (!name) return toast.error("请填写插件名称");
+    if (!description) return toast.error("请填写插件描述");
+    if (!url) return toast.error("请填写 MCP 地址");
+    // 后端是 z.string().url()，这里顺带要求 http(s)，否则探活必然失败
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return toast.error("MCP 地址必须以 http:// 或 https:// 开头");
+      }
+    } catch {
+      return toast.error("MCP 地址不是合法 URL");
+    }
+    upsertMutation.mutate({
+      key,
+      name,
+      description,
+      url,
+      // 空串不传：后端 tokenEnvKey 可选，传 "" 会落成空字符串而不是 null
+      ...(tokenEnvKey ? { tokenEnvKey } : {}),
+    });
+  };
+
+  const handleRemove = (plugin: PluginInfo) => {
+    // 删除不可逆且会连带丢掉启用状态，必须二次确认
+    if (!window.confirm(`确定移除插件「${plugin.name}」（${plugin.key}）？该操作不可撤销。`)) return;
+    removeMutation.mutate({ key: plugin.key });
+  };
+
+  const isRemoving = (key: string) =>
+    removeMutation.isPending && removeMutation.variables?.key === key;
+
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-24 pb-16">
@@ -138,17 +245,116 @@ export default function PluginCenter() {
               插件中心
             </h1>
             <p className="text-[10px] font-mono mt-1" style={{ color: "var(--text-muted)" }}>
-              PLUGIN CENTER · 能力可插拔 · 状态 / 工具数 / 启用开关
+              PLUGIN CENTER · 能力可插拔 · 状态 / 工具数 / 启用开关 / 接入与移除
             </p>
           </div>
-          <button
-            onClick={() => listQuery.refetch()}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
-            style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
-          >
-            <RefreshCw size={13} /> 刷新
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setFormOpen((v) => !v); }}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors"
+              style={{
+                color: formOpen ? "var(--accent-cyan)" : "var(--text-muted)",
+                border: `1px solid ${formOpen ? "var(--accent-cyan)" : "var(--border-default)"}`,
+              }}
+            >
+              {formOpen ? <X size={13} /> : <Plus size={13} />} {formOpen ? "收起" : "接入插件"}
+            </button>
+            <button
+              onClick={() => listQuery.refetch()}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono hover:bg-[rgba(180,200,255,0.05)] transition-colors"
+              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+            >
+              <RefreshCw size={13} /> 刷新
+            </button>
+          </div>
         </div>
+
+        {/* 接入表单（字段严格对齐 api/plugin-center-router.ts 的 upsert schema） */}
+        {formOpen && (
+          <div className="glass-panel p-4 sci-border mb-6">
+            <div className="text-xs font-mono font-bold mb-3" style={{ color: "var(--text-primary)" }}>
+              接入 / 更新插件
+              <span className="ml-2 text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>
+                key 已存在则覆盖名称/描述/地址，启用状态保留原值；新插件默认停用
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <label className="block">
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>key（唯一标识，≤50）</div>
+                <input
+                  value={form.key}
+                  onChange={(e) => setField({ key: e.target.value })}
+                  placeholder="xuanji-memory"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                  style={inputStyle}
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>名称</div>
+                <input
+                  value={form.name}
+                  onChange={(e) => setField({ name: e.target.value })}
+                  placeholder="璇玑记忆"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                  style={inputStyle}
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>描述（≤200）</div>
+                <input
+                  value={form.description}
+                  onChange={(e) => setField({ description: e.target.value })}
+                  placeholder="长期记忆与知识库检索"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                  style={inputStyle}
+                />
+              </label>
+              <label className="block">
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>MCP 地址（POST tools/list 的 URL）</div>
+                <input
+                  value={form.url}
+                  onChange={(e) => setField({ url: e.target.value })}
+                  placeholder="http://service-xuanji:8080/mcp"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                  style={inputStyle}
+                />
+              </label>
+              <label className="block sm:col-span-2">
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                  token 环境变量名（可选：填变量名，不填 token 本身）
+                </div>
+                <input
+                  value={form.tokenEnvKey}
+                  onChange={(e) => setField({ tokenEnvKey: e.target.value })}
+                  placeholder="XUANJI_MCP_TOKEN"
+                  className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
+                  style={inputStyle}
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleUpsert}
+                disabled={upsertMutation.isPending}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
+              >
+                <Plus size={13} /> {upsertMutation.isPending ? "提交中..." : "保存插件"}
+              </button>
+              <button
+                onClick={() => { setForm(emptyForm); setFormOpen(false); }}
+                disabled={upsertMutation.isPending}
+                className="text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
+                style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+              >
+                取消
+              </button>
+            </div>
+            <div className="text-[10px] font-mono mt-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              出于安全考虑，清单接口不返回 url 与 token 变量名，因此表单不回填已有插件——要改地址就按同一个 key 重新提交覆盖。
+            </div>
+          </div>
+        )}
 
         {/* 列表 / 空态 / 异常态 */}
         {listQuery.isPending ? (
@@ -172,7 +378,7 @@ export default function PluginCenter() {
               暂无插件
             </span>
             <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
-              接入规范见 docs/PLUGIN_SPEC.md（P2-3 将提供）
+              点右上角「接入插件」填写 key / 名称 / 描述 / MCP 地址即可注册
             </span>
           </div>
         ) : (
@@ -182,7 +388,9 @@ export default function PluginCenter() {
                 key={p.key}
                 plugin={p}
                 switchDisabled={isToggling(p.key)}
+                removeDisabled={isRemoving(p.key)}
                 onToggle={(enabled) => setEnableMutation.mutate({ key: p.key, enabled })}
+                onRemove={() => handleRemove(p)}
               />
             ))}
           </div>

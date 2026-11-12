@@ -42,6 +42,7 @@ const AgentDetail = lazy(() => import('./pages/AgentDetail'))
 const SessionPanel = lazy(() => import('./pages/SessionPanel'))
 const ConsolePanel = lazy(() => import('./pages/ConsolePanel'))
 const PluginCenter = lazy(() => import('./pages/PluginCenter'))
+const FusionPanel = lazy(() => import('./pages/FusionPanel'))
 
 function PageFallback() {
   return (
@@ -141,6 +142,7 @@ export default function App() {
           <Route path="/github" element={<GitHubPanel />} />
           <Route path="/console" element={<ConsolePanel />} />
           <Route path="/plugins" element={<PluginCenter />} />
+          <Route path="/fusion" element={<FusionPanel />} />
         </Route>
 
         {/* 404 — show nav but no auth requirement */}

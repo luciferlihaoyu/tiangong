@@ -64,8 +64,10 @@ export default function AccountSettings() {
     e.preventDefault();
     setMessage(null);
 
-    if (newPassword.length < 4) {
-      setMessage({ type: "error", text: "新密码至少 4 位" });
+    // 后端 local-auth-router 的 changePassword 用 z.string().min(8)，前端必须同口径，
+    // 否则 5~7 位密码会在前端放行、到后端才炸，用户看到的是莫名其妙的请求失败
+    if (newPassword.length < 8) {
+      setMessage({ type: "error", text: "新密码至少 8 位" });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -113,7 +115,7 @@ export default function AccountSettings() {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
               style={{ background: "var(--accent-glow-red)", color: "var(--accent-red-bright)" }}>
-              {username[0]}
+              {username?.[0]?.toUpperCase() ?? "?"}
             </div>
             <div>
               <div className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>{username}</div>
@@ -157,7 +159,7 @@ export default function AccountSettings() {
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               required
-              minLength={4}
+              minLength={8}
               style={{
                 background: "rgba(0,0,0,0.2)",
                 border: "1px solid var(--border-default)",

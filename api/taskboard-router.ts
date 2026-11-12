@@ -935,11 +935,18 @@ export const taskboardRouter = createRouter({
         .orderBy(desc(tasks.priority), asc(tasks.createdAt))
         .limit(200);
 
+      // 执行审批（parked）同样受 agentId 过滤约束（2026-11-12 补齐）：
+      // 此前只有 review 单按 agentId 收窄，parked 无论筛选谁都是全量返回——
+      // 于是「选中审批人 A」的看板里仍会冒出属于 B 的高风险待批单，横幅计数也对不上。
+      // 归 null（未指派）的任务对所有人可见，避免通用任务被筛没了。
       const parked = parkedRows
         .filter((row) => {
           const state = getApprovalState(row.input);
           return state.required && state.decision === "pending";
         })
+        .filter(
+          (row) => input.agentId === undefined || row.agentId === null || row.agentId === input.agentId
+        )
         .map((row) => ({ ...row, pendingType: "execution_approval" as const }));
 
       const review = reviewRows

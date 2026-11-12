@@ -1,6 +1,8 @@
 /**
  * AList 网盘页面
- * - 连接配置（界面可改，优先于环境变量；密码永不回显）
+ * - 连接配置（baseUrl / username / basePath / autoUpload 界面可改，优先于环境变量）
+ *   密码是唯一例外：后端 saveAlistDbConfig 明确丢弃 password 字段，只认服务器环境变量
+ *   ALIST_PASSWORD，所以界面不再提供密码输入框，也不再暗示密码可由界面保存
  * - 连接状态（含真实读写探测）
  * - 文件浏览器（目录导航 + 下载链接）
  * - 任务产物自动上传状态说明
@@ -40,7 +42,7 @@ export default function AlistPanel() {
   const [formTouched, setFormTouched] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  // 不再持有 password 状态：后端丢弃该字段，前端留着只会骗自己
   const [basePath, setBasePath] = useState("/");
   const [autoUpload, setAutoUpload] = useState(true);
 
@@ -57,15 +59,16 @@ export default function AlistPanel() {
   const saveMutation = trpc.alist.saveConfig.useMutation({
     onSuccess: (res) => {
       if (!res.success) {
-        toast.error(res.error ?? "保存失败");
+        // 后端在 ALIST_PASSWORD 缺失时会报"首次保存必须填写密码"，而界面已无密码框，
+        // 所以这里必须补上真正可操作的指引，否则用户只会对着表单找不到该填的地方
+        toast.error(`${res.error ?? "保存失败"}（密码需在服务器端配置环境变量 ALIST_PASSWORD）`);
         return;
       }
       if (res.connected) {
         toast.success(`已保存并验证通过：${res.message}`);
       } else {
-        toast.warning(`已保存，但连接探测未通过：${res.message}`);
+        toast.warning(`已保存，但连接探测未通过：${res.message}（密码需在服务器端配置环境变量 ALIST_PASSWORD）`);
       }
-      setPassword("");
       statusQuery.refetch();
       browseQuery.refetch();
     },
@@ -76,7 +79,6 @@ export default function AlistPanel() {
     onSuccess: () => {
       toast.success("已清除界面配置，回退到环境变量");
       setFormTouched(false);
-      setPassword("");
       statusQuery.refetch();
       browseQuery.refetch();
     },
@@ -86,11 +88,10 @@ export default function AlistPanel() {
   const handleSave = () => {
     if (!baseUrl.trim()) return toast.error("请填写 AList 地址");
     if (!username.trim()) return toast.error("请填写账号");
-    if (!password.trim() && !status?.configured) return toast.error("首次配置请填写密码");
+    // password 不再作为入参：后端 saveAlistDbConfig 丢弃它，密码恒定取自 ALIST_PASSWORD
     saveMutation.mutate({
       baseUrl: baseUrl.trim(),
       username: username.trim(),
-      password: password.trim() ? password : undefined, // 留空 = 保留原密码
       basePath: basePath.trim() || "/",
       autoUpload,
     });
@@ -170,7 +171,7 @@ export default function AlistPanel() {
             <Settings2 size={14} style={{ color: "var(--accent-cyan)" }} />
             <span className="text-xs font-mono font-bold" style={{ color: "var(--text-primary)" }}>连接配置</span>
             <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-              界面配置优先于环境变量 · 密码加密存储、永不回显
+              界面配置优先于环境变量 · 密码只认服务器环境变量 ALIST_PASSWORD
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
@@ -194,19 +195,20 @@ export default function AlistPanel() {
                 style={inputStyle}
               />
             </label>
-            <label className="block">
+            <div className="block">
               <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
-                密码{status?.configured ? "（留空则保留原密码）" : ""}
+                密码（不可在此配置）
               </div>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => { setFormTouched(true); setPassword(e.target.value); }}
-                placeholder={status?.configured ? "不修改请留空" : "账号密码"}
-                className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
-                style={inputStyle}
-              />
-            </label>
+              {/* 说明式只读展示：后端 saveAlistDbConfig 丢弃 password，填了也不会生效 */}
+              <div
+                className="w-full text-xs font-mono px-2.5 py-1.5 rounded leading-relaxed"
+                style={{ ...inputStyle, color: "var(--text-muted)" }}
+              >
+                由服务器环境变量{" "}
+                <span style={{ color: "var(--accent-gold)" }}>ALIST_PASSWORD</span>{" "}
+                提供，此处无需也不应该填写。
+              </div>
+            </div>
             <label className="block">
               <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
                 上传目录（该账号在 AList 中的路径）
@@ -254,6 +256,7 @@ export default function AlistPanel() {
           </div>
           <div className="text-[10px] font-mono mt-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
             也可以用 Zeabur 环境变量配置（ALIST_BASE_URL / ALIST_USERNAME / ALIST_PASSWORD / ALIST_BASE_PATH / ALIST_AUTO_UPLOAD）；两者同时存在时以界面配置为准。
+            其中 <span style={{ color: "var(--accent-gold)" }}>ALIST_PASSWORD</span> 是密码的唯一来源——界面配置里不含密码字段，未设置该变量时连接必然探测失败。
           </div>
         </div>
 

@@ -37,6 +37,68 @@ export function TaskDetailDrawer({
   const threadMessages = (detailData?.threadMessages || []) as ThreadMessageData[];
   const artifacts = (detailData?.artifacts || []) as TaskArtifactData[];
 
+  // 真实执行记录：查后端 execution.getByTask（task_messages 里 Runner/Connector
+  // 写下的 dispatch/ack/progress/working/result/error/timeout… 事件流）。
+  // 为什么改：原区块的「RUNNER · AUTO EXECUTION」文案完全由 task.status 推导
+  // （running 就说 Runner 正在执行、done 就说 Runner 自动完成、failed 就说 Runner 尝试失败），
+  // 是编造出来的执行叙事——用户自己点「标记完成」也会显示"Runner 自动完成"。
+  // 现在只展示后端真实存在的执行事件；没有就如实说没有。
+  const execQuery = trpc.execution.getByTask.useQuery(
+    { taskId: task.id },
+    { enabled: open, retry: 1, staleTime: 10000 }
+  );
+  const execTimeline = (execQuery.data?.timeline ?? []) as ExecEventData[];
+  const execSummary = execQuery.data?.summary;
+
+  type ExecEventData = {
+    id: number;
+    taskId: number;
+    fromAgentId: number | null;
+    toAgentId: number | null;
+    eventType: string;
+    content: string | null;
+    createdAt: string;
+  };
+
+  /** agent id → 可读名（查不到就如实显示 id，不美化） */
+  const agentLabel = (id: number | null | undefined) => {
+    if (id === null || id === undefined) return "—";
+    return agents.find((a) => a.id === id)?.name ?? `Agent #${id}`;
+  };
+
+  // 首末事件跨度（仅当有 ≥2 条真实事件时才算，不估猜）
+  const execSpanMs =
+    execTimeline.length >= 2
+      ? new Date(execTimeline[execTimeline.length - 1].createdAt).getTime() -
+        new Date(execTimeline[0].createdAt).getTime()
+      : null;
+  const executors = Array.from(
+    new Set(
+      execTimeline
+        .map((e) => e.fromAgentId)
+        .filter((v): v is number => v !== null && v !== undefined)
+    )
+  );
+
+  /** 毫秒 → 人类可读时长；无数据返回「—」，不编造 */
+  const fmtDur = (ms: number | null) => {
+    if (ms === null || !Number.isFinite(ms) || ms < 0) return "—";
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h${m % 60}m`;
+  };
+
+  /** 事件类型 → 颜色（只影响观感，不改变语义） */
+  const eventColor = (t: string) =>
+    t === "result" ? "var(--success)"
+    : t === "error" || t === "timeout" || t === "cancel" ? "var(--accent-red)"
+    : t === "working" || t === "progress" ? "var(--accent-cyan)"
+    : t === "dispatch" ? "var(--accent-gold)"
+    : "var(--text-muted)";
+
   type ThreadMessageData = {
     id: number;
     taskId: number;
@@ -350,32 +412,89 @@ export function TaskDetailDrawer({
             </div>
           )}
 
-          {/* P5: Runner execution info */}
-          {(task.status === "done" || task.status === "failed" || task.status === "running") && (
-            <div className="mb-4">
-              <div className="section-label mb-2">
-                <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                  <Bot size={11} /> RUNNER · AUTO EXECUTION
-                </span>
-              </div>
-              <div
-                className="glass-panel p-3 sci-border text-xs font-mono"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{
-                    background: task.status === "running" ? "var(--warning)" :
-                               task.status === "done" ? "var(--success)" : "var(--accent-red)"
-                  }} />
-                  <span style={{ color: "var(--text-secondary)" }}>
-                    {task.status === "running" ? "Runner picked up this task and is executing it" :
-                     task.status === "done" ? "Runner completed this task automatically" :
-                     "Runner attempted this task but it failed"}
-                  </span>
-                </div>
-              </div>
+          {/* Runner 执行记录 —— 只展示后端 execution.getByTask 里的真实事件 */}
+          <div className="mb-4">
+            <div className="section-label mb-2">
+              <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <Bot size={11} /> RUNNER · 执行记录
+              </span>
             </div>
-          )}
+            <div
+              className="glass-panel p-3 sci-border text-xs font-mono"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {execQuery.isLoading ? (
+                <div>加载执行记录...</div>
+              ) : execQuery.isError ? (
+                <div style={{ color: "var(--accent-red)" }}>
+                  执行记录加载失败：{execQuery.error?.message}
+                </div>
+              ) : execTimeline.length === 0 ? (
+                <div>无执行记录（该任务未经过 Runner 执行）</div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+                    <span>
+                      <span style={{ color: "var(--text-secondary)" }}>事件数:</span>{" "}
+                      {execTimeline.length}
+                      {execSummary ? `（dispatch ${execSummary.dispatch} / progress ${execSummary.progress} / result ${execSummary.result} / error ${execSummary.error}）` : ""}
+                    </span>
+                    <span>
+                      <span style={{ color: "var(--text-secondary)" }}>执行者:</span>{" "}
+                      {executors.length > 0
+                        ? executors.map((id) => agentLabel(id)).join("、")
+                        : "未记录"}
+                    </span>
+                    <span>
+                      <span style={{ color: "var(--text-secondary)" }}>首末事件跨度:</span>{" "}
+                      {execSpanMs === null ? "—（事件不足 2 条）" : fmtDur(execSpanMs)}
+                    </span>
+                    <span>
+                      <span style={{ color: "var(--text-secondary)" }}>开始:</span>{" "}
+                      {fmtTime(execTimeline[0].createdAt)}
+                    </span>
+                    <span>
+                      <span style={{ color: "var(--text-secondary)" }}>最后:</span>{" "}
+                      {fmtTime(execTimeline[execTimeline.length - 1].createdAt)}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {execTimeline
+                      .slice(-6)
+                      .reverse()
+                      .map((e) => (
+                        <div key={e.id} className="flex items-start gap-2">
+                          <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>
+                            {fmtTime(e.createdAt)}
+                          </span>
+                          <span style={{ color: eventColor(e.eventType), flexShrink: 0 }}>
+                            {e.eventType}
+                          </span>
+                          <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>
+                            {agentLabel(e.fromAgentId)}
+                            {e.toAgentId ? ` → ${agentLabel(e.toAgentId)}` : ""}
+                          </span>
+                          {e.content && (
+                            <span
+                              className="truncate"
+                              style={{ color: "var(--text-muted)" }}
+                              title={e.content}
+                            >
+                              {e.content.slice(0, 80)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                  {execTimeline.length > 6 && (
+                    <div className="mt-1" style={{ color: "var(--text-muted)" }}>
+                      以上为最近 6 条（共 {execTimeline.length} 条，按时间倒序）
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
           {/* Write to board — 写入任务记事板 */}
           {task.output && task.status === "done" && (

@@ -385,15 +385,21 @@ export default function MailboxPanel() {
   const agentQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 15000 });
   const agents = (agentQuery.data || []) as Agent[];
 
+  // 收件箱身份 = 用户在顶部下拉里显式选择的邮箱。
+  // 为什么改：原实现用「列表第一个 agent」兜底冒充"我"，而 agent.list 是按
+  // updatedAt 倒序返回的——别的助手一更新，"我的收件箱"就变成别人的收件箱。
+  // 身份不能猜，只能由用户明确指定；未指定时不发请求，页面显示「请先选择邮箱身份」。
   const inboxQuery = trpc.mailbox.inbox.useQuery(
     {
-      mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
+      mailboxId: selectedMailboxId,
       status: selectedStatus || undefined,
       limit: 100,
     },
-    { enabled: !!(selectedMailboxId || agents[0]?.agentId), retry: 1, staleTime: 5000 }
+    { enabled: !!selectedMailboxId, retry: 1, staleTime: 5000 }
   );
   const messages = (inboxQuery.data || []) as MailboxMessage[];
+  // 当前选中的邮箱身份（未选为 undefined）——发送/回复/已读都要用它，避免再猜"我"是谁
+  const selectedIdentity = agents.find((a) => a.agentId === selectedMailboxId);
 
   const utils = trpc.useUtils();
 
@@ -538,8 +544,25 @@ export default function MailboxPanel() {
         </div>
       </div>
 
+      {/* 未选择邮箱身份：明确提示先去选，不拿「列表第一个 agent」冒充我 */}
+      {!selectedMailboxId && (
+        <div className="glass-panel p-8 text-center sci-border">
+          <Inbox
+            size={48}
+            className="mx-auto mb-3 opacity-20"
+            style={{ color: "var(--text-muted)" }}
+          />
+          <div className="text-sm font-mono" style={{ color: "var(--text-muted)" }}>
+            请先选择邮箱身份
+          </div>
+          <div className="text-[10px] font-mono mt-2" style={{ color: "var(--text-muted)" }}>
+            收件箱与发件人身份都取自顶部的「选择助手邮箱」，系统不代为猜测
+          </div>
+        </div>
+      )}
+
       {/* Loading */}
-      {inboxQuery.isLoading && (
+      {selectedMailboxId && inboxQuery.isLoading && (
         <div
           className="text-sm font-mono text-center py-12"
           style={{ color: "var(--text-muted)" }}
@@ -549,14 +572,14 @@ export default function MailboxPanel() {
       )}
 
       {/* Error */}
-      {inboxQuery.isError && (
+      {selectedMailboxId && inboxQuery.isError && (
         <div className="text-sm" style={{ color: "var(--accent-red)" }}>
           加载失败: {inboxQuery.error?.message}
         </div>
       )}
 
       {/* Empty */}
-      {!inboxQuery.isLoading && !inboxQuery.isError && messages.length === 0 && (
+      {selectedMailboxId && !inboxQuery.isLoading && !inboxQuery.isError && messages.length === 0 && (
         <div className="glass-panel p-8 text-center sci-border">
           <Mail
             size={48}
@@ -564,9 +587,7 @@ export default function MailboxPanel() {
             style={{ color: "var(--text-muted)" }}
           />
           <div className="text-sm font-mono" style={{ color: "var(--text-muted)" }}>
-            {selectedMailboxId
-              ? "该邮箱暂无消息"
-              : "请选择助手邮箱查看消息"}
+            该邮箱暂无消息
           </div>
         </div>
       )}
@@ -579,18 +600,21 @@ export default function MailboxPanel() {
               key={msg.id}
               msg={msg}
               onView={() => setDetailMsg(msg)}
-              onAck={() =>
+              // 操作身份同样只认显式选择的邮箱，不再回退 system/第一个 agent
+              onAck={() => {
+                if (!selectedMailboxId) return;
                 ackMutation.mutate({
                   messageId: msg.id,
-                  mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
-                })
-              }
-              onResolve={() =>
+                  mailboxId: selectedMailboxId,
+                });
+              }}
+              onResolve={() => {
+                if (!selectedMailboxId) return;
                 resolveMutation.mutate({
                   messageId: msg.id,
-                  mailboxId: selectedMailboxId || agents[0]?.agentId || "system",
-                })
-              }
+                  mailboxId: selectedMailboxId,
+                });
+              }}
             />
           ))}
         </div>
@@ -614,6 +638,40 @@ export default function MailboxPanel() {
           </div>
 
           <div className="space-y-3">
+            {/* 发件人身份 — 取自顶部所选的邮箱身份 */}
+            <div>
+              <label className="block text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                发件人 · FROM
+              </label>
+              <div
+                className="w-full px-3 py-2 rounded text-xs font-mono flex items-center justify-between gap-2"
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid var(--border-default)",
+                  color: selectedMailboxId ? "var(--text-primary)" : "var(--accent-gold)",
+                }}
+              >
+                <span>
+                  {selectedMailboxId
+                    ? selectedIdentity
+                      ? `${selectedIdentity.name} (${selectedMailboxId})`
+                      : selectedMailboxId
+                    : "尚未选择邮箱身份"}
+                </span>
+                <span className="text-[9px]" style={{ color: "var(--text-muted)" }}>
+                  取自顶部「选择助手邮箱」
+                </span>
+              </div>
+              {/* 为什么不能省：后端 mailbox.send 在拿不到 sender 时会兜底写
+                  fromMailboxId = "system"，所有前端邮件于是都变成 system 发的。
+                  这里必须显式带上用户选定的身份，没选就先让他去选。 */}
+              {!selectedMailboxId && (
+                <div className="text-[10px] font-mono mt-1" style={{ color: "var(--accent-gold)" }}>
+                  请先在顶部选择邮箱身份，再发送消息
+                </div>
+              )}
+            </div>
+
             {/* Target Agent */}
             <div>
               <label className="block text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
@@ -680,6 +738,10 @@ export default function MailboxPanel() {
             <div className="flex justify-end">
               <button
                 onClick={() => {
+                  if (!selectedMailboxId) {
+                    toast.error("请先在顶部选择邮箱身份（发件人）");
+                    return;
+                  }
                   if (!targetAgentId) {
                     toast.error("请选择目标助手");
                     return;
@@ -689,6 +751,8 @@ export default function MailboxPanel() {
                     return;
                   }
                   sendMutation.mutate({
+                    // 显式带发件人身份，避免后端兜底成 "system"
+                    fromMailboxId: selectedMailboxId,
                     toMailboxId: targetAgentId,
                     subject: messageSubject || undefined,
                     body: messageBody,
@@ -723,13 +787,18 @@ export default function MailboxPanel() {
           msg={detailMsg}
           open={detailMsg !== null}
           onClose={() => setDetailMsg(null)}
-          onReply={(body) =>
+          onReply={(body) => {
+            // 回复的发件人同样只认显式选择的邮箱身份（原实现回退 system / 第一个 agent）
+            if (!selectedMailboxId) {
+              toast.error("请先在顶部选择邮箱身份（回复人）");
+              return;
+            }
             replyMutation.mutate({
               messageId: detailMsg.id,
-              fromMailboxId: selectedMailboxId || agents[0]?.agentId || "system",
+              fromMailboxId: selectedMailboxId,
               body,
-            })
-          }
+            });
+          }}
         />
       )}
     </div>

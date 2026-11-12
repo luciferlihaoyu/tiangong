@@ -3,6 +3,7 @@
  */
 import { useState, useMemo } from "react";
 import { trpc } from "@/providers/trpc";
+import { toast } from "sonner";
 import {
   GitBranch,
   CheckCircle2,
@@ -396,27 +397,90 @@ function PlanGenerator() {
     { enabled: false, retry: 0 }
   );
 
+  // 采纳入口：把建议的子任务真正落库成任务。
+  // 后端 taskboard.create 没有批量接口，只能逐条串行创建并逐条记账。
+  const utils = trpc.useUtils();
+  const createTaskMutation = trpc.taskboard.create.useMutation();
+  // 采纳时显式指派执行 Agent：agentId 为 null 的任务会被内建 Runner 以 mode=tianshu 抢跑，
+  // 而天枢没有部分模型的渠道，必然 503 ×3 后 failed（AGENTS.md 明确记载过这个形状）。
+  // 所以这里必须让人自己选，而不是留空。
+  const agentsQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 30000 });
+  const adoptableAgents = (agentsQuery.data ?? []) as Array<{ id: number; name: string; agentId: string; status?: string }>;
+  const [adoptAgentId, setAdoptAgentId] = useState<string>("");
+  const [adopting, setAdopting] = useState(false);
+  const [adoptMsg, setAdoptMsg] = useState<string | null>(null);
+
   const handleGenerate = async () => {
     if (!title || !description) return;
     setLoading(true);
     setGenError(null);
+    setAdoptMsg(null);
     try {
       const result = await generatePlan.refetch();
       if (result.data) {
         setPlan(result.data as TaskPlan);
       } else if (result.error) {
         // react-query 的 refetch 不 reject，失败走 result.error
+        // 文案据实：后端 generatePlan 没有调用任何模型，是关键词分支规则，
+        // 原文案把失败写成「编排生成失败」，会让用户以为是模型侧故障。
         setGenError(
-          "AI 编排生成失败：" +
+          "按关键词规则生成建议失败：" +
             (result.error instanceof Error ? result.error.message : String(result.error))
         );
       }
     } catch (err) {
       setGenError(
-        "AI 编排生成失败：" + (err instanceof Error ? err.message : String(err))
+        "按关键词规则生成建议失败：" + (err instanceof Error ? err.message : String(err))
       );
     }
     setLoading(false);
+  };
+
+  const handleAdopt = async () => {
+    if (!plan || plan.estimatedSubtasks.length === 0 || adopting) return;
+    if (!adoptAgentId) {
+      toast.error("请先选择执行 Agent：未指派的任务会被内建 Runner 抢跑并大概率 503 失败");
+      return;
+    }
+    setAdopting(true);
+    setAdoptMsg(null);
+    const created: string[] = [];
+    const failed: string[] = [];
+    for (const sub of plan.estimatedSubtasks) {
+      try {
+        const res = await createTaskMutation.mutateAsync({
+          name: sub.name,
+          agentId: Number(adoptAgentId),
+          // 描述里保留出处与建议角色，方便看板上的人知道这条任务从哪来
+          description: [
+            sub.description,
+            "",
+            `来源：任务计划「${plan.title}」的关键词规则建议`,
+            `建议角色：${sub.suggestedRole} · 预估工作量：${sub.estimatedEffort}`,
+          ].join("\n"),
+        });
+        created.push(res?.taskId ?? sub.name);
+      } catch (err) {
+        failed.push(
+          `${sub.name}（${err instanceof Error ? err.message : String(err)}）`
+        );
+      }
+    }
+    setAdopting(false);
+    utils.taskboard.list.invalidate();
+    if (failed.length === 0) {
+      toast.success(`已采纳 ${created.length} 个任务`);
+      setAdoptMsg(
+        `已创建 ${created.length} 个任务：${created.join("、")}。它们落在任务板的「待整理」列，` +
+          `执行 Agent 已指定为「${adoptableAgents.find((a) => String(a.id) === adoptAgentId)?.name ?? adoptAgentId}」。`
+      );
+    } else {
+      toast.error(`采纳部分失败：成功 ${created.length} 个，失败 ${failed.length} 个`);
+      setAdoptMsg(
+        `成功 ${created.length} 个${created.length ? `（${created.join("、")}）` : ""}；` +
+          `失败 ${failed.length} 个：${failed.join("；")}`
+      );
+    }
   };
 
   return (
@@ -454,8 +518,13 @@ function PlanGenerator() {
           className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono disabled:opacity-40"
           style={{ background: "var(--accent-cyan)", color: "#000" }}
         >
-          <Lightbulb size={14} /> {loading ? "生成中..." : "生成计划"}
+          <Lightbulb size={14} /> {loading ? "生成中..." : "生成计划建议"}
         </button>
+        {/* 能力说明：不做能力夸大，用户要知道这不是模型生成的 */}
+        <div className="text-[10px] font-mono leading-relaxed" style={{ color: "var(--text-muted)" }}>
+          说明：这里的子任务建议由后端关键词规则生成（不调用任何 AI 模型），
+          结果为临时对象、不自动落库 —— 需要点「采纳为任务」才会真正创建任务。
+        </div>
       </div>
 
       {genError && (
@@ -474,9 +543,47 @@ function PlanGenerator() {
 
       {plan && (
         <div className="space-y-3">
-          <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-            建议子任务
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              建议子任务 · {plan.estimatedSubtasks.length} 条（尚未落库）
+            </div>
+            <select
+              value={adoptAgentId}
+              onChange={(e) => setAdoptAgentId(e.target.value)}
+              className="text-xs px-2 py-1.5 rounded bg-transparent border"
+              style={{ borderColor: "var(--border-default)", color: "var(--text-primary)" }}
+              title="采纳后的任务指派给谁执行（必选：留空会被内建 Runner 抢跑）"
+            >
+              <option value="">采纳前选择执行 Agent…</option>
+              {adoptableAgents.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.name}（{a.agentId}）{a.status === "online" ? " · 在线" : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleAdopt}
+              disabled={adopting || plan.estimatedSubtasks.length === 0 || !adoptAgentId}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono disabled:opacity-40"
+              style={{ background: "var(--accent-gold)", color: "#000" }}
+              title="把这些建议逐条创建为任务（taskboard.create），创建后可在任务板看到"
+            >
+              <Send size={13} />
+              {adopting ? "采纳中..." : `采纳为任务（${plan.estimatedSubtasks.length}）`}
+            </button>
           </div>
+          {adoptMsg && (
+            <div
+              className="px-3 py-2 rounded text-[10px] font-mono leading-relaxed"
+              style={{
+                background: "rgba(76,175,125,0.08)",
+                border: "1px solid rgba(76,175,125,0.3)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              {adoptMsg}
+            </div>
+          )}
           {plan.estimatedSubtasks.map((task, i) => (
             <div
               key={i}

@@ -142,8 +142,6 @@ export default function TaskDetail() {
   const navigate = useNavigate();
   const taskIdNum = id ? Number(id) : NaN;
   const { user } = useAuth();
-  // taskboard 审批/驳回/进度 mutation 都要求 agentId（操作者），用当前登录用户 id 填入。
-  const operatorAgentId = user?.id ?? 0;
 
   const taskQuery = trpc.taskboard.get.useQuery(
     { id: taskIdNum },
@@ -158,6 +156,10 @@ export default function TaskDetail() {
 
   const task = taskQuery.data as TaskDetailData | null | undefined;
   const agents = (agentQuery.data || []) as { id: number; name: string; agentId: string; status: string }[];
+  // 审批操作者身份必须是 agents 表中的 id：users.id 与 agents.id 没有对应关系，
+  // 原先传登录用户 id，结果要么被后端 reviewer 校验直接拒，要么把用户 id 污染成 reviewerId。
+  // 取任务已指定的 reviewer，其次执行 agent；都拿不到就给 null（TaskReviewActions 会禁用按钮）。
+  const operatorAgentId = task?.reviewerId ?? task?.agentId ?? null;
 
   const assignee = useMemo(() => {
     if (!task?.agentId) return null;

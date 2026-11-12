@@ -54,7 +54,10 @@ export function useDashboardStats(): DashboardStats {
     if (!usageByDayQuery.data || !Array.isArray(usageByDayQuery.data)) {
       return undefined;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    // 与后端口径对齐：usage.byDay 现在按**本地日**聚合（api/lib/day-sql.ts），
+    // 这里也必须用本地日（原先 toISOString 是 UTC 日，北京时间 0~8 点会取到昨天那一行，
+    // 首页「今日成本」与用量页对不上）。
+    const today = localDayKey(new Date());
     const todayRow = (usageByDayQuery.data as Array<{ date: string; costCents: number }>).find(
       (r) => r.date === today
     );
@@ -72,4 +75,12 @@ export function useDashboardStats(): DashboardStats {
     isLoading,
     hasBackend,
   };
+}
+
+/** 本地时区的 YYYY-MM-DD（与后端 sqlDayOf 的 localtime 口径一致）。 */
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }

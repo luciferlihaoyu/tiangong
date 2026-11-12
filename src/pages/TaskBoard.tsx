@@ -9,7 +9,7 @@ import { CreateTaskModal } from "@/components/taskboard/CreateTaskModal";
 import type { Task, TaskDetail, Agent, BoardStatus } from "@/components/taskboard/types";
 import { BOARD_STATUSES, BOARD_STATUS_CONFIG } from "@/components/taskboard/types";
 import { toast } from "sonner";
-import { Plus, RefreshCw, Search, Layout, Shield, Gavel } from "lucide-react";
+import { Plus, RefreshCw, Search, Layout, Shield, Gavel, Users } from "lucide-react";
 
 export default function TaskBoard() {
   const navigate = useNavigate();
@@ -33,6 +33,12 @@ export default function TaskBoard() {
   const [showCreate, setShowCreate] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [dropError, setDropError] = useState<string | null>(null);
+  // 审批人筛选器（空 = 不过滤，展示全部待审批）。
+  // 为什么改：原来用 `agents.find(status === "online")` 把「第一个在线 Agent」当成
+  // 登录用户"我"传给 listPendingApprovals，横幅还写「待我审批 N 项」——
+  // 这个"我"与真正的登录用户毫无关系，在线列表一变结论就变。
+  // 现在默认看全部，要看某人的就由用户在筛选器里显式指定。
+  const [approverFilter, setApproverFilter] = useState<string>("");
 
   const utils = trpc.useUtils();
 
@@ -54,11 +60,13 @@ export default function TaskBoard() {
 
   const { isAdmin } = useAuth();
 
-  const firstAgent = agents.find((a) => a.status === "online");
-  const currentAgentId = firstAgent?.id ?? agents[0]?.id;
+  // undefined = 不按 agent 过滤。后端 listPendingApprovals 的 agentId 是可选入参：
+  // 不传时 review 单返回全部（含 reviewerId 为空的），执行审批(parked) 也全部返回；
+  // 传了就只保留 reviewerId 为空的或等于该 agent 的 review 单。
+  const approverAgentId = approverFilter ? Number(approverFilter) : undefined;
 
   const pendingApprovalsQuery = trpc.taskboard.listPendingApprovals.useQuery(
-    { agentId: currentAgentId },
+    { agentId: approverAgentId },
     { retry: 1, staleTime: 5000 }
   );
   const pendingApprovals = (pendingApprovalsQuery.data || []) as (Task & {
@@ -88,20 +96,24 @@ export default function TaskBoard() {
         duration: 4000,
       });
       utils.taskboard.list.invalidate();
-      if (currentAgentId) {
-        utils.taskboard.listPendingApprovals.invalidate({ agentId: currentAgentId });
-      }
+      // 不过滤地整体失效即可（原先按「假我」的 id 精确失效）
+      utils.taskboard.listPendingApprovals.invalidate();
     }
     if (lastMessage.type === "mailbox_message_sent") {
       const { subject, fromMailboxId, toMailboxId } = lastMessage as any;
-      if (toMailboxId && currentAgentId) {
+      // 前端没有「当前登录 Agent」这个概念（登录用户是平台账号，不是 Agent），
+      // 所以无法判断这条消息是不是"我的"；如实播报收件箱与发件人，不虚构归属。
+      if (toMailboxId) {
         const toAgent = agents.find((a) => a.agentId === toMailboxId);
-        if (toAgent?.id === currentAgentId) {
-          toast.info(`新消息: ${subject || "Mailbox message"}`, { duration: 5000 });
-        }
+        toast.info(
+          `新消息: ${subject || "Mailbox message"} → ${toAgent?.name ?? toMailboxId}${
+            fromMailboxId ? `（来自 ${fromMailboxId}）` : ""
+          }`,
+          { duration: 5000 }
+        );
       }
     }
-  }, [lastMessage, utils, detailTaskId, agents, currentAgentId]);
+  }, [lastMessage, utils, detailTaskId, agents]);
 
   // Group tasks by boardStatus
   const groupedTasks = useMemo(() => {
@@ -142,17 +154,19 @@ export default function TaskBoard() {
       const from = (task.boardStatus || "triage") as BoardStatus;
       if (from === status) return;
 
-      const firstAgent = agents.find((a) => a.status === "online");
-      const agentId = task.agentId || firstAgent?.id || agents[0]?.id;
+      // 状态变更需要记一个"操作 Agent"。原实现拿「第一个在线 Agent」顶替，
+      // 会把改动记到无关助手名下；现在改为：任务自己的执行者 → 看板上用户显式
+      // 选定的审批人/操作身份 → 都没有就报错要求先选，不猜。
+      const agentId = task.agentId ?? approverAgentId;
       if (!agentId) {
-        setDropError("无可用的 Agent 执行状态变更");
+        setDropError("未指定操作身份：请先在上方「审批人」筛选器里选一个助手，或给该任务指派执行 Agent");
         return;
       }
 
       updateStatusMutation.mutate({ taskId, agentId, boardStatus: status });
       setDraggedTaskId(null);
     },
-    [tasks, agents, updateStatusMutation]
+    [tasks, approverAgentId, updateStatusMutation]
   );
 
   const handleTaskClick = useCallback((task: Task) => {
@@ -187,26 +201,27 @@ export default function TaskBoard() {
   }, [tasks]);
 
   /**
-   * "我的待审"任务 id 集合：
-   *  - 管理员：所有 review 任务 + 所有审批闸门 parked 任务（高风险待批）
-   *  - 非管理员：仅 reviewerId === currentAgentId 的 review 任务
-   *    （parked/执行审批是管理员职责，非管理员不显示）
-   *  - 加上后端 listPendingApprovals 返回的（reviewerId 空的 review 任务）
+   * 待审批任务 id 集合（看板列高亮用）：
+   *  - 管理员：全部 review 任务
+   *  - 非管理员且未筛选审批人：全部 review 任务（含 reviewerId 为空的未指派单）
+   *  - 非管理员且已筛审批人：reviewerId 为空或等于该审批人的 review 任务
+   *  - 加上后端 listPendingApprovals 返回的记录（含高风险执行审批 parked）
+   * 「我」是谁不再猜测：没有筛选条件时就是"全部待审批"。
    */
   const myReviewTaskIds = useMemo(() => {
     const ids = new Set<number>();
     for (const t of tasks) {
-      if (t.boardStatus === "review") {
-        if (isAdmin) ids.add(t.id);
-        else if (currentAgentId && t.reviewerId === currentAgentId) ids.add(t.id);
-      }
+      if (t.boardStatus !== "review") continue;
+      if (isAdmin) ids.add(t.id);
+      else if (approverAgentId === undefined) ids.add(t.id);
+      else if (t.reviewerId === null || t.reviewerId === approverAgentId) ids.add(t.id);
     }
     for (const t of pendingApprovals) {
       if (t.pendingType === "execution_approval" && !isAdmin) continue;
       ids.add(t.id);
     }
     return ids;
-  }, [tasks, pendingApprovals, isAdmin, currentAgentId]);
+  }, [tasks, pendingApprovals, isAdmin, approverAgentId]);
 
   return (
     <div
@@ -260,7 +275,7 @@ export default function TaskBoard() {
             { key: "review", label: "审核中", color: "#c9a84c", bg: "rgba(201,168,76,0.05)", icon: null },
             { key: "blocked", label: "阻塞", color: "#c23a30", bg: "rgba(194,58,48,0.05)", icon: null },
             { key: "done", label: "已完成", color: "#4caf7d", bg: "rgba(76,175,125,0.05)", icon: null },
-            { key: "myReviews", label: "待我审核", color: "#c9a84c", bg: "rgba(201,168,76,0.08)", icon: Shield },
+            { key: "myReviews", label: "待审批", color: "#c9a84c", bg: "rgba(201,168,76,0.08)", icon: Shield },
           ].map((s) => (
             <div
               key={s.key}
@@ -272,15 +287,15 @@ export default function TaskBoard() {
                 {s.label}
               </span>
               <span className="text-xs font-bold" style={{ color: s.color }}>
-                {s.key === "myReviews" ? myReviewTaskIds.size : stats[s.key as keyof typeof stats]}
+                {s.key === "myReviews" ? pendingApprovals.length : stats[s.key as keyof typeof stats]}
               </span>
               {s.icon && <s.icon size={10} style={{ color: s.color }} />}
             </div>
           ))}
         </div>
 
-        {/* 待我审批 — N>0 时展开前 3 条快速入口 */}
-        {myReviewTaskIds.size > 0 && (
+        {/* 待审批 — 默认展示全部（不按 agent 过滤），可用下方「审批人」筛选器显式收窄 */}
+        {pendingApprovals.length > 0 && (
           <div
             className="mt-2 mb-3 px-3 py-2.5 rounded flex items-start gap-3"
             style={{
@@ -292,44 +307,46 @@ export default function TaskBoard() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <span className="text-xs font-bold" style={{ color: "var(--accent-gold)" }}>
-                  待我审批 · {myReviewTaskIds.size} 项
+                  待审批 · {pendingApprovals.length} 项
                 </span>
                 <span className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-                  含执行审批（高风险卡住）与结果审核，点击打开详情处理
+                  {approverAgentId === undefined
+                    ? "全部审批人（含执行审批高风险卡住与结果审核），点击打开详情处理"
+                    : `已按审批人过滤：${
+                        agents.find((a) => a.id === approverAgentId)?.name ?? `Agent #${approverAgentId}`
+                      }`}
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {tasks
-                  .filter((t) => myReviewTaskIds.has(t.id))
-                  .slice(0, 5)
-                  .map((t) => {
-                    const isParked = pendingApprovals.some(
-                      (p) => p.id === t.id && p.pendingType === "execution_approval"
-                    );
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => handleTaskClick(t)}
-                        className="text-[10px] px-2 py-1 rounded font-mono flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
-                        style={{
-                          background: isParked ? "rgba(194, 58, 48, 0.08)" : "rgba(201, 168, 76, 0.08)",
-                          color: isParked ? "var(--accent-red)" : "var(--accent-gold)",
-                          border: isParked ? "1px solid rgba(194, 58, 48, 0.3)" : "1px solid rgba(201, 168, 76, 0.25)",
-                        }}
-                        title={t.name}
-                      >
-                        <Shield size={9} />
-                        {t.taskId}
-                        {isParked && <span>· 高风险待批</span>}
-                        {!isParked && t.reviewerId && t.reviewerId !== currentAgentId && (
-                          <span style={{ color: "var(--text-muted)" }}>· 委派</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                {myReviewTaskIds.size > 5 && (
+                {pendingApprovals.slice(0, 5).map((p) => {
+                  const isParked = p.pendingType === "execution_approval";
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleTaskClick(p)}
+                      className="text-[10px] px-2 py-1 rounded font-mono flex items-center gap-1 transition-colors hover:bg-[rgba(201,168,76,0.12)]"
+                      style={{
+                        background: isParked ? "rgba(194, 58, 48, 0.08)" : "rgba(201, 168, 76, 0.08)",
+                        color: isParked ? "var(--accent-red)" : "var(--accent-gold)",
+                        border: isParked ? "1px solid rgba(194, 58, 48, 0.3)" : "1px solid rgba(201, 168, 76, 0.25)",
+                      }}
+                      title={p.name}
+                    >
+                      <Shield size={9} />
+                      {p.taskId}
+                      {isParked && <span>· 高风险待批</span>}
+                      {!isParked && p.reviewerId && (
+                        <span style={{ color: "var(--text-muted)" }}>
+                          · 审批人{" "}
+                          {agents.find((a) => a.id === p.reviewerId)?.name ?? `#${p.reviewerId}`}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                {pendingApprovals.length > 5 && (
                   <span className="text-[10px] font-mono px-2 py-1" style={{ color: "var(--text-muted)" }}>
-                    +{myReviewTaskIds.size - 5} 更多
+                    +{pendingApprovals.length - 5} 更多
                   </span>
                 )}
               </div>
@@ -337,7 +354,7 @@ export default function TaskBoard() {
           </div>
         )}
 
-        {/* Search + drop error */}
+        {/* Search + 审批人筛选 + drop error */}
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <div
             className="flex items-center gap-1.5 px-3 py-1.5 rounded"
@@ -353,6 +370,36 @@ export default function TaskBoard() {
               style={{ color: "var(--text-primary)" }}
             />
           </div>
+          {/* 审批人筛选：空 = 不过滤（看全部待审批）。不再自动认定"我"是谁。 */}
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded"
+            style={{ background: "rgba(0,0,0,0.15)", border: "1px solid var(--border-default)" }}
+          >
+            <Users size={14} style={{ color: "var(--text-muted)" }} />
+            <select
+              value={approverFilter}
+              onChange={(e) => setApproverFilter(e.target.value)}
+              className="bg-transparent text-xs outline-none font-mono"
+              style={{ color: "var(--text-primary)" }}
+              title="审批人筛选：选中后只显示该助手的待审批任务"
+            >
+              <option value="">审批人：全部</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.agentId})
+                </option>
+              ))}
+            </select>
+          </div>
+          {approverFilter && (
+            <button
+              onClick={() => setApproverFilter("")}
+              className="text-[10px] font-mono px-2 py-1 rounded"
+              style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
+            >
+              清除筛选
+            </button>
+          )}
           {dropError && (
             <div
               className="text-xs px-2 py-1 rounded font-mono"

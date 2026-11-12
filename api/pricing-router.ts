@@ -16,7 +16,15 @@ export const pricingRouter = createRouter({
    */
   list: publicQuery.query(async () => {
     const db = getDb();
-    return db.select().from(modelPricing).orderBy(modelPricing.model);
+    const rows = await db.select().from(modelPricing).orderBy(modelPricing.model);
+    // 标注「未定价」：syncFromTianshu 新建条目时把价格写成 "0" 占位（notes 里写着「价格待人工维护」），
+    // 而 calculateCost 对「表里有该模型且价 0」会诚实地算出 0 元——比「表里没有」（走 fallback
+    // $0.002/1K）还便宜，于是这些模型的成本看起来永远是 0。这里只做只读标注、不动历史成本口径，
+    // 调用方据此提示「未定价」，而不是把 0 当成真实价格展示。
+    return rows.map((r) => ({
+      ...r,
+      unpriced: Number(r.inputPrice) === 0 && Number(r.outputPrice) === 0,
+    }));
   }),
 
   /**

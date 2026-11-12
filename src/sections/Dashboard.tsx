@@ -73,9 +73,9 @@ function SystemMonitor() {
   }).length;
 
   const bars = [
-    { label: '任务吞吐', value: cpuValue, display: cpuDisplay, color: 'var(--accent-cyan)', sub: 'CPU' },
-    { label: '在线 Agent', value: ramValue, display: ramDisplay, color: 'var(--success)', sub: 'RAM' },
-    { label: '任务创建', value: Math.min(100, last24hCount * 5), display: `${last24hCount} 个/24h`, color: wsConnected ? 'var(--accent-gold)' : 'var(--accent-red)', sub: 'NET' },
+    { label: '任务吞吐', value: cpuValue, display: cpuDisplay, color: 'var(--accent-cyan)', sub: 'tasks' },
+    { label: '在线 Agent', value: ramValue, display: ramDisplay, color: 'var(--success)', sub: 'agents' },
+    { label: '任务创建', value: Math.min(100, last24hCount * 5), display: `${last24hCount} 个/24h`, color: wsConnected ? 'var(--accent-gold)' : 'var(--accent-red)', sub: '24h' },
   ];
   return (
     <div className="glass-panel p-4 sci-border">
@@ -189,66 +189,82 @@ function AgentCard({ agent, onStatusChange, onEdit, onDelete, onNavigateToMcp, o
    ═══════════════════════════════════════════ */
 
 function OrgTab() {
-  const treeQuery = "__trpc" in window ? null : null; // will use existing data
+  // 组织/部门数据统一走后端 org.orgTree（组织 → 部门 → 成员一次拿全）。
+  // 原先三块里有两块是硬编码占位文案（提示先部署后端并跑 db:seed），
+  // 而 org.* 的 8 个部门节点后端全部早已实现——纯属前端没接。
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <OrgTreePanel />
+      <OrgTreePanel selectedDeptId={selectedDeptId} onSelectDept={setSelectedDeptId} />
       <div className="lg:col-span-2 flex flex-col gap-4">
-        <DeptDetailPanel />
-        <AgentAssignPanel />
+        <DeptDetailPanel selectedDeptId={selectedDeptId} />
+        <AgentAssignPanel selectedDeptId={selectedDeptId} />
       </div>
     </div>
   );
 }
 
-function OrgTreePanel() {
-  const data = useDataSource();
-  const orgs = data.orgs;
-  const agents = data.agents as MockAgent[];
+function OrgTreePanel({ selectedDeptId, onSelectDept }: { selectedDeptId: number | null; onSelectDept: (id: number) => void }) {
+  const treeQuery = trpc.org.orgTree.useQuery(undefined, { retry: 1, staleTime: 30000 });
+  const tree = treeQuery.data ?? [];
 
-  // We build org hierarchy from agents' orgId and reportsTo
-  const hierarchy = useMemo(() => {
-    const roots = agents.filter(a => !a.reportsTo);
-    const children = new Map<number, MockAgent[]>();
-    for (const a of agents) {
-      if (a.reportsTo) {
-        const list = children.get(a.reportsTo) || [];
-        list.push(a);
-        children.set(a.reportsTo, list);
-      }
-    }
-    return { roots, children };
-  }, [agents]);
-
-  const renderNode = (agent: MockAgent, depth: number = 0) => {
-    const kids = hierarchy.children.get(agent.id) || [];
+  if (treeQuery.isLoading) {
     return (
-      <div key={agent.id} className="ml-4">
-        <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[rgba(180,200,255,0.03)] transition-colors" style={{ marginLeft: `${depth * 16}px` }}>
-          <span className="w-2 h-2 rounded-full" style={{ background: statusCfg[agent.status]?.color || 'var(--text-muted)' }} />
-          <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{agent.name}</span>
-          <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{agent.role || agent.agentId}</span>
-        </div>
-        {kids.map(k => renderNode(k, depth + 1))}
+      <div className="glass-panel p-4 sci-border">
+        <div className="section-label mb-3">组织架构 · ORG_TREE</div>
+        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>加载中…</div>
       </div>
     );
-  };
+  }
+
+  if (treeQuery.isError) {
+    return (
+      <div className="glass-panel p-4 sci-border">
+        <div className="section-label mb-3">组织架构 · ORG_TREE</div>
+        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--accent-red)' }}>
+          组织数据加载失败：{treeQuery.error.message}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-panel p-4 sci-border">
-      <div className="section-label mb-3">组织架构 · ORG_HIERARCHY</div>
-      {orgs.length === 0 ? (
-        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>暂无组织数据</div>
+      <div className="section-label mb-3">组织架构 · ORG_TREE</div>
+      {tree.length === 0 ? (
+        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>
+          暂无组织 · 可在下方「组织」区新建
+        </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {orgs.map(org => (
+          {tree.map(org => (
             <div key={org.id}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-bold" style={{ color: 'var(--accent-gold)' }}>🏢 {org.name}</span>
-                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{org.description}</span>
+                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{org.departments.length} 个部门</span>
               </div>
-              <div className="border-l pl-2" style={{ borderColor: 'var(--border-default)' }}>
-                {hierarchy.roots.filter(r => r.orgId === org.id || !r.orgId).map(r => renderNode(r))}
+              <div className="border-l pl-2 flex flex-col gap-1" style={{ borderColor: 'var(--border-default)' }}>
+                {org.departments.length === 0 && (
+                  <div className="text-[10px] font-mono py-1" style={{ color: 'var(--text-muted)' }}>（该组织下暂无部门）</div>
+                )}
+                {org.departments.map(dept => (
+                  <button
+                    key={dept.id}
+                    onClick={() => onSelectDept(dept.id)}
+                    className="text-left py-1.5 px-2 rounded transition-colors hover:bg-[rgba(180,200,255,0.04)]"
+                    style={selectedDeptId === dept.id ? { background: 'var(--accent-glow-gold)' } : undefined}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>📁 {dept.name}</span>
+                      <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{dept.agents.length} 人</span>
+                    </div>
+                    {dept.leadAgent && (
+                      <div className="text-[10px] font-mono mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        负责人：{dept.leadAgent.name}
+                      </div>
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
           ))}
@@ -258,25 +274,128 @@ function OrgTreePanel() {
   );
 }
 
-function DeptDetailPanel() {
+function DeptDetailPanel({ selectedDeptId }: { selectedDeptId: number | null }) {
+  const utils = trpc.useUtils();
+  const membersQuery = trpc.org.deptGetAgents.useQuery(
+    { deptId: selectedDeptId ?? 0 },
+    { enabled: selectedDeptId !== null, retry: 1 }
+  );
+  const unassign = trpc.org.deptUnassignAgent.useMutation({
+    onSuccess: () => {
+      void utils.org.orgTree.invalidate();
+      if (selectedDeptId !== null) void utils.org.deptGetAgents.invalidate({ deptId: selectedDeptId });
+      toast.success("已移出部门");
+    },
+    onError: (err) => toast.error(`移出部门失败：${err.message}`),
+  });
+
+  const members = membersQuery.data ?? [];
+
   return (
     <div className="glass-panel p-4 sci-border">
-      <div className="section-label mb-3">部门概览 · DEPARTMENTS</div>
-      <div className="text-xs font-mono text-center py-8" style={{ color: 'var(--text-muted)' }}>
-        💡 请先部署后端并运行 `npm run db:seed` 以获取部门数据<br/>
-        部门管理功能将通过 tRPC org 路由提供
-      </div>
+      <div className="section-label mb-3">部门详情 · DEPT_DETAIL</div>
+      {selectedDeptId === null ? (
+        <div className="text-xs font-mono text-center py-6" style={{ color: 'var(--text-muted)' }}>
+          在左侧选择一个部门查看成员
+        </div>
+      ) : membersQuery.isLoading ? (
+        <div className="text-xs font-mono text-center py-6" style={{ color: 'var(--text-muted)' }}>加载中…</div>
+      ) : membersQuery.isError ? (
+        <div className="text-xs font-mono text-center py-6" style={{ color: 'var(--accent-red)' }}>
+          成员加载失败：{membersQuery.error.message}
+        </div>
+      ) : members.length === 0 ? (
+        <div className="text-xs font-mono text-center py-6" style={{ color: 'var(--text-muted)' }}>
+          该部门暂无成员 · 可在下方「Agent 分配」中加入
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {members.map(m => (
+            <div key={m.id} className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[rgba(180,200,255,0.02)]">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusCfg[m.status]?.color || 'var(--text-muted)' }} />
+              <span className="text-xs flex-1 truncate" style={{ color: 'var(--text-secondary)' }}>{m.name}</span>
+              <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{m.agentId}</span>
+              <button
+                onClick={() => unassign.mutate({ agentId: m.id })}
+                disabled={unassign.isPending}
+                className="text-[10px] px-1.5 py-0.5 rounded disabled:opacity-40"
+                style={{ color: 'var(--accent-red)' }}
+              >
+                移出
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function AgentAssignPanel() {
+function AgentAssignPanel({ selectedDeptId }: { selectedDeptId: number | null }) {
+  const utils = trpc.useUtils();
+  const treeQuery = trpc.org.orgTree.useQuery(undefined, { retry: 1, staleTime: 30000 });
+  const agentsQuery = trpc.agent.list.useQuery(undefined, { retry: 1, staleTime: 10000 });
+  const [pickedAgentId, setPickedAgentId] = useState<string>("");
+
+  const assign = trpc.org.deptAssignAgent.useMutation({
+    onSuccess: () => {
+      void utils.org.orgTree.invalidate();
+      if (selectedDeptId !== null) void utils.org.deptGetAgents.invalidate({ deptId: selectedDeptId });
+      setPickedAgentId("");
+      toast.success("已分配到部门");
+    },
+    onError: (err) => toast.error(`分配失败：${err.message}`),
+  });
+
+  // 只列当前未归属任何部门的 agent：已归属的若要调整，先去目标部门"移出"，
+  // 避免同一份列表里出现两种语义。
+  const unassigned = useMemo(
+    () => (agentsQuery.data ?? []).filter(a => !(a as { departmentId?: number | null }).departmentId),
+    [agentsQuery.data]
+  );
+  const deptOptions = useMemo(
+    () => (treeQuery.data ?? []).flatMap(org => org.departments.map(d => ({ id: d.id, label: `${org.name} / ${d.name}` }))),
+    [treeQuery.data]
+  );
+
   return (
     <div className="glass-panel p-4 sci-border">
       <div className="section-label mb-3">Agent 分配 · ASSIGN</div>
-      <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>
-        💡 部门分配功能：拖拽 Agent 到部门 / 通过 tRPC org.deptAssignAgent
-      </div>
+      {selectedDeptId === null ? (
+        <div className="text-xs font-mono text-center py-4" style={{ color: 'var(--text-muted)' }}>
+          先选择左侧部门，再选择要加入的 Agent
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={pickedAgentId}
+            onChange={e => setPickedAgentId(e.target.value)}
+            className="text-xs px-2 py-1.5 rounded bg-transparent border flex-1 min-w-[160px]"
+            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+          >
+            <option value="">选择未分配部门的 Agent…</option>
+            {unassigned.map(a => (
+              <option key={a.id} value={String(a.id)}>{a.name}（{a.agentId}）</option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              if (!pickedAgentId) { toast.error("请先选择 Agent"); return; }
+              assign.mutate({ agentId: Number(pickedAgentId), deptId: selectedDeptId });
+            }}
+            disabled={assign.isPending || !pickedAgentId}
+            className="text-xs px-3 py-1.5 rounded disabled:opacity-40"
+            style={{ background: 'var(--accent-glow-gold)', color: 'var(--accent-gold)' }}
+          >
+            {assign.isPending ? "分配中…" : "分配到当前部门"}
+          </button>
+          {unassigned.length === 0 && (
+            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
+              所有 Agent 均已归属部门（共 {deptOptions.length} 个部门可选）
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -468,7 +587,7 @@ function StatsRow({ agents, tasks, totalMsgs, orgs, todayCostCents }: {
       {[
         { label: '活跃 Agent', value: String(onlineCount), sub: `${agents.length} 个总计` },
         { label: '今日任务', value: String(todayActive), sub: `完成 ${todayDone} / 失败 ${todayFailed}` },
-        { label: '今日成本', value: todayCostCents !== undefined ? `¥${(todayCostCents / 100).toFixed(2)}` : '—', sub: '元' },
+        { label: '今日成本', value: todayCostCents !== undefined ? `$${(todayCostCents / 100).toFixed(2)}` : '—', sub: 'USD' },
         { label: '消息总量', value: totalMsgs >= 1000 ? `${(totalMsgs / 1000).toFixed(1)}K` : String(totalMsgs), sub: '实时同步' },
         { label: '组织', value: String(orgs), sub: '个公司' },
       ].map(s => (
@@ -603,7 +722,6 @@ export function MessagePanel({
   /** 独立栏目页全高模式：面板铺满视口高度（首页沿用紧凑 minHeight） */
   fullHeight?: boolean;
 }) {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   // 对话面切换：天宫对话 | Open WebUI（固定会话）。持久化到 localStorage
   const [chatMode, setChatMode] = useState<"tg" | "webui">(() => {
     return localStorage.getItem("tg_message_chat_mode") === "webui" ? "webui" : "tg";
@@ -625,6 +743,15 @@ export function MessagePanel({
     } catch {
       return null;
     }
+  });
+  // 「我」的身份：显式可选并可持久化。
+  // 原先用 agents[0]（按 updatedAt 排序的第一条）冒充当前用户——别人一改资料，
+  // 我的发言人就换人了。现在默认给一个可见的初始值，但允许在面板里切换。
+  const [myAgentId, setMyAgentId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem("tg_message_my_agent");
+      return saved ? Number(saved) : null;
+    } catch { return null; }
   });
   const [sendContent, setSendContent] = useState("");
   const [conversationMsgs, setConversationMsgs] = useState<DisplayMessage[]>([]);
@@ -684,36 +811,33 @@ export function MessagePanel({
     return m;
   }, [agents]);
 
-  // Fetch recent messages on mount
+  // 「我」的身份落地：优先用用户选过的；没选过或已失效时落到第一个在线/忙碌的助手，
+  // 都没有才退到第一条，并把它写回 localStorage——下次进来身份不再漂移。
   useEffect(() => {
-    fetch("/api/trpc/message.list")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setMessages(data.slice(0, 50).reverse());
-        } else if (Array.isArray(data?.result?.data)) {
-          setMessages(data.result.data.slice(0, 50).reverse());
-        }
-      })
-      .catch(() => {});
-  }, []);
+    if (agents.length === 0) return;
+    if (myAgentId !== null && agents.some((a) => a.id === myAgentId)) return;
+    const fallback = agents.find((a) => a.status === "online" || a.status === "busy") ?? agents[0];
+    setMyAgentId(fallback.id);
+  }, [agents, myAgentId]);
 
-  // "我"的身份：列表第一个 agent（与发送/拉取对话共用同一值）
-  const myId = agents[0]?.id;
+  useEffect(() => {
+    try {
+      if (myAgentId === null) localStorage.removeItem("tg_message_my_agent");
+      else localStorage.setItem("tg_message_my_agent", String(myAgentId));
+    } catch { /* ignore */ }
+  }, [myAgentId]);
+
+  const myId = myAgentId;
+  const myAgent = useMemo(() => agents.find((a) => a.id === myAgentId) ?? null, [agents, myAgentId]);
 
   // Listen for new messages from WebSocket
   useEffect(() => {
     if (!lastWsMessage) return;
     if (lastWsMessage.type === "new_message" && lastWsMessage.message) {
       const msg = lastWsMessage.message as DisplayMessage;
-      setMessages((prev) => {
-        // Avoid duplicates
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg].slice(-100);
-      });
-      // 关键：属于当前对话的消息（含助手回复）实时进对话区，不再等刷新
-      const myId = agents[0]?.id;
-      if (selectedAgentId !== null && myId) {
+      // 属于当前对话的消息（含助手回复）实时进对话区，不再等刷新
+      if (selectedAgentId !== null && myAgentId !== null) {
+        const myId = myAgentId;
         const inConversation =
           (msg.fromAgent === myId && msg.toAgent === selectedAgentId) ||
           (msg.fromAgent === selectedAgentId && msg.toAgent === myId);
@@ -726,14 +850,7 @@ export function MessagePanel({
         setAiThinking(false);
       }
     }
-    if (lastWsMessage.type === "message_read" && lastWsMessage.messageId) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === lastWsMessage.messageId ? { ...m, status: "read", readAt: new Date().toISOString() } : m
-        )
-      );
-    }
-  }, [lastWsMessage, selectedAgentId, myId, assistantAgentId]);
+  }, [lastWsMessage, selectedAgentId, myAgentId, assistantAgentId]);
 
   // Fetch conversation when selecting an agent
   // 依赖收窄到 myId 值（而非整个 agents 数组）——否则 WS 每次状态推送都生成
@@ -765,7 +882,7 @@ export function MessagePanel({
 
   const handleSend = useCallback(async () => {
     if (!sendContent.trim() || selectedAgentId === null) return;
-    const myId = agents[0]?.id;
+    const myId = myAgentId;
     if (!myId) return;
 
     // message.send 是 authedQuery：必须带登录 JWT（与 trpc.tsx httpLink 同一来源），
@@ -852,6 +969,23 @@ export function MessagePanel({
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <div className="section-label">消息面板 · MESSAGES</div>
+          {/* 身份选择器：把「我」摆在明面上。原先程序偷偷拿 updatedAt 最新的 agent 当用户，
+              别人改个资料我的发言人就被换掉，且界面上完全看不出来。 */}
+          <label className="text-[10px] font-mono flex items-center gap-1" style={{ color: "var(--text-muted)" }}>
+            我的身份
+            <select
+              value={myAgentId ?? ""}
+              onChange={(e) => setMyAgentId(e.target.value ? Number(e.target.value) : null)}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-transparent border"
+              style={{ borderColor: "var(--border-default)", color: "var(--text-primary)" }}
+              title="以哪个助手的身份收发消息（保存在本机）"
+            >
+              <option value="">未选择</option>
+              {agents.map((a) => (
+                <option key={a.id} value={String(a.id)}>{a.name}</option>
+              ))}
+            </select>
+          </label>
           <div className="flex items-center gap-1 ml-2">
             <button
               onClick={() => setChatMode("tg")}
@@ -1052,7 +1186,7 @@ export function MessagePanel({
                   </div>
                 ) : (
                   conversationMsgs.map((msg) => {
-                    const isMe = msg.fromAgent === agents[0]?.id;
+                    const isMe = msg.fromAgent === myAgentId;
                     const isAssistant = assistantAgentId !== null && msg.fromAgent === assistantAgentId;
                     return (
                       <div
@@ -1278,9 +1412,91 @@ export default function Dashboard() {
     { key: 'archived', label: '已归档', count: agentBuckets.archived.length },
   ];
 
-  const handleAddAgent = (v: Record<string, string>) => { data.addAgent(v); setShowAgentForm(false); };
-  const handleEditAgent = (v: Record<string, string>) => { if (editAgent) { data.updateAgent(editAgent.id, { name: v.name, system: v.system, source: v.source, model: v.model, role: v.role, description: v.description, capabilities: v.capabilities }); setEditAgent(null); } };
-  const handleAddTask = (v: Record<string, string>) => { data.addTask(v); setShowTaskForm(false); };
+  // 写操作一律 await + catch + toast：原先不 await 不 catch，请求失败时表单照样关闭，
+  // 用户看到「提交成功」而库里什么都没有（task.create 曾经还是 404）。
+  const handleAddAgent = async (v: Record<string, string>) => {
+    try {
+      await data.addAgent(v);
+      setShowAgentForm(false);
+      offlineWarn();
+    } catch (err) {
+      toast.error(`新增助手失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleEditAgent = async (v: Record<string, string>) => {
+    if (!editAgent) return;
+    try {
+      await data.updateAgent(editAgent.id, { name: v.name, system: v.system, source: v.source, model: v.model, role: v.role, description: v.description, capabilities: v.capabilities });
+      setEditAgent(null);
+    } catch (err) {
+      toast.error(`保存助手失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleAddTask = async (v: Record<string, string>) => {
+    try {
+      await data.addTask(v);
+      setShowTaskForm(false);
+      toast.success("任务已创建");
+      offlineWarn();
+    } catch (err) {
+      toast.error(`创建任务失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  // 离线降级提示：hasBackend=false 时 useDataSource 只改 React state，刷新即丢。
+  // 这类"看起来成功"最容易骗人，所以凡是走了降级分支的写操作都要显式告警。
+  const offlineWarn = () => {
+    if (!data.hasBackend) toast.warning("离线模式：改动只写入浏览器内存，刷新后即丢失");
+  };
+  const handleDeleteTask = async (id: number) => {
+    if (!window.confirm("确定删除该任务？此操作不可撤销。")) return;
+    try {
+      await data.deleteTask(id);
+      toast.success("任务已删除");
+      offlineWarn();
+    } catch (err) {
+      toast.error(`删除任务失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  // 子组件回调统一在这里兜住异常：它们原本直接拿 async 函数当同步回调用，
+  // 失败只会变成 unhandled rejection，界面既无提示也无回滚。
+  const handleAgentStatusChange = async (id: number, status: string) => {
+    try {
+      await data.updateAgentStatus(id, status);
+    } catch (err) {
+      toast.error(`切换助手状态失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleDeleteAgent = async (id: number) => {
+    if (!window.confirm("确定删除该助手？此操作不可撤销。")) return;
+    try {
+      await data.deleteAgent(id);
+      toast.success("助手已删除");
+      offlineWarn();
+    } catch (err) {
+      toast.error(`删除助手失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleToggleArchive = async (id: number, archived: boolean) => {
+    try {
+      await data.setAgentArchived(id, archived);
+    } catch (err) {
+      toast.error(`归档操作失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleSystemStatusChange = async (id: number, status: string) => {
+    try {
+      await data.updateSystemStatus(id, status);
+    } catch (err) {
+      toast.error(`切换接入状态失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  const handleTaskProgressBump = async (id: number, progress: number, status: string) => {
+    try {
+      await data.updateTaskProgress(id, progress, status);
+    } catch (err) {
+      toast.error(`更新任务进度失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
   const handleAddOrg = async (v: Record<string, string>) => {
     try {
       await data.addOrg(v);
@@ -1415,15 +1631,15 @@ export default function Dashboard() {
                   </div>
                 ) : filteredAgents.map(agent => (
                   <AgentCard key={agent.id} agent={agent}
-                    onStatusChange={data.updateAgentStatus}
+                    onStatusChange={handleAgentStatusChange}
                     onEdit={a => setEditAgent(a)}
-                    onDelete={data.deleteAgent}
+                    onDelete={handleDeleteAgent}
                     onNavigateToMcp={() => setMainTab('mcp')}
-                    onToggleArchive={(id, archived) => data.setAgentArchived(id, archived)} />
+                    onToggleArchive={handleToggleArchive} />
                 ))}
               </div>
               <div className="lg:col-span-1">
-                <ConnectionPanel systems={data.systems} onStatusChange={data.updateSystemStatus} />
+                <ConnectionPanel systems={data.systems} onStatusChange={handleSystemStatusChange} />
               </div>
             </div>
             {/* Message Panel */}
@@ -1441,8 +1657,8 @@ export default function Dashboard() {
                     <span className="font-mono text-[10px]" style={{ color: 'var(--accent-gold)' }}>{t.taskId}</span>
                     <span className="text-xs flex-1 truncate" style={{ color: 'var(--text-secondary)' }}>{t.name}</span>
                     <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.progress}%</span>
-                    <button onClick={() => data.updateTaskProgress(t.id, Math.min(100, t.progress + 10), t.progress + 10 >= 100 ? 'done' : 'running')} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(180,200,255,0.04)]" style={{ color: 'var(--text-muted)' }}>+10%</button>
-                    <button onClick={() => data.deleteTask(t.id)} className="text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)]" style={{ color: 'var(--accent-red)' }}>✕</button>
+                    <button onClick={() => handleTaskProgressBump(t.id, Math.min(100, t.progress + 10), t.progress + 10 >= 100 ? 'done' : 'running')} className="text-[10px] px-1.5 py-0.5 rounded hover:bg-[rgba(180,200,255,0.04)]" style={{ color: 'var(--text-muted)' }}>+10%</button>
+                    <button onClick={() => handleDeleteTask(t.id)} className="text-[10px] px-1 rounded hover:bg-[var(--accent-glow-red)]" style={{ color: 'var(--accent-red)' }}>✕</button>
                   </div>
                 ))}
               </div>

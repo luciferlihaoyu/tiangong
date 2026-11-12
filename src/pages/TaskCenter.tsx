@@ -85,12 +85,32 @@ export default function TaskCenter() {
     done: "done",
     failed: "failed",
   };
-  const boardStatusFilter = filterStatus ? statusToBoardStatus[filterStatus] : undefined;
+  // ⚠️ 反向映射（看板 10 值 → 生命周期 5 值）：原实现只用上面的 statusToBoardStatus
+  // 把 pending 翻成 backlog 去查后端，于是 triage / blocked / cancelled 这些看板态在
+  // 任何筛选项下都查不出来——新建任务默认就是 triage，选「待处理」反而看不见自己刚建的单。
+  // 改为：后端只按 agent/keyword 过滤（照样 limit 200），前端按完整映射归类后再筛。
+  const boardToLifecycle: Record<string, string> = {
+    triage: "pending",
+    backlog: "pending",
+    blocked: "pending",
+    todo: "queued",
+    ready: "queued",
+    running: "running",
+    review: "running",
+    done: "done",
+    failed: "failed",
+    cancelled: "failed",
+  };
   const taskQuery = trpc.taskboard.list.useQuery(
-    { boardStatus: boardStatusFilter, agentId: filterAgentId, keyword: keyword || undefined },
+    { agentId: filterAgentId, keyword: keyword || undefined },
     { retry: 1, staleTime: 5000 }
   );
-  const tasks = (taskQuery.data || []) as Task[];
+  const allTasks = (taskQuery.data || []) as Task[];
+  const tasks = filterStatus
+    ? allTasks.filter(
+        (t) => boardToLifecycle[String((t as { boardStatus?: string | null }).boardStatus ?? "")] === filterStatus
+      )
+    : allTasks;
 
   const convQuery = trpc.conversation.list.useQuery(
     { status: "active" },

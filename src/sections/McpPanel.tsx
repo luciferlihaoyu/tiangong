@@ -1018,23 +1018,23 @@ export default function McpPanel() {
   const [heartbeatResult, setHeartbeatResult] = useState<string | null>(null);
   const [heartbeatLoading, setHeartbeatLoading] = useState(false);
 
-  const handleHeartbeatTest = async () => {
-    if (!heartbeatAgentId) return;
+  // 心跳必须由 Agent/connector 侧携带 MCP Key（x-api-key）上报——后端
+  // agent.updateHeartbeat 用 ctx.apiKeyAgentId 做身份校验，浏览器只有 JWT，
+  // 在这里点按钮 100% 返回 401。所以此处不代发，只生成可直接粘到 Agent 端执行的命令。
+  // 另外该接口会顺带认领一个 queued 任务，在网页上误点等于替 Agent 抢单，更不该代发。
+  const heartbeatCommand = heartbeatAgentId
+    ? `curl -X POST ${typeof window !== "undefined" ? window.location.origin : "https://tiangong.xianrealme.com"}/api/trpc/agent.updateHeartbeat \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: <该 Agent 的 MCP Key>" \\\n  -d '{"id": ${heartbeatAgentId}}'`
+    : "";
+
+  const handleHeartbeatCopy = async () => {
+    if (!heartbeatCommand) return;
     setHeartbeatLoading(true);
     setHeartbeatResult(null);
     try {
-      const res = await trpcCall("agent.updateHeartbeat", { id: parseInt(heartbeatAgentId) });
-      const data = unwrapTrpcData(res);
-      const claimedTask = isRecord(data) ? data.claimedTask : null;
-      const claimedTaskName = isRecord(claimedTask) ? String(claimedTask.name) : "undefined";
-      setHeartbeatResult(claimedTask
-        ? `✅ 心跳成功！已自动认领任务: ${claimedTaskName}`
-        : "✅ 心跳成功！当前无待认领任务"
-      );
-      // 刷新页面以更新 Agent 列表中的心跳时间和连接状态
-      setTimeout(() => window.location.reload(), 1500);
+      await navigator.clipboard.writeText(heartbeatCommand);
+      setHeartbeatResult("✅ 命令已复制，请在该 Agent 的运行环境（带 MCP Key）中执行");
     } catch (e: unknown) {
-      setHeartbeatResult(`❌ 失败: ${getErrorMessage(e)}`);
+      setHeartbeatResult(`⚠️ 复制失败，请手动选中命令复制：${getErrorMessage(e)}`);
     } finally {
       setHeartbeatLoading(false);
     }
@@ -1180,7 +1180,7 @@ curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.updateHeartbeat \\
 
           {/* 心跳测试 */}
           <div className="glass-panel p-5 sci-border">
-            <div className="section-label mb-3">💓 心跳测试 · HEARTBEAT TEST</div>
+            <div className="section-label mb-3">💓 心跳上报 · HEARTBEAT（Agent 侧执行）</div>
             <div className="flex items-end gap-3">
               <div className="flex-1">
                 <Label className="text-[10px] font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
@@ -1203,14 +1203,24 @@ curl -X POST https://tiangong.xianrealme.com/api/trpc/agent.updateHeartbeat \\
                 </select>
               </div>
               <button
-                onClick={handleHeartbeatTest}
+                onClick={handleHeartbeatCopy}
                 disabled={heartbeatLoading || !heartbeatAgentId}
                 className="px-4 py-1.5 rounded text-xs font-bold transition-all hover:brightness-110 disabled:opacity-50"
                 style={{ background: "var(--accent-red)", color: "#fff" }}
               >
-                {heartbeatLoading ? "发送中..." : "💓 发送心跳"}
+                {heartbeatLoading ? "复制中..." : "📋 复制心跳命令"}
               </button>
             </div>
+            <div className="mt-2 text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+              心跳接口要求 MCP Key 身份（x-api-key），浏览器只有登录态发不出去；该接口还会顺带认领一个排队任务，
+              因此不在网页代发。选中 Agent 后复制命令，到该 Agent 的运行环境执行即可。
+            </div>
+            {heartbeatCommand && (
+              <pre className="mt-2 p-2 rounded text-[10px] font-mono overflow-x-auto"
+                style={{ background: "rgba(0,0,0,0.25)", border: "1px solid var(--border-default)", color: "var(--text-secondary)" }}>
+{heartbeatCommand}
+              </pre>
+            )}
             {heartbeatResult && (
               <div className="mt-3 p-2 rounded text-xs font-mono"
                 style={{

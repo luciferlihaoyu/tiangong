@@ -36,6 +36,10 @@ type UsageCacheStats = RouterOutputs["usage"]["cacheStats"];
 type UsageByDay = RouterOutputs["usage"]["byDay"];
 type UsageBySource = RouterOutputs["usage"]["bySource"];
 type UsageRecord = RouterOutputs["usage"]["list"][number];
+/** model_pricing 行（api/pricing-router.ts list，publicQuery） */
+type PricingRow = RouterOutputs["pricing"]["list"][number];
+/** cacheStats.byModel 的单项 */
+type CacheModelRow = UsageCacheStats["byModel"][number];
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -81,54 +85,111 @@ function fmtCny(usd: number): string {
   return `¥${(usd * EXCHANGE_RATE).toFixed(2)}`;
 }
 
-/** 月度预算进度条 */
-function BudgetBar({ byDay, currency, displayMode }: { byDay: UsageByDay; currency: Currency; displayMode: DisplayMode }) {
+/** 缓存节省折算结果；null = 定价表里没有任何一个模型能算出价差（此时不显示金额） */
+interface CacheSavings {
+  /** 按 model_pricing 真实价差折算的节省金额（USD） */
+  usd: number;
+  /** 有可用价差（cachedInputPrice < inputPrice）并参与折算的模型数 */
+  pricedModels: number;
+  /** 命中过缓存、但定价表里查不到价差的 token 数（这部分不折算） */
+  unpricedCachedTokens: number;
+}
+
+/**
+ * 用后端 model_pricing 的真实价差折算缓存节省，取代原先写死的「每 1K token
+ * 固定价差系数」折算（那是一个凭空约定的常数，与任何模型的实际定价无关）。
+ *
+ * 公式与 api/lib/model-pricing.ts 的 calculateCost 同源：
+ *   saved = Σ cachedTokens × (inputPrice − cachedInputPrice) / 1000
+ * 价格单位是 USD / 1K tokens（New API 口径）。
+ *
+ * 为什么宁可返回 null 也不给个数字：
+ * 定价表里没这个模型、或 cachedInputPrice 为空（= 上游没有缓存折扣）时，
+ * 真实的节省就是「算不出来」，编一个平均价差等于造数据。
+ * 渠道前缀模型（如 newapi/xxx）按后端 getModelPricing 的同一套规则回退到末段匹配。
+ */
+function computeCacheSavings(
+  rows: readonly CacheModelRow[],
+  pricing: readonly PricingRow[] | undefined
+): CacheSavings | null {
+  if (!pricing || pricing.length === 0) return null;
+
+  const byModel = new Map<string, PricingRow>();
+  for (const p of pricing) byModel.set(p.model, p);
+  const lookup = (model: string): PricingRow | undefined => {
+    const direct = byModel.get(model);
+    if (direct) return direct;
+    const tail = model.includes("/") ? model.split("/").pop() : undefined;
+    return tail && tail !== model ? byModel.get(tail) : undefined;
+  };
+
+  let usd = 0;
+  let pricedModels = 0;
+  let unpricedCachedTokens = 0;
+
+  for (const row of rows) {
+    const cached = Number(row.cachedPromptTokens ?? 0);
+    if (!(cached > 0)) continue;
+    const p = lookup(row.model);
+    const inputPrice = p ? Number(p.inputPrice) : NaN;
+    const cachedPrice = p?.cachedInputPrice != null ? Number(p.cachedInputPrice) : NaN;
+    const discount = inputPrice - cachedPrice;
+    if (Number.isFinite(inputPrice) && Number.isFinite(cachedPrice) && discount > 0) {
+      usd += (cached * discount) / 1000;
+      pricedModels += 1;
+    } else {
+      unpricedCachedTokens += cached;
+    }
+  }
+
+  if (pricedModels === 0) return null;
+  return { usd, pricedModels, unpricedCachedTokens };
+}
+
+/**
+ * 本月已用金额（取代原来的「月度预算进度条」）
+ *
+ * 为什么改：原实现把一个写死的固定金额（$10）当月度预算分母画进度条，
+ * 但后端根本没有"月度预算"这个配置项可读 ——
+ *   · api/usage-router.ts 只有用量聚合（byModel/byDay/cacheStats…），无预算字段；
+ *   · api/guard-router.ts 的预算是 agents.budgetCents / agents.spentCents（按 Agent、
+ *     按美分、且在 guard.check 里实时校验），不是全局月度刻度；
+ *   · 全库唯一的 monthlyBudgetCents 只是 api/connectors/newapi/types.ts 里的
+ *     契约字段声明，没有任何路由读取或写入它。
+ * 也就是说那条进度条对所有人都是假的（永远显示「$X / $10」）。这里只保留可验证的
+ * 事实——本月实际花费 + 由本月数据外推的月底预计，并明确标注「未设置月度预算」。
+ */
+function MonthlySpendBar({ byDay, currency }: { byDay: UsageByDay; currency: Currency }) {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthCost = byDay
     .filter(d => d.date?.startsWith(monthPrefix))
     .reduce((sum, d) => sum + microsOf(d), 0);
 
-  const BUDGET_MICROS = 10 * 1_000_000; // 月度预算 $10
-  const progress = Math.min(100, (monthCost / BUDGET_MICROS) * 100);
-
-  let barColor = "var(--success)";
-  if (progress > 100) barColor = "var(--accent-red)";
-  else if (progress >= 80) barColor = "var(--warning)";
-  else if (progress >= 60) barColor = "#eab308";
-
-  const remaining = Math.max(0, BUDGET_MICROS - monthCost);
   const currentDay = now.getDate();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  // 预计月底 = 本月已用 / 已过天数 × 当月天数（外推值，不是预算，故文案单独标注）
   const projected = currentDay > 0 && monthCost > 0 ? Math.round((monthCost / currentDay) * daysInMonth) : 0;
 
   return (
     <div className="glass-panel p-3 sci-border mb-4">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1">
         <div className="text-[10px] font-mono uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
-          月度预算 · MONTHLY BUDGET
+          本月已用 · MONTHLY SPEND
         </div>
         <div className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
-          {fmtCost(monthCost, currency)} / {fmtCost(BUDGET_MICROS, currency)}
-          {currency === "USD" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "CNY")} / {fmtCost(BUDGET_MICROS, "CNY")})</span>}
-          {currency === "CNY" && <span className="ml-1" style={{ color: "var(--text-muted)" }}>({fmtCost(monthCost, "USD")} / {fmtCost(BUDGET_MICROS, "USD")})</span>}
+          {fmtCost(monthCost, currency)}
+          {currency === "USD" && <span className="ml-1">({fmtCost(monthCost, "CNY")})</span>}
+          {currency === "CNY" && <span className="ml-1">({fmtCost(monthCost, "USD")})</span>}
         </div>
       </div>
-      <div className="w-full rounded-full overflow-hidden mb-2" style={{ height: "6px", background: "rgba(255,255,255,0.05)" }}>
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(100, progress)}%`, background: barColor }}
-        />
-      </div>
       <div className="flex items-center justify-between text-[10px] font-mono">
-        <span style={{ color: "var(--text-muted)" }}>
-          剩余 {fmtCost(remaining, currency)}
-          {currency === "USD" && <span className="ml-1">({fmtCost(remaining, "CNY")})</span>}
-          {currency === "CNY" && <span className="ml-1">({fmtCost(remaining, "USD")})</span>}
+        <span style={{ color: "var(--text-muted)" }} title="后端没有月度预算配置项，故不显示进度条与剩余额度">
+          未设置月度预算 · {now.getFullYear()}/{now.getMonth() + 1} 累计
         </span>
         {projected > 0 && (
-          <span style={{ color: progress >= 100 ? "var(--accent-red)" : "var(--text-muted)" }}>
-            预计月底 {fmtCost(projected, currency)}
+          <span style={{ color: "var(--text-muted)" }}>
+            按日均外推月底 {fmtCost(projected, currency)}
             {currency === "USD" && <span className="ml-1">({fmtCost(projected, "CNY")})</span>}
             {currency === "CNY" && <span className="ml-1">({fmtCost(projected, "USD")})</span>}
           </span>
@@ -142,11 +203,17 @@ function BudgetBar({ byDay, currency, displayMode }: { byDay: UsageByDay; curren
 function OverviewCards({
   byModel,
   cacheStats,
+  cacheSaved,
+  cacheNote,
   currency,
   displayMode,
 }: {
   byModel: { totalTokens: number | string; callCount: number | string; costCents: number | string; costMicros?: number | string }[];
   cacheStats: { overall?: { cacheHitRate: number; cachedPromptTokens: number; uncachedPromptTokens: number; costCents: number | string; costMicros?: number | string } } | undefined;
+  /** 由 model_pricing 真实价差算出的缓存节省；null = 定价不足，不折算金额 */
+  cacheSaved: CacheSavings | null;
+  /** cacheSaved 为 null 时的原因说明（定价表为空/读取失败/无价差），避免笼统措辞 */
+  cacheNote: string;
   currency: Currency;
   displayMode: DisplayMode;
 }) {
@@ -160,9 +227,8 @@ function OverviewCards({
   );
 
   const costUsd = totals.costMicros / 1_000_000;
-  const savedUsd = cacheStats?.overall
-    ? (cacheStats.overall.cachedPromptTokens * 0.0015) / 1000 // rough estimate
-    : 0;
+  // 缓存命中 token 数是可验证的事实；金额只在定价表能算出真实价差时才展示
+  const cachedTokens = Number(cacheStats?.overall?.cachedPromptTokens ?? 0);
 
   const cards = [
     {
@@ -184,13 +250,21 @@ function OverviewCards({
       color: "var(--success)",
       icon: <Zap size={16} />,
     },
-    {
-      label: "缓存节省",
-      value: fmtUsd(savedUsd),
-      sub: fmtCny(savedUsd),
-      color: "var(--warning)",
-      icon: <ShieldCheck size={16} />,
-    },
+    cacheSaved
+      ? {
+          label: "缓存节省",
+          value: currency === "CNY" ? fmtCny(cacheSaved.usd) : fmtUsd(cacheSaved.usd),
+          sub: `${currency === "CNY" ? fmtUsd(cacheSaved.usd) : fmtCny(cacheSaved.usd)} · 定价表 ${cacheSaved.pricedModels} 模型`,
+          color: "var(--warning)",
+          icon: <ShieldCheck size={16} />,
+        }
+      : {
+          label: "缓存命中 Token",
+          value: fmtTokens(cachedTokens, displayMode),
+          sub: cacheNote,
+          color: "var(--warning)",
+          icon: <ShieldCheck size={16} />,
+        },
     {
       label: "缓存命中率",
       value: cacheStats?.overall?.cacheHitRate != null ? `${cacheStats.overall.cacheHitRate}%` : "0%",
@@ -330,11 +404,12 @@ function CrossTable({ byAgentAndModel, loading, currency, displayMode }: { byAge
 }
 
 /** 缓存命中率图表 */
-function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: UsageCacheStats | undefined; loading: boolean; displayMode: DisplayMode }) {
+function CacheChart({ cacheStats, cacheSaved, cacheNote, loading, displayMode }: { cacheStats: UsageCacheStats | undefined; cacheSaved: CacheSavings | null; cacheNote: string; loading: boolean; displayMode: DisplayMode }) {
   if (loading) return <div className="text-xs p-4" style={{ color: "var(--text-muted)" }}>加载中...</div>;
   if (!cacheStats || cacheStats.byModel.length === 0) return <EmptyState title="暂无缓存数据" desc="Connector 上报缓存信息后可分析" />;
 
   const maxCached = Math.max(...cacheStats.byModel.map((m) => m.cachedPromptTokens), 1);
+  const cachedTokens = Number(cacheStats.overall?.cachedPromptTokens ?? 0);
 
   return (
     <div className="space-y-4">
@@ -375,13 +450,23 @@ function CacheChart({ cacheStats, loading, displayMode }: { cacheStats: UsageCac
           </div>
         </div>
         <div className="p-3 rounded" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
-          <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>缓存节省估算</div>
-          <div className="text-xl font-bold font-mono" style={{ color: "var(--accent-gold)" }}>
-            {fmtUsd(((cacheStats.overall?.cachedPromptTokens ?? 0) * 0.0015) / 1000)}
+          {/* 原来这里用一个写死的每 1K 价差系数乘上命中 token 数，当作「节省金额」，
+              既不读 model_pricing 也不代表任何真实价差。改为只报可验证的命中 token 数，
+              金额仅在定价表算得出真实价差时附带展示。 */}
+          <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>缓存命中 Token</div>
+          <div className="text-xl font-bold font-mono" style={{ color: "var(--success)" }}>
+            {fmtTokens(cachedTokens, displayMode)}
           </div>
           <div className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
-            基于平均输入价差
+            {cacheSaved
+              ? `按定价表价差 ≈ ${fmtUsd(cacheSaved.usd)}（${cacheSaved.pricedModels} 个模型可折算）`
+              : cacheNote}
           </div>
+          {cacheSaved && cacheSaved.unpricedCachedTokens > 0 && (
+            <div className="text-[9px] font-mono mt-0.5" style={{ color: "var(--text-muted)" }}>
+              另有 {fmtTokens(cacheSaved.unpricedCachedTokens, displayMode)} 命中 token 无定价，未折算
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -556,12 +641,15 @@ function EmptyState({ title, desc }: { title: string; desc: string }) {
 
 export default function UsagePanel() {
   const now = new Date();
+  // 日期一律用**本地日**（与后端 api/lib/day-sql.ts 的 'localtime' 分组口径一致）。
+  // 原先 toISOString() 是 UTC 日：北京时间 0~8 点时"今天"取到的是昨天，
+  // 选出来的区间与后端按本地日分组的行对不齐。
   const [from, setFrom] = useState(() => {
     const d = new Date(now);
     d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
+    return localDayKey(d);
   });
-  const [to, setTo] = useState(() => now.toISOString().slice(0, 10));
+  const [to, setTo] = useState(() => localDayKey(now));
   const [model, setModel] = useState("");
   const [source, setSource] = useState("");
   const [agentId, setAgentId] = useState<number | undefined>(undefined);
@@ -569,7 +657,12 @@ export default function UsagePanel() {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("m");
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
 
-  const timeRange = { from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59Z` : undefined };
+  // 不带 Z 后缀 → 按浏览器本地时区解释，与后端分组的本地日边界对齐。
+  // （原先带 Z 即 UTC 边界，与本地日分组错开 8 小时，会漏掉本地今早 0~8 点的用量）
+  const timeRange = {
+    from: from ? `${from}T00:00:00` : undefined,
+    to: to ? `${to}T23:59:59.999` : undefined,
+  };
 
   const byModelQuery = trpc.usage.byModel.useQuery(
     { ...timeRange, source: source || undefined, agentId },
@@ -612,6 +705,13 @@ export default function UsagePanel() {
     { retry: 1, staleTime: 10_000 }
   );
 
+  /**
+   * 定价表（publicQuery）：缓存节省金额的唯一合法来源。
+   * 读不到或没有可用价差时 computeCacheSavings 返回 null，界面就只报命中的 token 数，
+   * 绝不回退到写死系数。
+   */
+  const pricingQuery = trpc.pricing.list.useQuery(undefined, { retry: 1, staleTime: 60_000 });
+
   const byModel: UsageByModel = byModelQuery.data ?? [];
   const byAgent: UsageByAgent = byAgentQuery.data ?? [];
   const byAgentAndModel: UsageByAgentAndModel = byAgentAndModelQuery.data ?? [];
@@ -621,7 +721,25 @@ export default function UsagePanel() {
   const records: readonly UsageRecord[] = listQuery.data ?? [];
   const loading = byModelQuery.isLoading || byDayQuery.isLoading;
 
-  /** 审计：把任意查询的失败显式呈现，避免数字悄悄归零。 */
+  /** 缓存节省：按 model_pricing 真实价差折算（无可用价差 → null，只显示命中量） */
+  const cacheSaved = useMemo(
+    () => computeCacheSavings(cacheStats?.byModel ?? [], pricingQuery.data),
+    [cacheStats, pricingQuery.data]
+  );
+
+  /** 折算不出来时把原因写清楚：定价表没读到 ≠ 定价表没有缓存价 */
+  const cacheNote = useMemo(() => {
+    if (pricingQuery.isError) return "定价表读取失败，不折算金额";
+    if ((pricingQuery.data?.length ?? 0) === 0) return "定价表为空，不折算金额";
+    return "定价表无可用价差，仅显示命中量";
+  }, [pricingQuery.isError, pricingQuery.data]);
+
+  /**
+   * 审计：把任意查询的失败显式呈现，避免数字悄悄归零。
+   * 这里刻意不含 pricingQuery —— 定价表只是缓存节省金额的"可选增强"，
+   * 它失败时页面照常给出 token 事实（并在卡片上注明"定价表读取失败"），
+   * 拉到顶部红条会把一次可选增强的失败放大成整页故障。
+   */
   const firstError = [
     byModelQuery,
     byAgentQuery,
@@ -649,6 +767,7 @@ export default function UsagePanel() {
     cacheStatsQuery.refetch();
     byDayQuery.refetch();
     listQuery.refetch();
+    pricingQuery.refetch(); // 定价变了缓存节省金额就变，手动刷新时一并拉
   };
 
   return (
@@ -822,9 +941,9 @@ export default function UsagePanel() {
         </div>
 
         {/* Overview cards */}
-        <OverviewCards byModel={byModel} cacheStats={cacheStats} currency={currency} displayMode={displayMode} />
+        <OverviewCards byModel={byModel} cacheStats={cacheStats} cacheSaved={cacheSaved} cacheNote={cacheNote} currency={currency} displayMode={displayMode} />
 
-        <BudgetBar byDay={byDay} currency={currency} displayMode={displayMode} />
+        <MonthlySpendBar byDay={byDay} currency={currency} />
 
         {/* Tab navigation */}
         <div className="flex items-center gap-1 mb-4 overflow-x-auto custom-scrollbar">
@@ -905,10 +1024,18 @@ export default function UsagePanel() {
             <div className="text-[10px] font-mono mb-3 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
               缓存命中率分析 · CACHE ANALYTICS
             </div>
-            <CacheChart cacheStats={cacheStats} loading={cacheStatsQuery.isLoading} displayMode={displayMode} />
+            <CacheChart cacheStats={cacheStats} cacheSaved={cacheSaved} cacheNote={cacheNote} loading={cacheStatsQuery.isLoading} displayMode={displayMode} />
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/** 本地时区的 YYYY-MM-DD（与后端 sqlDayOf 的 localtime 口径一致）。 */
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }

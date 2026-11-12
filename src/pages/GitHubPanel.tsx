@@ -7,7 +7,7 @@
  * - Agent permission management (grant, revoke)
  * - PR approval queue (register, approve, reject, audit)
  */
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import { trpc } from "@/providers/trpc";
 import { AdminGate } from "@/components/AdminGate";
@@ -34,7 +34,18 @@ import {
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type GithubReadiness = RouterOutputs["github"]["status"]["readiness"];
-type GithubRepo = RouterOutputs["github"]["listRepos"][number] & { readonly permissionCount?: number };
+/**
+ * 仓库行 = github.listRepos 的原样输出。
+ *
+ * 审计修复：这里原本手写了一个 `& { readonly permissionCount?: number }` 断言，
+ * 但 listRepos（api/github-router.ts）只 select githubRepos 表，根本不返回该字段，
+ * 于是卡片上的「权限: {r.permissionCount ?? 0}」永远显示 0——假数据。
+ * 真实的每仓库权限数只有 github.status 给（它逐个 repo 统计 githubRepoPermissions
+ * 里 active 的行数），类型见 PermissionCounts。
+ */
+type GithubRepo = RouterOutputs["github"]["listRepos"][number];
+/** repoId → active 权限条数（来自 github.status 的 permCounts） */
+type PermissionCounts = Record<number, number>;
 type GithubAgent = RouterOutputs["github"]["listAgents"][number];
 type GithubPermission = RouterOutputs["github"]["listPermissions"][number];
 type GithubPullRequest = RouterOutputs["github"]["listPRs"][number];
@@ -155,7 +166,16 @@ function ReadinessPanel({ readiness, onRefresh }: { readiness: GithubReadiness |
    子组件: Repos
    ═══════════════════════════════════════════ */
 
-function RepoPanel({ repos, onRefresh }: { repos: readonly GithubRepo[]; onRefresh: () => void }) {
+function RepoPanel({
+  repos,
+  permissionCounts,
+  onRefresh,
+}: {
+  repos: readonly GithubRepo[];
+  /** repoId → active 权限条数；未知（如未激活仓库不在 status 统计里）时显示「—」 */
+  permissionCounts: PermissionCounts;
+  onRefresh: () => void;
+}) {
   const [showAdd, setShowAdd] = useState(false);
   const [owner, setOwner] = useState("luciferlihaoyu");
   const [name, setName] = useState("tiangong");
@@ -271,7 +291,12 @@ function RepoPanel({ repos, onRefresh }: { repos: readonly GithubRepo[]; onRefre
                 </a>
                 <span style={{ color: "var(--text-muted)" }}>分支: {r.defaultBranch}</span>
               </div>
-              <span style={{ color: "var(--text-muted)" }}>权限: {r.permissionCount ?? 0}</span>
+              <span
+                style={{ color: "var(--text-muted)" }}
+                title="active 授权条数（来源：github.status 逐仓库统计）"
+              >
+                权限: {permissionCounts[r.id] ?? "—"}
+              </span>
             </div>
           ))}
         </div>
@@ -802,6 +827,16 @@ export default function GitHubPanel() {
   const status = statusQuery.data;
   const readiness = status?.readiness;
   const repos: readonly GithubRepo[] = listReposQuery.data ?? [];
+
+  /**
+   * 每仓库权限数：取 github.status 的统计结果按 repoId 映射。
+   * 不再自己数 listPermissions（它只覆盖当前选中的仓库），也不再用前端手写字段。
+   * 没拿到的仓库（未激活 / status 尚未返回）保持 undefined，界面显示「—」而非误导性的 0。
+   */
+  const permissionCounts = useMemo<PermissionCounts>(
+    () => Object.fromEntries((status?.repos ?? []).map((r) => [r.id, r.permissionCount])),
+    [status]
+  );
   const agents: readonly GithubAgent[] = listAgentsQuery.data ?? [];
   const permissions: readonly GithubPermission[] = listPermsQuery.data ?? [];
 
@@ -872,7 +907,7 @@ export default function GitHubPanel() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
           <div className="lg:col-span-1 space-y-4">
-            <RepoPanel repos={repos} onRefresh={handleRefresh} />
+            <RepoPanel repos={repos} permissionCounts={permissionCounts} onRefresh={handleRefresh} />
             {selectedRepoId > 0 && (
               <PermissionPanel
                 repoId={selectedRepoId}

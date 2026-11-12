@@ -7,6 +7,7 @@ import { applyTaskTransition } from "./lib/task-transition";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { applyRequestedAgentToInput } from "./lib/task-metadata";
+import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
 
 // ─── Helpers ───
 
@@ -289,6 +290,29 @@ export const orchestrationRouter = createRouter({
         return { success: false, error: `状态转移无效: ${task.status} → ${input.status}` };
       }
 
+      // ── 执行审批闸门（2026-11-12 补齐）──
+      // 此前只有 taskboard.updateStatus 过闸，而任务中心/首页走的是本节点：
+      // 同一个「标记完成」动作，从任务中心提交就能绕过高风险任务的审批拦截。
+      // 与 taskboard.updateStatus 的 to==="done" 分支保持同一判据。
+      if (input.status === "done") {
+        const gate = checkCompletionGate(task);
+        if (gate.status === "blocked") {
+          await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
+          return { success: false, error: gate.reason ?? "该任务需人工审批后才能完成" };
+        }
+      }
+
+      // status → boardStatus 投影（2026-11-12 补齐）。
+      // task-transition.ts 的契约要求「同一行上的多个维度必须是一致投影」，此前本节点只写
+      // status，看板卡停在原列：done 是终态，之后连拖拽都会被 taskboard-validator 拒，
+      // 任务永久卡在中间态。这里只投影语义明确的三态，其余维度保持不动。
+      const BOARD_PROJECTION: Record<string, "running" | "done" | "failed"> = {
+        running: "running",
+        done: "done",
+        failed: "failed",
+      };
+      const projectedBoardStatus = BOARD_PROJECTION[input.status];
+
       const updates: Record<string, unknown> = { status: input.status };
       if (input.lifecycleStatus) updates.lifecycleStatus = input.lifecycleStatus;
       if (input.progress !== undefined) updates.progress = input.progress;
@@ -300,6 +324,7 @@ export const orchestrationRouter = createRouter({
       const transition = await applyTaskTransition(db, {
         taskId: input.id,
         status: input.status,
+        ...(projectedBoardStatus ? { boardStatus: projectedBoardStatus } : {}),
         ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
         at: new Date(),
         expectedRevision: task.stateRevision,

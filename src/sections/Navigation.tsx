@@ -72,6 +72,7 @@ const navGroups: NavGroup[] = [
     items: [
       { path: '/agents', label: 'Agent 列表', icon: <Users size={15} /> },
       { path: '/tasks', label: '任务工作台', icon: <Bot size={15} /> },
+      { path: '/fusion', label: 'Fusion 审查', icon: <Scale size={15} /> },
     ],
   },
   {

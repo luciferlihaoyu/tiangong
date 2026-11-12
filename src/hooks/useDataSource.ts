@@ -18,7 +18,20 @@ async function trpcFetch(path: string, input?: any): Promise<any> {
     const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
     throw new Error(err?.message || err?.[0]?.message || `HTTP ${res.status}`);
   }
-  return res.json();
+  const payload = await res.json();
+  // tRPC 业务失败是 HTTP 200 + {result:{data:{success:false,error}}}（如 orch.updateStatus 的
+  // 非法状态迁移）。只看 HTTP 码会把「没生效」当成「成功」，这里统一抛错让调用方能提示用户。
+  const biz = payload?.result?.data;
+  if (biz && typeof biz === "object" && !Array.isArray(biz) && biz.success === false) {
+    throw new Error(typeof biz.error === "string" && biz.error ? biz.error : "操作未生效（后端返回失败）");
+  }
+  return payload;
+}
+
+/** 记日志并上抛：写操作失败必须让调用点能提示用户，不能只在控制台留痕。 */
+function fail(scope: string, err: unknown): never {
+  console.error(`[useDataSource] ${scope} failed:`, err);
+  throw err instanceof Error ? err : new Error(String(err));
 }
 
 // Reuse DB types
@@ -153,11 +166,12 @@ export function useDataSource() {
   // ── Task mutations ──
   const addTask = useCallback(async (data: Record<string, string>) => {
     if (hasBackend) {
-      await trpcFetch("task.create", {
-        taskId: data.taskId || `TASK-${Date.now()}`,
+      // 后端没有 task 命名空间；真实节点是 taskboard.create（taskId 由服务端生成，
+      // 不接受客户端指定）。原先打 task.create 必然 404，是「表单关闭=假成功」的根因。
+      await trpcFetch("taskboard.create", {
         name: data.name,
         agentId: data.agentId ? Number(data.agentId) : undefined,
-        description: data.description,
+        description: data.description || undefined,
         priority: Number(data.priority) || 0,
       });
       await taskQuery.refetch();
@@ -174,7 +188,8 @@ export function useDataSource() {
   }, [hasBackend, taskQuery]);
   const deleteTask = useCallback(async (id: number) => {
     if (hasBackend) {
-      await trpcFetch("task.delete", { id });
+      // 同上：真实节点是 taskboard.delete，入参字段名是 taskId 而非 id。
+      await trpcFetch("taskboard.delete", { taskId: id });
       await taskQuery.refetch();
       return;
     }
@@ -197,7 +212,8 @@ export function useDataSource() {
         await trpcFetch("system.updateStatus", { id, status });
         await systemQuery.refetch();
       } catch (err) {
-        console.error("[useDataSource] system.updateStatus failed:", err);
+        // 原实现只 console.error，界面纹丝不动（非管理员 403 时完全无感）。改为上抛，由调用点提示。
+        fail("system.updateStatus", err);
       }
       return;
     }
@@ -235,7 +251,7 @@ export function useDataSource() {
         await trpcFetch("org.orgUpdate", payload);
         await orgListQuery.refetch();
       } catch (err) {
-        console.error("[useDataSource] org.orgUpdate failed:", err);
+        fail("org.orgUpdate", err);
       }
       return;
     }
@@ -247,7 +263,7 @@ export function useDataSource() {
         await trpcFetch("org.orgDelete", { id });
         await orgListQuery.refetch();
       } catch (err) {
-        console.error("[useDataSource] org.orgDelete failed:", err);
+        fail("org.orgDelete", err);
       }
       return;
     }

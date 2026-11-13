@@ -47,10 +47,27 @@ function isCapabilityLevel(value: unknown): value is AgentCapability["level"] {
  * api/lib/task-claim.ts（单一事实源，MCP claim_task 工具与 tRPC 面共用）。
  */
 
+/**
+ * P2（2026-11-13）：公开查询一律剥离凭证字段。
+ * agents.mcp_token 是现役活凭证（boot.ts 载入 _globalApiKeys，与 mcp_api_keys.key 同源 10/12）；
+ * list/getById/getBySource 均为 publicProcedure（匿名可调），全列返回 = 公网裸奔 12 家 connector。
+ * 前端 src/ 对两字段零消费（grep 实证），裁剪零影响；服务端内部一律直读 DB，不经这三个查询。
+ * 注意：不设「按 key 取 token」端点——x-mcp-key 无身份绑定（ctx.apiKeyAgentId 恒 -1/null），
+ *       给了就是万能口子。找回 token 走注册接入包或本机 secrets，不走 API。
+ */
+const AGENT_REDACTED_FIELDS = ["mcpToken", "sourceApiKey"] as const;
+type SanitizedAgent<T> = T extends infer U ? Omit<U, (typeof AGENT_REDACTED_FIELDS)[number]> : never;
+
+function sanitizeAgent<T extends Record<string, unknown>>(row: T): SanitizedAgent<T> {
+  const { mcpToken: _m, sourceApiKey: _s, ...rest } = row;
+  return rest as SanitizedAgent<T>;
+}
+
 export const agentRouter = createRouter({
   list: publicQuery.query(async () => {
     const db = getDb();
-    return db.select().from(agents).orderBy(agents.updatedAt);
+    const rows = await db.select().from(agents).orderBy(agents.updatedAt);
+    return rows.map(sanitizeAgent);
   }),
 
   getById: publicQuery
@@ -58,14 +75,15 @@ export const agentRouter = createRouter({
     .query(async ({ input }) => {
       const db = getDb();
       const rows = await db.select().from(agents).where(eq(agents.id, input.id));
-      return rows[0] ?? null;
+      return rows[0] ? sanitizeAgent(rows[0]) : null;
     }),
 
   getBySource: publicQuery
     .input(z.object({ source: z.string() }))
     .query(async ({ input }) => {
       const db = getDb();
-      return db.select().from(agents).where(like(agents.source, `%${input.source}%`));
+      const rows = await db.select().from(agents).where(like(agents.source, `%${input.source}%`));
+      return rows.map(sanitizeAgent);
     }),
 
   create: authedQuery

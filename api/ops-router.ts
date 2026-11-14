@@ -326,17 +326,18 @@ export const opsRouter = createRouter({
    * 所以这里直接调 runBackupJob，不走 sweeper 的间隔判断。
    */
   backupRun: authedQuery.mutation(async () => {
-    const { backupDir } = await import("./lib/sweepers/db-backup");
+    const { backupDir, createBackupUploader } = await import("./lib/sweepers/db-backup");
     const { resolveDbPath } = await import("./queries/connection");
     const { runBackupJob } = await import("./lib/db-backup");
-    const { resolveAlistConfig, alistUpload } = await import("./connectors/alist");
 
-    const alist = await resolveAlistConfig().catch(() => null);
+    // 上传一律走 createBackupUploader（本地时区落点 + AES-256-GCM）——
+    // 这里原本硬编码着第二份「/tiangong/db-backups + 明文」实现：路径在 AList
+    // 上不存在，且绕开了加密。手动端点绝不能比自动端点更少防护。
     const report = await runBackupJob({
       dbPath: resolveDbPath(env.databaseUrl ?? ""),
       destDir: backupDir(),
       keep: sweeperConfig.dbBackupKeep,
-      upload: alist ? (name, bytes) => alistUpload(alist, `/tiangong/db-backups/${name}`, bytes) : undefined,
+      upload: await createBackupUploader(),
     });
 
     return report;

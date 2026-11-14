@@ -22,6 +22,7 @@ import {
   DollarSign,
   Cpu,
 } from "lucide-react";
+import { localDayKey, localDayRange } from "@/lib/day";
 
 const EXCHANGE_RATE = 7.2;
 
@@ -657,11 +658,10 @@ export default function UsagePanel() {
   const [displayMode, setDisplayMode] = useState<DisplayMode>("m");
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
 
-  // 不带 Z 后缀 → 按浏览器本地时区解释，与后端分组的本地日边界对齐。
-  // （原先带 Z 即 UTC 边界，与本地日分组错开 8 小时，会漏掉本地今早 0~8 点的用量）
+  // localDayRange：不带 Z 后缀按本地时区解释，与后端本地日分组边界对齐。
   const timeRange = {
-    from: from ? `${from}T00:00:00` : undefined,
-    to: to ? `${to}T23:59:59.999` : undefined,
+    from: from ? localDayRange(from).from : undefined,
+    to: to ? localDayRange(to).to : undefined,
   };
 
   const byModelQuery = trpc.usage.byModel.useQuery(
@@ -1032,10 +1032,3 @@ export default function UsagePanel() {
   );
 }
 
-/** 本地时区的 YYYY-MM-DD（与后端 sqlDayOf 的 localtime 口径一致）。 */
-function localDayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}

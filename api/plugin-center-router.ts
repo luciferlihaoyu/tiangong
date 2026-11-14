@@ -5,6 +5,7 @@
  *   单插件失败只影响自身 status，绝不拖垮整体，也绝不抛崩）。返回体绝不
  *   包含 url 与 tokenEnvKey（普通用户不可见内部地址与密钥环境变量名）。
  * - setEnable: 管理员切换插件启用状态。
+ * - get: 管理员单插件详情（含 url 与 tokenEnvKey，供编辑预填；list 契约不含这两项）。
  * - upsert: 管理员新增/更新插件注册信息（key 相同则覆盖，启用状态保留原值）。
  * - remove: 管理员删除插件（幂等：key 不存在也视为成功）。
  *
@@ -112,6 +113,28 @@ export const pluginCenterRouter = createRouter({
     const probeMap = new Map(entries);
     return { plugins: rows.map((r) => toPublicFields(r, probeMap.get(r.key))) };
   }),
+
+  /**
+   * 单插件详情（admin-only，2026-11-14 补）：返回 list 契约里刻意不暴露的
+   * url 与 tokenEnvKey，只为「编辑」能预填——此前 list 不给这两项，前端
+   * 改地址只能凭记忆重敲整条 URL。tokenEnvKey 是环境变量**名**不是值，
+   * 回显不构成泄密；普通用户依旧只能走 list。
+   */
+  get: adminQuery
+    .input(z.object({ key: z.string().min(1).max(50) }))
+    .query(async ({ input }) => {
+      const rows = await getDb().select().from(plugins).where(eq(plugins.key, input.key));
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        key: row.key,
+        name: row.name,
+        description: row.description,
+        url: row.url,
+        tokenEnvKey: row.tokenEnvKey ?? "",
+        enabled: row.enabled,
+      };
+    }),
 
   /** 切换插件启用状态（key 不存在返回固定中文错误） */
   setEnable: adminQuery

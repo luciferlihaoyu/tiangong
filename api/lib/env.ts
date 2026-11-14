@@ -51,6 +51,9 @@ export const env = {
   ),
   callbackBindings: optional("TIANGONG_CALLBACK_BINDINGS", "[]"),
   artifactRoot: optional("TIANGONG_ARTIFACT_ROOT", "/app/data/tiangong-artifacts"),
+  // DbBackup 离机加密钥（AES-256-GCM，key=SHA-256(本值)），与 cron 备份链
+  // （.secrets/tiangong-backup.key）同值。未设置时离机上传诚实跳过，绝不明文上云。
+  backupKey: optional("TIANGONG_BACKUP_KEY"),
   artifactVolumeId: optional("TIANGONG_ARTIFACT_VOLUME_ID"),
   artifactGenerationId: optional("TIANGONG_ARTIFACT_GENERATION_ID", "1"),
   tiangongProviderInstanceId: optional("TIANGONG_PROVIDER_INSTANCE_ID"),

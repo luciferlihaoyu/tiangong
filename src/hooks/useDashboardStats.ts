@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { trpc } from "@/providers/trpc";
 import type { MockAgent, MockTask } from "@/hooks/useDataSource";
+import { localDayKey } from "@/lib/day";
 
 export interface DashboardStats {
   agents: MockAgent[];
@@ -77,10 +78,3 @@ export function useDashboardStats(): DashboardStats {
   };
 }
 
-/** 本地时区的 YYYY-MM-DD（与后端 sqlDayOf 的 localtime 口径一致）。 */
-function localDayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}

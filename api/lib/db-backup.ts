@@ -41,6 +41,19 @@ export interface PruneResult {
 const SNAPSHOT_PREFIX = "tiangong-";
 const SNAPSHOT_SUFFIX = ".db";
 
+/**
+ * 严格快照名：tiangong-YYYYMMDD-HHMMSS.db。
+ *
+ * 2026-11-14 事故：backups/ 里混进了手工留底（tiangong-pre-tsfix-*.db 等），
+ * 旧的 startsWith/endsWith 过滤把它们当合法快照——而 localeCompare 里 "p" > "2"，
+ * 手工留底排到**末尾被当成最新快照**：节流从此认为"最新备份是 11-03"，
+ * 每 60 秒 tick 都真做一次全库 VACUUM INTO（每分钟 7.3MB 快照 ×11 天）；
+ * 轮换则每分钟删掉一份真快照，手工留底反而被永久保留。
+ * 收紧为严格正则后：手工留底既不参与节流/轮换（不会被自动删），
+ * 也不再污染"最新快照"的判断。
+ */
+const SNAPSHOT_NAME_RE = /^tiangong-\d{8}-\d{6}\.db$/;
+
 const describeError = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** 2026-09-18T12:34:56Z → 20260918-123456（文件名即时间序，便于轮换） */
@@ -130,11 +143,14 @@ function createdAtOf(name: string, fallbackMs: number): Date {
   return Number.isFinite(parsed) ? new Date(parsed) : new Date(fallbackMs);
 }
 
-/** 列出目录内的快照（按时间序，旧→新）。无关文件一律不算快照。 */
+/** 列出目录内的快照（按时间序，旧→新）。只认严格快照名，手工留底一律不算（见 SNAPSHOT_NAME_RE）。 */
 export function listSnapshots(dir: string): SnapshotInfo[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter((name) => name.startsWith(SNAPSHOT_PREFIX) && name.endsWith(SNAPSHOT_SUFFIX))
+    .filter(
+      (name) =>
+        SNAPSHOT_NAME_RE.test(name) && name.startsWith(SNAPSHOT_PREFIX) && name.endsWith(SNAPSHOT_SUFFIX)
+    )
     .map((name) => {
       const full = path.join(dir, name);
       const stat = statSync(full);

@@ -124,6 +124,11 @@ export default function AuditTab({ workspaceId }: { readonly workspaceId: number
               hash 链完整 · 已校验 {integrity.verified}/{integrity.total} 行
               {integrity.chainStartId !== null ? ` · 链起点 #${integrity.chainStartId}` : " · 尚无已上链行"}
               {integrity.legacyRows > 0 ? ` · ${integrity.legacyRows} 行为上链前遗留（hash 为空，不在链内）` : ""}
+              {/* 口径澄清：verifyIntegrity 无 workspace 入参，校验的是**全站** audit_events，
+                  不是当前工作区的日志子集——不写明白，绿色结论会被误读成"当前工作区完整"。 */}
+              <div className="mt-1" style={{ color: "var(--text-secondary)" }}>
+                口径：全站 audit_events 全表（非当前工作区子集）
+              </div>
             </div>
           ) : integrity ? (
             <div
@@ -133,6 +138,7 @@ export default function AuditTab({ workspaceId }: { readonly workspaceId: number
               <div className="mb-1">
                 hash 链已断：{broken.length} 行 hash 与重算值不一致（共 {integrity.total} 行已上链、{integrity.verified} 行通过）
                 ，审计记录被改过或删过，无法修复。
+                <div style={{ color: "var(--text-secondary)" }}>口径：全站 audit_events 全表（非当前工作区子集）</div>
               </div>
               <div className="space-y-0.5" style={{ color: "var(--text-secondary)" }}>
                 {broken.slice(0, MAX_BROKEN_SHOWN).map((b) => (

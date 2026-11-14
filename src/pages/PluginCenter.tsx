@@ -5,13 +5,14 @@
  * - 状态灯复用 HealthLight，status 直接映射 ok / down / unknown
  * - 接入 / 移除：pluginCenter.upsert（key/name/description/url/tokenEnvKey，同 key 覆盖）
  *   与 pluginCenter.remove（幂等）；两者成功后都 invalidate list 让服务端状态回灌
- *   注：list 故意不返回 url 与 tokenEnvKey，所以这里不预填、不支持点开改——只能按 key 重新 upsert 覆盖
+ * - 编辑回填（2026-11-14）：list 契约不返回 url/tokenEnvKey，编辑走 admin-only 的
+ *   pluginCenter.get 拉详情再预填；保存仍是同 key upsert 覆盖
  */
 import { useState } from "react";
 import { trpc } from "@/providers/trpc";
 import HealthLight from "@/components/HealthLight";
 import { Switch } from "@/components/ui/switch";
-import { Puzzle, RefreshCw, Plus, Trash2, X } from "lucide-react";
+import { Puzzle, RefreshCw, Plus, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 type PluginStatus = "ok" | "down" | "unknown";
@@ -55,13 +56,17 @@ function PluginCard({
   plugin,
   switchDisabled,
   removeDisabled,
+  editDisabled,
   onToggle,
+  onEdit,
   onRemove,
 }: {
   plugin: PluginInfo;
   switchDisabled: boolean;
   removeDisabled: boolean;
+  editDisabled: boolean;
   onToggle: (enabled: boolean) => void;
+  onEdit: () => void;
   onRemove: () => void;
 }) {
   return (
@@ -115,6 +120,16 @@ function PluginCard({
             disabled={switchDisabled}
             onCheckedChange={onToggle}
           />
+          {/* 编辑：走 admin-only get 拉详情回填表单（list 契约不含 url/tokenEnvKey，不能凭空预填） */}
+          <button
+            onClick={onEdit}
+            disabled={editDisabled}
+            title="编辑插件（回填地址与 token 环境变量名）"
+            className="p-1 rounded transition-colors hover:bg-[rgba(74,158,255,0.1)] disabled:opacity-40"
+            style={{ color: "var(--accent-cyan)" }}
+          >
+            {editDisabled ? <RefreshCw size={13} className="animate-spin" /> : <Pencil size={13} />}
+          </button>
           {/* 移除是不可逆的（注册信息直接 delete），卡片上只放图标按钮，点击后仍要二次确认 */}
           <button
             onClick={onRemove}
@@ -158,18 +173,42 @@ export default function PluginCenter() {
   const isToggling = (key: string) =>
     setEnableMutation.isPending && setEnableMutation.variables?.key === key;
 
-  // ─── 接入插件（upsert）───
+  // ─── 接入 / 编辑插件（upsert；编辑预填走 admin-only get）───
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<PluginForm>(emptyForm);
+  // 非 null = 表单处于「编辑既有插件」态：标题/按钮文案变化，key 锁死（改 key 等于另建插件）
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState<string | null>(null);
   const setField = (patch: Partial<PluginForm>) => setForm((prev) => ({ ...prev, ...patch }));
+
+  // 命令式拉详情（utils.client.<proc>.query）而不是 useQuery+useEffect 回填：
+  // 后者会被缓存 data 的 stale 引用重复触发，编辑态最容易踩这种竞态。
+  const handleEdit = async (plugin: PluginInfo) => {
+    setEditBusy(plugin.key);
+    try {
+      const p = await utils.client.pluginCenter.get.query({ key: plugin.key });
+      if (!p) {
+        toast.error(`插件 ${plugin.key} 不存在（可能刚被移除），请刷新清单`);
+        return;
+      }
+      setForm({ key: p.key, name: p.name, description: p.description, url: p.url, tokenEnvKey: p.tokenEnvKey });
+      setEditingKey(p.key);
+      setFormOpen(true);
+    } catch (e) {
+      toast.error(`读取插件详情失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setEditBusy(null);
+    }
+  };
 
   const upsertMutation = trpc.pluginCenter.upsert.useMutation({
     onSuccess: (res, vars) => {
       if (res.ok) {
-        toast.success(`已接入插件：${vars.name}`);
-        // 成功后收表单并清空，避免用户以为还能接着改同一个 key 的 url（list 不回 url）
+        // 新增与编辑共用 upsert（key 存在即覆盖），文案不猜意图，统一「已保存」
+        toast.success(`已保存插件：${vars.name}`);
         setForm(emptyForm);
         setFormOpen(false);
+        setEditingKey(null);
       } else {
         toast.error(`接入失败：${res.error ?? "未知错误"}`);
       }
@@ -273,16 +312,19 @@ export default function PluginCenter() {
         {formOpen && (
           <div className="glass-panel p-4 sci-border mb-6">
             <div className="text-xs font-mono font-bold mb-3" style={{ color: "var(--text-primary)" }}>
-              接入 / 更新插件
+              {editingKey ? `编辑插件：${editingKey}` : "接入 / 更新插件"}
               <span className="ml-2 text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>
                 key 已存在则覆盖名称/描述/地址，启用状态保留原值；新插件默认停用
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               <label className="block">
-                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>key（唯一标识，≤50）</div>
+                <div className="text-[10px] font-mono mb-1" style={{ color: "var(--text-muted)" }}>
+                  {editingKey ? "key（编辑态锁死：改 key 等于另建插件，请取消后重新接入）" : "key（唯一标识，≤50）"}
+                </div>
                 <input
                   value={form.key}
+                  disabled={!!editingKey}
                   onChange={(e) => setField({ key: e.target.value })}
                   placeholder="xuanji-memory"
                   className="w-full text-xs font-mono px-2.5 py-1.5 rounded outline-none"
@@ -339,10 +381,11 @@ export default function PluginCenter() {
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
                 style={{ color: "var(--accent-cyan)", border: "1px solid var(--accent-cyan)" }}
               >
-                <Plus size={13} /> {upsertMutation.isPending ? "提交中..." : "保存插件"}
+                {editingKey ? <Pencil size={13} /> : <Plus size={13} />}{" "}
+                {upsertMutation.isPending ? "提交中..." : editingKey ? "更新插件" : "保存插件"}
               </button>
               <button
-                onClick={() => { setForm(emptyForm); setFormOpen(false); }}
+                onClick={() => { setForm(emptyForm); setFormOpen(false); setEditingKey(null); }}
                 disabled={upsertMutation.isPending}
                 className="text-xs px-3 py-1.5 rounded font-mono transition-colors disabled:opacity-50"
                 style={{ color: "var(--text-muted)", border: "1px solid var(--border-default)" }}
@@ -351,7 +394,7 @@ export default function PluginCenter() {
               </button>
             </div>
             <div className="text-[10px] font-mono mt-3 leading-relaxed" style={{ color: "var(--text-muted)" }}>
-              出于安全考虑，清单接口不返回 url 与 token 变量名，因此表单不回填已有插件——要改地址就按同一个 key 重新提交覆盖。
+              清单接口（list）不返回 url 与 token 变量名；「编辑」按钮经 admin-only 的 get 拉取详情后预填，保存按同 key upsert 覆盖。
             </div>
           </div>
         )}
@@ -389,6 +432,8 @@ export default function PluginCenter() {
                 plugin={p}
                 switchDisabled={isToggling(p.key)}
                 removeDisabled={isRemoving(p.key)}
+                editDisabled={editBusy === p.key}
+                onEdit={() => handleEdit(p)}
                 onToggle={(enabled) => setEnableMutation.mutate({ key: p.key, enabled })}
                 onRemove={() => handleRemove(p)}
               />

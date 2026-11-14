@@ -13,6 +13,8 @@
  * GB 级，应改为后台任务 + 状态表，而不是让它卡住整轮巡检。
  */
 import path from "node:path";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { gzipSync } from "node:zlib";
 
 import { env } from "../env";
 import { resolveDbPath } from "../../queries/connection";
@@ -21,7 +23,59 @@ import { listSnapshots, runBackupJob, type BackupJobReport, type SnapshotInfo } 
 import { readiness } from "../readiness";
 import { sweeperConfig } from "./config";
 
-const UPLOAD_DIR = "/tiangong/db-backups";
+/**
+ * 离机落点：必须挂在 AList 上**已存在且可写**的存储下。
+ * 事故（2026-11-12 起，11-14 修复）：原值 "/tiangong/db-backups" 是 AList 根下
+ * 不存在的路径（storage not found），建目录恒被 permission denied 拒——
+ * 异地副本自该日起从未建成，只有本机卷留底。/tos/backup 是现役可用存储
+ * （cron 链的 tiangong-db-backup.sh 就落 /tos/backup/tiangong/）。
+ */
+const UPLOAD_DIR = "/tos/backup/tiangong-live";
+
+/**
+ * 离机加密：与 cron 备份链（方案整合/备份工程/tiangong-db-backup.sh）同钥同算法——
+ * AES-256-GCM，密文格式 iv(12) || authTag(16) || ciphertext，key = SHA-256(钥值)；
+ * 明文是 gzip 后的库文件（cron 链是 tar.gz(db.gz+META)，本链单文件更简，
+ * 解密同一条 openssl/node 流程，解出后 gunzip 即得 .db）。
+ *
+ * 为什么必须加密：库里有用户表、API key 等敏感数据，项目备份体系
+ * （AGENTS.md 备份体系①⑤⑦）全部密文落云——明文 .db 上 AList 是 unacceptable。
+ * 钥未配置时**诚实跳过**离机上传（本地链照常），绝不降级成明文上传。
+ */
+function encryptForUpload(db: Buffer, keyRaw: string): Buffer {
+  const key = createHash("sha256").update(keyRaw, "utf8").digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(gzipSync(db)), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+}
+
+/** tiangong-20261114-131710.db → tiangong-live-20261114-131710.db.gz.enc */
+function uploadNameOf(snapshotName: string): string {
+  const stamp = snapshotName.replace(/^tiangong-/, "").replace(/\.db$/, "");
+  return `tiangong-live-${stamp}.db.gz.enc`;
+}
+
+/**
+ * 离机上传器工厂（2026-11-14 收敛）：sweeper 与 ops.backupRun **必须**走这里。
+ * 此前 ops-router 的手动备份自己硬编码了一份「/tiangong/db-backups + 明文」的
+ * 上传逻辑——路径错误之外，更要命的是明文：手动点一次"立即备份"就会把
+ * 含凭据的生产库原样推上对象存储。单一实现，杜绝这类漂移。
+ * 返回 undefined = 不上传（AList 未配置 / 未设加密钥），本地快照链照常。
+ */
+export async function createBackupUploader(): Promise<((name: string, bytes: Buffer) => Promise<string>) | undefined> {
+  const alist = await resolveAlistConfig().catch(() => null);
+  if (!alist) return undefined;
+  const backupKey = env.backupKey;
+  if (!backupKey) {
+    console.warn(
+      "[DbBackup] 已配置 AList 但未设置 TIANGONG_BACKUP_KEY —— 仅本机快照，离机上传跳过（防明文上云）"
+    );
+    return undefined;
+  }
+  return (name, bytes) =>
+    alistUpload(alist, `${UPLOAD_DIR}/${uploadNameOf(name)}`, encryptForUpload(bytes, backupKey));
+}
 
 export interface BackupSweepState {
   lastRunAt: string | null;
@@ -67,15 +121,12 @@ export async function sweepDbBackup(_db: unknown, now: Date): Promise<void> {
     return;
   }
 
-  const alist = await resolveAlistConfig().catch(() => null);
   const report = await runBackupJob({
     dbPath: resolveDbPath(env.databaseUrl ?? ""),
     destDir: backupDir(),
     keep: sweeperConfig.dbBackupKeep,
     now,
-    upload: alist
-      ? (name, bytes) => alistUpload(alist, `${UPLOAD_DIR}/${name}`, bytes)
-      : undefined,
+    upload: await createBackupUploader(),
   });
 
   state.lastRunAt = now.toISOString();

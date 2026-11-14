@@ -92,12 +92,6 @@ export function TaskDetailDrawer({
   };
 
   /** 事件类型 → 颜色（只影响观感，不改变语义） */
-  const eventColor = (t: string) =>
-    t === "result" ? "var(--success)"
-    : t === "error" || t === "timeout" || t === "cancel" ? "var(--accent-red)"
-    : t === "working" || t === "progress" ? "var(--accent-cyan)"
-    : t === "dispatch" ? "var(--accent-gold)"
-    : "var(--text-muted)";
 
   type ThreadMessageData = {
     id: number;
@@ -458,39 +452,12 @@ export function TaskDetailDrawer({
                       {fmtTime(execTimeline[execTimeline.length - 1].createdAt)}
                     </span>
                   </div>
-                  <div className="space-y-1">
-                    {execTimeline
-                      .slice(-6)
-                      .reverse()
-                      .map((e) => (
-                        <div key={e.id} className="flex items-start gap-2">
-                          <span style={{ color: "var(--text-muted)", flexShrink: 0 }}>
-                            {fmtTime(e.createdAt)}
-                          </span>
-                          <span style={{ color: eventColor(e.eventType), flexShrink: 0 }}>
-                            {e.eventType}
-                          </span>
-                          <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>
-                            {agentLabel(e.fromAgentId)}
-                            {e.toAgentId ? ` → ${agentLabel(e.toAgentId)}` : ""}
-                          </span>
-                          {e.content && (
-                            <span
-                              className="truncate"
-                              style={{ color: "var(--text-muted)" }}
-                              title={e.content}
-                            >
-                              {e.content.slice(0, 80)}
-                            </span>
-                          )}
-                        </div>
-                      ))}
+                  {/* 逐条明细不再在此重复展示：下方「生命周期 · TIMELINE」已全量列出
+                      同一批 task_messages（2026-11-14 去重——执行块只留 TIMELINE
+                      没有的汇总视角：事件数/分类计数/执行者/首末跨度）。 */}
+                  <div style={{ color: "var(--text-muted)" }}>
+                    逐条明细见下方「生命周期 · TIMELINE」（共 {execTimeline.length} 条）
                   </div>
-                  {execTimeline.length > 6 && (
-                    <div className="mt-1" style={{ color: "var(--text-muted)" }}>
-                      以上为最近 6 条（共 {execTimeline.length} 条，按时间倒序）
-                    </div>
-                  )}
                 </>
               )}
             </div>

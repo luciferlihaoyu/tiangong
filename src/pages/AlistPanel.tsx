@@ -58,6 +58,9 @@ export default function AlistPanel() {
 
   const saveMutation = trpc.alist.saveConfig.useMutation({
     onSuccess: (res) => {
+      // 复位「用户改过表单」标记：否则服务端 normalizeBaseUrl 规整过的地址
+      // （如去尾斜杠）永远回填不了输入框，用户看到的仍是自己敲的原样。
+      setFormTouched(false);
       if (!res.success) {
         // 后端在 ALIST_PASSWORD 缺失时会报"首次保存必须填写密码"，而界面已无密码框，
         // 所以这里必须补上真正可操作的指引，否则用户只会对着表单找不到该填的地方

@@ -9,7 +9,7 @@
  * 类型/常量/子组件已逐段搬迁至 src/components/taskcenter/，行为保持。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { TASK_STATUS_CONFIG as STATUS_CONFIG } from "@/lib/taskStatus";
+import { TASK_STATUS_CONFIG as STATUS_CONFIG, BOARD_TO_LIFECYCLE } from "@/lib/taskStatus";
 import { trpc } from "@/providers/trpc";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { toast } from "sonner";
@@ -68,39 +68,8 @@ export default function TaskCenter() {
   // memo 不会被击穿；同时省掉每行一次的 O(n) find。
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
-  // taskboard.list 的 boardStatus 是看板状态枚举（triage/backlog/todo/ready/
-  // running/review/blocked/done/failed/cancelled），UI 顶栏 STATUS_CONFIG
-  // 是生命周期 status（pending/queued/running/done/failed）。两者重叠子集
-  // 不够覆盖生命周期过滤，t3 阶段做完整语义映射：
-  //   pending  → backlog（待处理/未排期）
-  //   queued   → todo    （已排队/可执行）
-  //   running  → running（直传）
-  //   done     → done   （直传）
-  //   failed   → failed （直传）
-  // boardStatus 字段必填枚举值之一，否则后端 zod 拒绝。
-  const statusToBoardStatus: Record<string, "backlog" | "todo" | "running" | "done" | "failed"> = {
-    pending: "backlog",
-    queued: "todo",
-    running: "running",
-    done: "done",
-    failed: "failed",
-  };
-  // ⚠️ 反向映射（看板 10 值 → 生命周期 5 值）：原实现只用上面的 statusToBoardStatus
-  // 把 pending 翻成 backlog 去查后端，于是 triage / blocked / cancelled 这些看板态在
-  // 任何筛选项下都查不出来——新建任务默认就是 triage，选「待处理」反而看不见自己刚建的单。
-  // 改为：后端只按 agent/keyword 过滤（照样 limit 200），前端按完整映射归类后再筛。
-  const boardToLifecycle: Record<string, string> = {
-    triage: "pending",
-    backlog: "pending",
-    blocked: "pending",
-    todo: "queued",
-    ready: "queued",
-    running: "running",
-    review: "running",
-    done: "done",
-    failed: "failed",
-    cancelled: "failed",
-  };
+  // 生命周期筛选（filterStatus）→ 看板数据的归类用 BOARD_TO_LIFECYCLE（@/lib/taskStatus）；
+  // 后端只按 agent/keyword 过滤，boardStatus 的筛选在前端做完整映射后比较。
   const taskQuery = trpc.taskboard.list.useQuery(
     { agentId: filterAgentId, keyword: keyword || undefined },
     { retry: 1, staleTime: 5000 }
@@ -108,7 +77,7 @@ export default function TaskCenter() {
   const allTasks = (taskQuery.data || []) as Task[];
   const tasks = filterStatus
     ? allTasks.filter(
-        (t) => boardToLifecycle[String((t as { boardStatus?: string | null }).boardStatus ?? "")] === filterStatus
+        (t) => BOARD_TO_LIFECYCLE[String((t as { boardStatus?: string | null }).boardStatus ?? "")] === filterStatus
       )
     : allTasks;
 

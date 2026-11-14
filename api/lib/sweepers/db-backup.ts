@@ -29,6 +29,8 @@ import { sweeperConfig } from "./config";
  * 不存在的路径（storage not found），建目录恒被 permission denied 拒——
  * 异地副本自该日起从未建成，只有本机卷留底。/tos/backup 是现役可用存储
  * （cron 链的 tiangong-db-backup.sh 就落 /tos/backup/tiangong/）。
+ * 注意换路径只是必要条件之一：真正拦路的是账号对 /tos 无写权限，
+ * 见 createBackupUploader 的专用账号说明。
  */
 const UPLOAD_DIR = "/tos/backup/tiangong-live";
 

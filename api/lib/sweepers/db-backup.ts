@@ -18,7 +18,7 @@ import { gzipSync } from "node:zlib";
 
 import { env } from "../env";
 import { resolveDbPath } from "../../queries/connection";
-import { alistUpload, resolveAlistConfig } from "../../connectors/alist";
+import { alistUpload, getAlistEnvConfig, resolveAlistConfig, type AlistEnvConfig } from "../../connectors/alist";
 import { listSnapshots, runBackupJob, type BackupJobReport, type SnapshotInfo } from "../db-backup";
 import { readiness } from "../readiness";
 import { sweeperConfig } from "./config";
@@ -63,18 +63,32 @@ function uploadNameOf(snapshotName: string): string {
  * 含凭据的生产库原样推上对象存储。单一实现，杜绝这类漂移。
  * 返回 undefined = 不上传（AList 未配置 / 未设加密钥），本地快照链照常。
  */
+/** 离机专用账号（可写）优先；未配置则回退全局配置（只读账号会 403，但保持可诊断）。 */
+function backupAlistConfig(): AlistEnvConfig | null {
+  const username = env.backupAlistUsername.trim();
+  const password = env.backupAlistPassword;
+  if (!username || !password) return null;
+  const baseUrl = (env.backupAlistBaseUrl || getAlistEnvConfig()?.baseUrl || "").trim();
+  if (!baseUrl) return null;
+  // basePath/autoUpload 与此处无关：alistUpload 按绝对 relPath 落盘，不拼 basePath。
+  return { baseUrl, username, password, basePath: "/", autoUpload: true };
+}
+
 export async function createBackupUploader(): Promise<((name: string, bytes: Buffer) => Promise<string>) | undefined> {
-  const alist = await resolveAlistConfig().catch(() => null);
-  if (!alist) return undefined;
-  const backupKey = env.backupKey;
-  if (!backupKey) {
-    console.warn(
-      "[DbBackup] 已配置 AList 但未设置 TIANGONG_BACKUP_KEY —— 仅本机快照，离机上传跳过（防明文上云）"
-    );
+  if (!env.backupKey) {
+    console.warn("[DbBackup] 未设置 TIANGONG_BACKUP_KEY —— 仅本机快照，离机上传跳过（防明文上云）");
     return undefined;
   }
+  const dedicated = backupAlistConfig();
+  const alist = dedicated ?? (await resolveAlistConfig().catch(() => null));
+  if (!alist) return undefined;
+  if (!dedicated) {
+    console.warn(
+      `[DbBackup] 未配置 TIANGONG_BACKUP_ALIST_USERNAME/PASSWORD，回退全局 AList 账号 ${alist.username} —— 该账号若无写权限，离机上传将持续失败`
+    );
+  }
   return (name, bytes) =>
-    alistUpload(alist, `${UPLOAD_DIR}/${uploadNameOf(name)}`, encryptForUpload(bytes, backupKey));
+    alistUpload(alist, `${UPLOAD_DIR}/${uploadNameOf(name)}`, encryptForUpload(bytes, env.backupKey));
 }
 
 export interface BackupSweepState {

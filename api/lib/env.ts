@@ -54,6 +54,13 @@ export const env = {
   // DbBackup 离机加密钥（AES-256-GCM，key=SHA-256(本值)），与 cron 备份链
   // （.secrets/tiangong-backup.key）同值。未设置时离机上传诚实跳过，绝不明文上云。
   backupKey: optional("TIANGONG_BACKUP_KEY"),
+  // DbBackup 专用 AList 账号（2026-11-14 加）：生产全局账号 tiangong 是
+  // role=9 permission=0，mkdir/put 实测 403——「离机上传静默失败」的真正根因是
+  // **账号无写权限**，路径错只是表象。cron 备份链自 11-03 起就用可写的 dsh 账号，
+  // 本链对齐同一口径；刻意不复用全局配置，避免顺手改掉归档链的账号（那需单独决策）。
+  backupAlistUsername: optional("TIANGONG_BACKUP_ALIST_USERNAME"),
+  backupAlistPassword: optional("TIANGONG_BACKUP_ALIST_PASSWORD"),
+  backupAlistBaseUrl: optional("TIANGONG_BACKUP_ALIST_BASE_URL"),
   artifactVolumeId: optional("TIANGONG_ARTIFACT_VOLUME_ID"),
   artifactGenerationId: optional("TIANGONG_ARTIFACT_GENERATION_ID", "1"),
   tiangongProviderInstanceId: optional("TIANGONG_PROVIDER_INSTANCE_ID"),

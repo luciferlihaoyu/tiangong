@@ -149,6 +149,12 @@ export const tasks = sqliteTable("tasks", {
   workerLeaseExpiresAt: integer("worker_lease_expires_at", { mode: "timestamp" }),
   cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
   cancelAcknowledgedAt: integer("cancel_acknowledged_at", { mode: "timestamp" }),
+  // ── t2-3：建单者身份（agents.id）──────────────────────────────
+  // `agentId` 是"派给谁执行"，本列是"谁建的单"——两回事。历史事故
+  // #61/#62/#198 复盘时发现：大量 agent_id=NULL 的任务查不出是谁投的，
+  // 无法追责、也无法判断该由哪个 Runner 兜底。可空（老行 + 推导不出身份的
+  // 调用方一律 NULL），新单在 MCP Key / API Key 能定出身份时写值。
+  createdByAgentId: integer("created_by_agent_id", { mode: "number" }),
   originSystem: text("origin_system", { length: 32 }),
   externalRef: text("external_ref", { length: 255 }),
   idempotencyKey: text("idempotency_key", { length: 128 }),

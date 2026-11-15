@@ -151,7 +151,7 @@ export const orchestrationRouter = createRouter({
       // 返回已存在任务（reused:true）。列与唯一索引早已存在，本次只是开放使用。
       idempotencyKey: z.string().min(1).max(191).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       // ── t2-2 执行人闸门 ────────────────────────────────────────
       // 无 agentId 又无 requestedAgentId = 通用任务 → 内建 Runner 会以
@@ -163,6 +163,11 @@ export const orchestrationRouter = createRouter({
       // 写入 input metadata routing.selectedAgentId，认领侧据此阻止其他 agent 抢单。
       const routedInput = applyRequestedAgentToInput(taskData.input, requestedAgentId);
       const normalizedKey = idempotencyKey?.trim() || null;
+      // ── t2-3 建单者身份 ────────────────────────────────────────
+      // MCP Key / API Key 绑定的 agent（ctx.apiKeyAgentId；env-only Key 记 -1）。
+      // 纯登录用户建单推导不出 agent 身份 → 留 NULL，绝不因此报错。
+      const createdByAgentId =
+        typeof ctx.apiKeyAgentId === "number" && ctx.apiKeyAgentId > 0 ? ctx.apiKeyAgentId : null;
 
       // 幂等前置查重：命中即复用，不再插入（并发竞态另由下方唯一冲突兜底）
       const existing = await findTaskByIdempotencyKey(db, normalizedKey);
@@ -184,6 +189,7 @@ export const orchestrationRouter = createRouter({
             maxRetries: taskData.maxRetries ?? 3,
             timeoutMs: taskData.timeoutMs ?? 300000,
             parentTaskId: taskData.parentTaskId ?? null,
+            createdByAgentId,
             originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
             idempotencyKey: normalizedKey,
           });
@@ -241,6 +247,7 @@ export const orchestrationRouter = createRouter({
           maxRetries: taskData.maxRetries ?? 3,
           timeoutMs: taskData.timeoutMs ?? 300000,
           parentTaskId: taskData.parentTaskId ?? null,
+          createdByAgentId,
           originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
           idempotencyKey: normalizedKey,
         });

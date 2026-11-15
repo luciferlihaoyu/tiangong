@@ -427,6 +427,8 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
           input: routedInput,
           maxRetries: params.maxRetries ?? 3,
           timeoutMs: params.timeoutMs ?? 1800000,
+          // t2-3：建单者 = MCP Key 绑定的 Agent；env-only Key（agentId=null）留 NULL，绝不抛错
+          createdByAgentId: ctx.agentId ?? null,
           originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
           idempotencyKey: normalizedKey,
         });

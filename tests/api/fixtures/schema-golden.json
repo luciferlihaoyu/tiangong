@@ -227,6 +227,13 @@
     0
    ],
    [
+    "archived_at",
+    "INTEGER",
+    0,
+    null,
+    0
+   ],
+   [
     "source_api_key",
     "TEXT",
     0,
@@ -3758,6 +3765,13 @@
    ],
    [
     "cancel_acknowledged_at",
+    "INTEGER",
+    0,
+    null,
+    0
+   ],
+   [
+    "created_by_agent_id",
     "INTEGER",
     0,
     null,

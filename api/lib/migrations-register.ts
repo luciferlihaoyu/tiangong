@@ -52,3 +52,24 @@ registerSchemaMigration({
     }
   },
 });
+
+/**
+ * t2-3：tasks.created_by_agent_id——记录"谁建的单"。
+ *
+ * 与 `agent_id`（派给谁执行）语义不同：历史事故 #61/#62/#198 复盘时发现，
+ * 大量 agent_id=NULL 的任务查不出是谁投的，既无法追责、也无法判断该由哪个
+ * Runner 兜底。本列可空（老行 + 推导不出身份的调用方一律 NULL）。
+ *
+ * 为什么写成版本化迁移而不是只靠 schema-repair：加列本身 repair 能补，但
+ * "库的形状变了"必须是有记录的有意识行为（§4 版本化纪律）。DDL 从派生
+ * schema 现取（单一事实源），避免手写副本与 db/schema.ts 漂移；列已存在时
+ * （全新库 / repair 先跑过）幂等跳过。
+ */
+registerSchemaMigration({
+  name: "0003-tasks-created-by-agent-id",
+  up(db: DatabaseSync) {
+    const columns = db.prepare(`PRAGMA table_info("tasks")`).all() as Array<{ name: string }>;
+    if (columns.some((c) => c.name === "created_by_agent_id")) return;
+    db.exec(`ALTER TABLE "tasks" ADD COLUMN "created_by_agent_id" integer`);
+  },
+});

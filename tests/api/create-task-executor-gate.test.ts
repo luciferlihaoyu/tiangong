@@ -248,4 +248,79 @@ describe("t2-2 createTask 执行人闸门", () => {
   });
 });
 
-  // t2-3 的用例见本文件后半段（随 t2-3 commit 一并落入）
+describe("t2-3 tasks.created_by_agent_id", () => {
+  it("MCP create_task（Key 绑定 Agent）→ created_by_agent_id = 调用方 agent id", async () => {
+    const res = await callTool(
+      "create_task",
+      { name: "谁建的单", requestedAgentId: "dsh" },
+      AGENT_BOUND_CTX,
+    );
+    expect(res.payload.success).toBe(true);
+    const rows = taskRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].createdByAgentId).toBe(17);
+  });
+
+  it("MCP create_task（env-only Key，无绑定 Agent）→ 列留 NULL，绝不抛错", async () => {
+    const res = await callTool("create_task", { name: "匿名建单", requestedAgentId: "dsh" }, ENV_KEY_CTX);
+    expect(res.payload.success).toBe(true);
+    expect(taskRows()[0].createdByAgentId).toBeNull();
+  });
+
+  it("tRPC orch.createTask 带 API Key 身份 → created_by_agent_id = ctx.apiKeyAgentId", async () => {
+    const caller = orchCaller({
+      req: undefined,
+      user: null,
+      apiKeyAgentId: 12,
+      servicePrincipal: null,
+    } as never);
+    const res = await caller.createTask({
+      taskId: nextTaskId(),
+      name: "API Key 建单",
+      agentId: 7,
+    });
+    expect(res.success).toBe(true);
+    expect(taskRows()[0].createdByAgentId).toBe(12);
+  });
+
+  it("tRPC orch.createTask 仅登录用户（无 Key 绑定）→ 列留 NULL，不抛错", async () => {
+    const caller = orchCaller(adminCtx);
+    const res = await caller.createTask({ taskId: nextTaskId(), name: "UI 建单", agentId: 7 });
+    expect(res.success).toBe(true);
+    expect(taskRows()[0].createdByAgentId).toBeNull();
+  });
+
+  it("旧库升级：缺列的 tasks 表经版本化迁移 0003 补上 created_by_agent_id 且数据不丢", async () => {
+    const raw = testDb.raw;
+    raw.exec(`ALTER TABLE tasks DROP COLUMN "created_by_agent_id"`);
+    const cols = (raw.prepare(`PRAGMA table_info("tasks")`).all() as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).not.toContain("created_by_agent_id");
+    raw.prepare(
+      `INSERT INTO tasks (task_id, name, status, lifecycle_status) VALUES ('TG-T23-OLD', '老库任务', 'done', 'completed')`,
+    ).run();
+
+    // 生产注册表（auto-migrate 会 side-effect import 它）+ 真实迁移执行器
+    const { runSchemaMigrations, listRegisteredSchemaMigrations } = await import(
+      "../../api/lib/schema-migrations"
+    );
+    await import("../../api/lib/migrations-register");
+    expect(listRegisteredSchemaMigrations()).toContain("0003-tasks-created-by-agent-id");
+
+    const run = runSchemaMigrations(raw);
+    expect(run.failures).toEqual([]);
+    expect(run.applied).toContain("0003-tasks-created-by-agent-id");
+
+    const after = (raw.prepare(`PRAGMA table_info("tasks")`).all() as Array<{ name: string }>).map((c) => c.name);
+    expect(after).toContain("created_by_agent_id");
+    const row = raw
+      .prepare(`SELECT task_id, name, created_by_agent_id FROM tasks WHERE task_id = 'TG-T23-OLD'`)
+      .get() as Record<string, unknown>;
+    expect(row.name).toBe("老库任务");
+    expect(row.created_by_agent_id).toBeNull();
+
+    // 幂等：重跑跳过，不再执行
+    const rerun = runSchemaMigrations(raw);
+    expect(rerun.applied).not.toContain("0003-tasks-created-by-agent-id");
+    expect(rerun.skipped).toContain("0003-tasks-created-by-agent-id");
+  });
+});

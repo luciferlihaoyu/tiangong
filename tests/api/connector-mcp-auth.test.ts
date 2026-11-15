@@ -90,7 +90,10 @@ describe("Connector authentication with issued MCP keys", () => {
 
   it("claims an assigned task when an active MCP key is bound to the target agent", async () => {
     // Given
-    dbMocks.queueSelectResults([[activeBoundKey], [agent16], [agent16], [queuedTask], [], [queuedTask]]); // 末行供转移服务重读
+    // 队列中的空 [] 对应 api/lib/task-claim.ts 里 `const inflight` 那次查询（单飞闸；
+    // 定位用 grep 'const inflight'，勿写行号/序号——本入口经 createContext 真实鉴权，
+    // 前面多两次 key/agent 查询，位次与 execution-gate.test.ts 不同）。末行供转移服务重读。
+    dbMocks.queueSelectResults([[activeBoundKey], [agent16], [agent16], [], [queuedTask], [], [queuedTask]]);
     const caller = await callerForKey(BOUND_KEY);
 
     // When
@@ -128,7 +131,7 @@ describe("Connector authentication with issued MCP keys", () => {
     // Given
     _globalApiKeys.add(GLOBAL_KEY);
     const agent2: DbRow = { id: 2, name: "CodeMaster", orgId: null };
-    dbMocks.queueSelectResults([[agent2], [queuedTask], [], [queuedTask]]); // 末行供转移服务重读
+    dbMocks.queueSelectResults([[agent2], [], [queuedTask], [], [queuedTask]]); // 空 [] = task-claim.ts `const inflight` 单飞闸查询（口径见本文件首个认领用例注释）；末行供转移服务重读
     const caller = await callerForKey(GLOBAL_KEY);
 
     // When

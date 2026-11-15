@@ -11,71 +11,69 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { markSystemReady } from "./helpers/test-db";
 
-// ─── 按表名路由的 mock db（可断言 SQL 参数） ───
+// ─── 假 DB：helpers/fake-db（读会真正求值 WHERE；写落内存行）+ 写路径 spy ───
+// 历史教训（2026-11-16 评审）：本文件曾用"按表名返回整表、where() 空操作"的表级桩，
+// 单飞闸新增一次投影查询后它把 queued 行当 running 行 → 认领恒返 agent_busy；
+// 而当时用手写的"投影式 select 恒返 []"判别补救——brand 名单抄错（SchemaTable/MySqlTable
+// 对 sqliteTable 恒不命中）退化成全局规则，构成**误绿**（变异实验：无关投影查询被吞也全绿）。
+// 现在读写统一走 FakeDb：任何新增查询按真实 WHERE 语义过滤，无需再补桩。
 type AnyRow = Record<string, unknown>;
 type Call4 = { table: string; values: unknown };
 
 const TABLE_NAME = Symbol.for("drizzle:Name");
 
+// FakeDb 实例在 vi.mock 工厂里构造（async import），经共享 holder 暴露给用例
+// （照 task-concurrency.test.ts 的惯用法）。
+const shared = vi.hoisted(() => ({ db: null as unknown as import("./helpers/fake-db").FakeDb }));
+
+vi.mock("../../api/queries/connection", async () => {
+  const mod = await import("./helpers/fake-db");
+  mod.fakeDbRegistry.instance = mod.createFakeDb();
+  shared.db = mod.fakeDbRegistry.instance;
+  // getDb 返回带写路径 spy 的 instrumentedDb（下方定义；工厂在测试体求值时才被调用）
+  return { getDb: () => getInstrumentedDb() };
+});
+
+const fakeDb = shared.db;
+
 const state = {
-  rows: {} as Record<string, AnyRow[]>,
   insertCalls: [] as Call4[],
   updateCalls: [] as Array<{ table: string; set: AnyRow; where: unknown }>,
   failNextTokenUsageInsert: false,
   tokenUsageInsertAttempted: false,
 };
 
-function rowsOf(table: string): AnyRow[] {
-  return state.rows[table] ?? [];
-}
-
-// 宽松链式 mock：where/orderBy/limit 均返回自身，thenable 直接结算为该表全部行
-function makeChain(table: string): any {
-  const chain: Record<string, unknown> = {
-    orderBy: () => chain,
-    limit: () => chain,
-    where: () => chain,
-    then: (onDone: (rows: AnyRow[]) => unknown, onFail?: (e: unknown) => unknown) =>
-      Promise.resolve(rowsOf(table)).then(onDone, onFail),
-  };
-  return chain;
-}
-
-const mockDb = {
-  select: vi.fn(() => ({
-    from: vi.fn((table: any) => makeChain(table[TABLE_NAME])),
-  })),
-  insert: vi.fn((table: any) => ({
-    values: vi.fn((values: unknown) => {
-      const name = table[TABLE_NAME] as string;
-      if (name === "token_usage") {
-        state.tokenUsageInsertAttempted = true;
-        if (state.failNextTokenUsageInsert) {
-          state.failNextTokenUsageInsert = false;
-          return Promise.reject(new Error("forced token_usage insert failure"));
+// 写路径包一层 spy：保留"SQL 形状断言"（COALESCE 原子递增等）与失败注入能力，
+// 同时把写入落到 FakeDb 内存行（Object.assign 语义与 FakeDb.update 一致）。
+let instrumentedDb: import("./helpers/fake-db").FakeDb | null = null;
+function getInstrumentedDb(): import("./helpers/fake-db").FakeDb {
+  if (!instrumentedDb) {
+    instrumentedDb = Object.create(fakeDb) as import("./helpers/fake-db").FakeDb;
+    instrumentedDb.insert = ((table: any) => ({
+      values: async (values: unknown) => {
+        const name = table[TABLE_NAME] as string;
+        if (name === "token_usage") {
+          state.tokenUsageInsertAttempted = true;
+          if (state.failNextTokenUsageInsert) {
+            state.failNextTokenUsageInsert = false;
+            throw new Error("forced token_usage insert failure");
+          }
         }
-      }
-      state.insertCalls.push({ table: name, values });
-      return Promise.resolve({ insertId: 1 });
-    }),
-  })),
-  update: vi.fn((table: any) => ({
-    set: vi.fn((set: AnyRow) => ({
-      where: vi.fn((where: unknown) => {
-        state.updateCalls.push({ table: table[TABLE_NAME], set, where });
-        // 对齐真实驱动语义：tasks 行上的写入要回映到 state.rows，
-        // 否则"读-改-写"链（如转移服务的先提交再完成）第二次读到的还是旧状态。
-        if (table[TABLE_NAME] === "tasks" && state.rows.tasks?.[0]) {
-          Object.assign(state.rows.tasks[0], set);
-        }
-        return Promise.resolve({ changes: 1, lastInsertRowid: 0, affectedRows: 1 });
+        state.insertCalls.push({ table: name, values });
+        return (fakeDb.insert(table) as any).values(values);
+      },
+    }) as never);
+    instrumentedDb.update = ((table: any) => ({
+      set: (set: AnyRow) => ({
+        where: async (where: unknown) => {
+          state.updateCalls.push({ table: table[TABLE_NAME], set, where });
+          return (fakeDb.update(table) as any).set(set).where(where);
+        },
       }),
-    })),
-  })),
-  delete: vi.fn(() => ({ where: vi.fn(() => Promise.resolve({ affectedRows: 0 })) })),
-};
-
-vi.mock("../../api/queries/connection", () => ({ getDb: () => mockDb }));
+    }) as never);
+  }
+  return instrumentedDb;
+}
 
 vi.mock("../../api/ws-manager", () => ({
   wsManager: {
@@ -153,36 +151,38 @@ function mockCtx(overrides: Record<string, unknown> = {}) {
 
 /** 常用任务行：id=7, agentId=5, 低风险（不触发完成闸门） */
 function seedTask(overrides: AnyRow = {}) {
-  state.rows.tasks = [
-    {
-      id: 7,
-      taskId: "TG-EXT1",
-      name: "external writeback task",
-      description: null,
-      input: null,
-      output: null,
-      agentId: 5,
-      status: "running",
-      lifecycleStatus: "working",
-      stateRevision: 1,
-      originSystem: null,
-      ...overrides,
-    },
-  ];
+  fakeDb.tables.get("tasks")!.push({
+    id: 7,
+    task_id: "TG-EXT1",
+    name: "external writeback task",
+    description: null,
+    input: null,
+    output: null,
+    agent_id: 5,
+    status: "running",
+    lifecycle_status: "working",
+    state_revision: 1,
+    origin_system: null,
+    ...overrides,
+  });
 }
 
 /** 定价行：input $0.001/1K，output $0.002/1K，cached $0.0001/1K（统一价，非分层） */
 function seedPricing(model = "test-model") {
-  state.rows.model_pricing = [
-    { model, inputPrice: "0.001", outputPrice: "0.002", cachedInputPrice: "0.0001", notes: null },
-  ];
+  fakeDb.tables.get("model_pricing")!.push({
+    model,
+    inputPrice: "0.001",
+    outputPrice: "0.002",
+    cachedInputPrice: "0.0001",
+    notes: null,
+  });
 }
 
 beforeEach(() => {
   // Phase B §2 起认领有就绪闸门；本文件测的是预算/记账/产物通道，需先声明系统已就绪
   markSystemReady();
   vi.clearAllMocks();
-  state.rows = {};
+  fakeDb.reset();
   state.insertCalls = [];
   state.updateCalls = [];
   state.failNextTokenUsageInsert = false;
@@ -429,27 +429,27 @@ describe("updateProgress 长产物通道", () => {
 // ─── C. 认领预算熔断（claimTask / updateHeartbeat） ───
 describe("认领预算熔断", () => {
   function seedAgents(agent: AnyRow) {
-    state.rows.agents = [{ id: 5, name: "dsh-runner", status: "idle", budgetCents: 0, spentCents: 0, ...agent }];
+    // FakeDb 底层按 db 列名存储；显式 id=5（否则自动发号成 1，与任务的 agent_id=5 对不上）
+    fakeDb.tables.get("agents")!.push({ id: 5, agent_id: "dsh-runner", name: "dsh-runner", system: "dsh", status: "idle", budget_cents: 0, spent_cents: 0, ...agent });
   }
   function seedQueuedTask() {
-    state.rows.tasks = [
-      {
-        id: 9,
-        taskId: "TG-Q1",
-        name: "low risk queued task",
-        description: null,
-        input: null,
-        output: null,
-        agentId: 5,
-        status: "queued",
-        boardStatus: null,
-        priority: 1,
-      },
-    ];
+    fakeDb.tables.get("tasks")!.push({
+      id: 9,
+      task_id: "TG-Q1",
+      name: "low risk queued task",
+      description: null,
+      input: null,
+      output: null,
+      agent_id: 5,
+      status: "queued",
+      lifecycle_status: "queued",
+      board_status: null,
+      priority: 1,
+    });
   }
 
   it("claimTask：预算耗尽 → 无任务 + budget_exhausted，且不写 tasks", async () => {
-    seedAgents({ budgetCents: 100, spentCents: 150 });
+    seedAgents({ budget_cents: 100, spent_cents: 150 });
     seedQueuedTask();
 
     const caller = agentCaller(mockCtx({ user: null, apiKeyAgentId: 5 }));
@@ -462,7 +462,7 @@ describe("认领预算熔断", () => {
   });
 
   it("claimTask：预算正常 → 照常认领", async () => {
-    seedAgents({ budgetCents: 1000, spentCents: 100 });
+    seedAgents({ budget_cents: 1000, spent_cents: 100 });
     seedQueuedTask();
 
     const caller = agentCaller(mockCtx({ user: null, apiKeyAgentId: 5 }));
@@ -474,7 +474,7 @@ describe("认领预算熔断", () => {
   });
 
   it("updateHeartbeat：预算耗尽 → claimedTask=null + claimReason，不停放任务", async () => {
-    seedAgents({ budgetCents: 100, spentCents: 200 });
+    seedAgents({ budget_cents: 100, spent_cents: 200 });
     seedQueuedTask();
 
     const caller = agentCaller(mockCtx({ user: null, apiKeyAgentId: 5 }));
@@ -488,7 +488,7 @@ describe("认领预算熔断", () => {
   });
 
   it("updateHeartbeat：budgetCents=0（不限额）→ 照常认领", async () => {
-    seedAgents({ budgetCents: 0, spentCents: 999_999 });
+    seedAgents({ budget_cents: 0, spent_cents: 999_999 });
     seedQueuedTask();
 
     const caller = agentCaller(mockCtx({ user: null, apiKeyAgentId: 5 }));

@@ -160,8 +160,10 @@ describe("Execution approval gate", () => {
 
   it("blocks claiming of a high-risk task and parks it pending approval", async () => {
     // Given: agent + one high-risk queued task + no generic tasks
+    // 队列中的空 [] 对应 api/lib/task-claim.ts 里 `const inflight` 那次查询（单飞闸；
+    // 定位用 grep 'const inflight'，勿写行号/序号——入口链路不同则队列位次不同）。
     // 末行供转移服务写入前重读（§3-3 认领/停放统一走服务）
-    dbMocks.queueSelectResults([[agent16], [highRiskTask], [], [highRiskTask]]);
+    dbMocks.queueSelectResults([[agent16], [], [highRiskTask], [], [highRiskTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);
@@ -176,8 +178,8 @@ describe("Execution approval gate", () => {
   });
 
   it("still claims and executes a low-risk task (regression)", async () => {
-    // Given
-    dbMocks.queueSelectResults([[agent16], [lowRiskTask], [], [lowRiskTask]]);
+    // Given（队列位次口径见上一个用例的注释：空 [] = task-claim.ts `const inflight` 单飞闸查询）
+    dbMocks.queueSelectResults([[agent16], [], [lowRiskTask], [], [lowRiskTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);
@@ -214,7 +216,8 @@ describe("Execution approval gate", () => {
         },
       }),
     });
-    dbMocks.queueSelectResults([[agent16], [approvedTask], [], [approvedTask]]);
+    // 队列位次口径见本文件首个用例注释（空 [] = task-claim.ts `const inflight` 单飞闸查询）
+    dbMocks.queueSelectResults([[agent16], [], [approvedTask], [], [approvedTask]]);
 
     // When
     const caller = await callerForKey(GLOBAL_KEY);

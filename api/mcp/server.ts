@@ -57,6 +57,13 @@ import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
 import { createTraceId, applyRequestedAgentToInput } from "../lib/task-metadata";
+import { isUniqueConstraintViolation } from "../lib/db-error";
+import {
+  ORIGIN_SYSTEM_TIANGONG,
+  EXECUTOR_REQUIRED_MESSAGE,
+  hasDeclaredExecutor,
+  findTaskByIdempotencyKey,
+} from "../lib/create-task-gate";
 import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
 import { createXuanjiClient } from "../connectors/xuanji/service";
 import { SearchContextRequestSchema } from "../connectors/xuanji/types";
@@ -116,6 +123,25 @@ function textResult(data: unknown) {
 
 function failResult(error: string) {
   return textResult({ success: false, error });
+}
+
+/**
+ * t2-2：幂等键命中已有任务时的回执（与正常建单同形状 + reused:true）。
+ * create_task 的两条命中路径（前置查重 / 并发唯一冲突）共用，避免形状漂移。
+ */
+function reusedTaskResult(row: typeof tasks.$inferSelect, dependencies: number[]) {
+  return textResult({
+    success: true,
+    reused: true,
+    task: {
+      id: row.id,
+      taskId: row.taskId,
+      name: row.name,
+      status: row.status,
+      priority: row.priority,
+      dependencies,
+    },
+  });
 }
 
 /**
@@ -365,7 +391,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
   // Tool 1: 创建任务
   server.tool(
     "create_task",
-    "[天宫] 创建新任务，支持依赖其他任务",
+    "[天宫] 创建新任务，支持依赖其他任务。执行人必须指定：requestedAgentId（指名归属）或数字 agentId（直派）至少给一个——两者皆缺的通用单已被服务端拒绝（t2-2，历史 #61/#62/#198：agent_id=NULL 的任务会被内建 Runner 抢走并以失败收场）。可选 idempotencyKey：同 key 重复建单不报错，返回已存在任务（reused:true）。",
     {
       name: z.string().describe("任务名称"),
       agentId: z.number().optional().describe("分配给的 Agent ID"),
@@ -373,25 +399,47 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       priority: z.number().min(0).max(100).optional().default(0).describe("优先级 0-100"),
       dependencies: z.array(z.number()).optional().describe("依赖的任务 ID 列表"),
       input: z.string().optional().describe("输入数据 (JSON 字符串)"),
-      requestedAgentId: z.string().min(1).max(100).optional().describe("期望执行 Agent 的 agentId（如 \"dsh\"）。指定后此任务只允许该 agent 认领，防止被其他空闲 agent 抢走。不指定 = 通用任务，任意 agent 可认领。"),
+      requestedAgentId: z.string().min(1).max(100).optional().describe("期望执行 Agent 的 agentId（如 \"dsh\"）。指定后此任务只允许该 agent 认领，防止被其他空闲 agent 抢走。**必须**与 agentId 至少给一个：不给任何执行人的通用单会被服务端直接拒绝（t2-2，原「不指定 = 通用任务」语义已作废）。"),
+      idempotencyKey: z.string().min(1).max(191).optional().describe("幂等键（t2-2）：同一 key 重复建单返回同一个任务号，不会重复派活。"),
       maxRetries: z.number().min(0).max(10).optional().default(3).describe("最大重试次数"),
       timeoutMs: z.number().min(1000).max(3600000).optional().default(1800000).describe("超时毫秒（上限 3600000=60 分钟）。按任务类型参考：连通性/问答 300000(5min)；文本写作/翻译/分析 900000(15min)；代码/数据处理/图像生成(≤5张) 1800000(30min)；图像批量+自检/复杂多步骤 3600000(60min)。openclaw 侧执行链路全局窗口 57 分钟，超过 60 分钟的任务需先与碧霄确认异步方案。默认 1800000(30min)。"),
     },
     async (params) => {
       const db = getDb();
+      // ── t2-2 执行人闸门（与 orch.createTask 共用 create-task-gate 事实源）──
+      if (!hasDeclaredExecutor(params)) return failResult(EXECUTOR_REQUIRED_MESSAGE);
+
+      // ── t2-2 幂等前置查重（并发竞态另由下方唯一冲突兜底）──
+      const normalizedKey = params.idempotencyKey?.trim() || null;
+      const existing = await findTaskByIdempotencyKey(db, normalizedKey);
+      if (existing) return reusedTaskResult(existing, params.dependencies ?? []);
+
       const taskId = `T-${Date.now().toString(36).toUpperCase()}`;
       const routedInput = applyRequestedAgentToInput(params.input, params.requestedAgentId);
 
-      await db.insert(tasks).values({
-        taskId,
-        name: params.name,
-        agentId: params.agentId ?? null,
-        description: params.description ?? null,
-        priority: params.priority ?? 0,
-        input: routedInput,
-        maxRetries: params.maxRetries ?? 3,
-        timeoutMs: params.timeoutMs ?? 1800000,
-      });
+      try {
+        await db.insert(tasks).values({
+          taskId,
+          name: params.name,
+          agentId: params.agentId ?? null,
+          description: params.description ?? null,
+          priority: params.priority ?? 0,
+          input: routedInput,
+          maxRetries: params.maxRetries ?? 3,
+          timeoutMs: params.timeoutMs ?? 1800000,
+          originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
+          idempotencyKey: normalizedKey,
+        });
+      } catch (error) {
+        // 并发竞态：查重之后、插入提交之前，另一请求已用同一 key 建单。
+        // 判定精确到 tasks.idempotency_key 列，无关约束错误一律照抛。
+        if (!normalizedKey || !isUniqueConstraintViolation(error, { table: "tasks", columns: ["idempotency_key"] })) {
+          throw error;
+        }
+        const raced = await findTaskByIdempotencyKey(db, normalizedKey);
+        if (!raced) throw error;
+        return reusedTaskResult(raced, params.dependencies ?? []);
+      }
 
       const created = await db
         .select()

@@ -51,7 +51,8 @@ export function CreateTaskDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    // t2-2：执行人是硬性前提（服务端会 BAD_REQUEST 拒绝通用单）
+    if (!name.trim() || agentId === null) return;
 
     const tid = taskIdQuery.data?.taskId ?? `TG-${Date.now().toString(36).slice(-6).toUpperCase()}`;
     createMutation.mutate({
@@ -168,7 +169,11 @@ export function CreateTaskDialog({
                   color: "var(--text-primary)",
                 }}
               >
-                <option value="">— 不指定（通用任务）—</option>
+                {/* t2-2：服务端已拒绝无执行人的通用单（历史 #61/#62/#198），
+                    「不指定」不再是合法选项——占位项 disabled，提交前必须选人 */}
+                <option value="" disabled>
+                  — 必须指派 Agent —
+                </option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({AGENT_STATUS_LABELS[a.status]})
@@ -258,7 +263,7 @@ export function CreateTaskDialog({
             </button>
             <button
               type="submit"
-              disabled={createMutation.isPending || !name.trim()}
+              disabled={createMutation.isPending || !name.trim() || agentId === null}
               className="text-xs px-5 py-2 rounded font-bold tracking-wide transition-all hover:brightness-110 disabled:opacity-50 flex items-center gap-1"
               style={{
                 background: "var(--accent-cyan)",

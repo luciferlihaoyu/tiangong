@@ -8,6 +8,13 @@ import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { applyRequestedAgentToInput } from "./lib/task-metadata";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
+import { isUniqueConstraintViolation } from "./lib/db-error";
+import {
+  ORIGIN_SYSTEM_TIANGONG,
+  assertDeclaredExecutor,
+  findTaskByIdempotencyKey,
+  toReusedTaskResult,
+} from "./lib/create-task-gate";
 
 // ─── Helpers ───
 
@@ -140,30 +147,56 @@ export const orchestrationRouter = createRouter({
       ]).optional(),
       dependsOn: z.array(z.number()).optional(),
       requestedAgentId: z.string().min(1).max(100).optional(),
+      // t2-2：幂等键。同 (origin_system='tiangong', key) 重复建单不报错，
+      // 返回已存在任务（reused:true）。列与唯一索引早已存在，本次只是开放使用。
+      idempotencyKey: z.string().min(1).max(191).optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const { dependsOn, requestedAgentId, ...taskData } = input;
+      // ── t2-2 执行人闸门 ────────────────────────────────────────
+      // 无 agentId 又无 requestedAgentId = 通用任务 → 内建 Runner 会以
+      // agent_id=NULL 抢单并必然失败（历史 #61/#62/#198），入口直接拒。
+      assertDeclaredExecutor(input);
+
+      const { dependsOn, requestedAgentId, idempotencyKey, ...taskData } = input;
       // 归属声明：requestedAgentId 是期望执行者的 agentId 字符串（如 "dsh"），
       // 写入 input metadata routing.selectedAgentId，认领侧据此阻止其他 agent 抢单。
       const routedInput = applyRequestedAgentToInput(taskData.input, requestedAgentId);
+      const normalizedKey = idempotencyKey?.trim() || null;
+
+      // 幂等前置查重：命中即复用，不再插入（并发竞态另由下方唯一冲突兜底）
+      const existing = await findTaskByIdempotencyKey(db, normalizedKey);
+      if (existing) return toReusedTaskResult(existing);
 
       // Cycle detection
       if (dependsOn && dependsOn.length > 0) {
         // Insert task first to get id
-        const result = await db.insert(tasks).values({
-          taskId: taskData.taskId,
-          name: taskData.name,
-          agentId: taskData.agentId ?? null,
-          description: taskData.description ?? null,
-          priority: taskData.priority ?? 0,
-          input: routedInput,
-          status: taskData.status ?? "pending",
-          lifecycleStatus: taskData.lifecycleStatus ?? "created",
-          maxRetries: taskData.maxRetries ?? 3,
-          timeoutMs: taskData.timeoutMs ?? 300000,
-          parentTaskId: taskData.parentTaskId ?? null,
-        });
+        try {
+          await db.insert(tasks).values({
+            taskId: taskData.taskId,
+            name: taskData.name,
+            agentId: taskData.agentId ?? null,
+            description: taskData.description ?? null,
+            priority: taskData.priority ?? 0,
+            input: routedInput,
+            status: taskData.status ?? "pending",
+            lifecycleStatus: taskData.lifecycleStatus ?? "created",
+            maxRetries: taskData.maxRetries ?? 3,
+            timeoutMs: taskData.timeoutMs ?? 300000,
+            parentTaskId: taskData.parentTaskId ?? null,
+            originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
+            idempotencyKey: normalizedKey,
+          });
+        } catch (error) {
+          // 并发竞态：查重之后、插入提交之前，另一请求已用同一 key 建单。
+          // 判定精确到 tasks.idempotency_key 列，无关约束错误一律照抛。
+          if (!normalizedKey || !isUniqueConstraintViolation(error, { table: "tasks", columns: ["idempotency_key"] })) {
+            throw error;
+          }
+          const raced = await findTaskByIdempotencyKey(db, normalizedKey);
+          if (!raced) throw error;
+          return toReusedTaskResult(raced);
+        }
 
         const created = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.taskId, taskData.taskId)).then(r => r[0]);
         if (!created) return { success: false, error: "任务创建失败" };
@@ -192,24 +225,35 @@ export const orchestrationRouter = createRouter({
           timestamp: new Date().toISOString(),
         });
 
-        return { success: true, id: taskId };
+        return { success: true, id: taskId, taskId: taskData.taskId, reused: false as const };
       }
 
-      await db.insert(tasks).values({
-        taskId: taskData.taskId,
-        name: taskData.name,
-        agentId: taskData.agentId ?? null,
-        description: taskData.description ?? null,
-        priority: taskData.priority ?? 0,
-        input: routedInput,
-        status: taskData.status ?? "pending",
-        lifecycleStatus: taskData.lifecycleStatus ?? "created",
-        maxRetries: taskData.maxRetries ?? 3,
-        timeoutMs: taskData.timeoutMs ?? 300000,
-        parentTaskId: taskData.parentTaskId ?? null,
-      });
+      try {
+        await db.insert(tasks).values({
+          taskId: taskData.taskId,
+          name: taskData.name,
+          agentId: taskData.agentId ?? null,
+          description: taskData.description ?? null,
+          priority: taskData.priority ?? 0,
+          input: routedInput,
+          status: taskData.status ?? "pending",
+          lifecycleStatus: taskData.lifecycleStatus ?? "created",
+          maxRetries: taskData.maxRetries ?? 3,
+          timeoutMs: taskData.timeoutMs ?? 300000,
+          parentTaskId: taskData.parentTaskId ?? null,
+          originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
+          idempotencyKey: normalizedKey,
+        });
+      } catch (error) {
+        if (!normalizedKey || !isUniqueConstraintViolation(error, { table: "tasks", columns: ["idempotency_key"] })) {
+          throw error;
+        }
+        const raced = await findTaskByIdempotencyKey(db, normalizedKey);
+        if (!raced) throw error;
+        return toReusedTaskResult(raced);
+      }
 
-      const created = await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.taskId, taskData.taskId)).then(r => r[0]);
+      const created = await db.select({ id: tasks.id, taskId: tasks.taskId }).from(tasks).where(eq(tasks.taskId, taskData.taskId)).then(r => r[0]);
       // 通知 Dashboard
       wsManager.broadcastToDashboard({
         type: "task_update",
@@ -221,7 +265,7 @@ export const orchestrationRouter = createRouter({
         agentId: taskData.agentId,
         timestamp: new Date().toISOString(),
       });
-      return { success: true, id: created?.id ?? null };
+      return { success: true, id: created?.id ?? null, taskId: created?.taskId ?? taskData.taskId, reused: false as const };
     }),
 
   updateStatus: authedQuery

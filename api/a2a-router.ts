@@ -5,6 +5,7 @@ import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/sch
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
 import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
+import { canReviewTask } from "./lib/task-authz";
 import { enqueueTaskFinalize } from "./lib/finalize-actions";
 import { LIFECYCLE_STATUSES, isValidLifecycleTransition, applyTaskTransition } from "./lib/task-transition";
 import { getInsertId } from "./lib/insert-id";
@@ -400,20 +401,35 @@ export const a2aRouter = createRouter({
     }),
 
   // ─── 7. Review / Complete / Fail / Timeout / Cancel ───
-  review: adminQuery
+  review: authedQuery
     .input(z.object({ taskId: z.number(), approved: z.boolean(), note: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
       if (!task) throw new Error("Task not found");
 
-      // 权限检查：API Key 认证时，Agent 必须有 admin 角色
+      // 验收身份判定（2026-11 缺陷修复 + A2A 编排闭环补全）：此前挂 adminQuery，API Key 在中间件即 401，
+      // connector 自动收尾永远进不了过程体（"Task reviewed and approved" 审计长期缺失、
+      // 下方旧的 admin-agent 检查成为死代码）。现改 authedQuery + canReviewTask：
+      // admin 登录用户 / 管理型 Key / 任务执行者本人 / admin 角色 agent / **被指派的验收方
+      // （task.reviewerId，submit 时按父任务 agentId > dispatcherAgentId 落库）**可验收；
+      // 普通登录用户与非执行者且非验收方的 agent Key 拒绝。
+      // ⚠️ 高风险 self-approve 防线仍在下方 checkCompletionGate——本判定不放宽闸门，
+      //    reviewer 验收高风险任务同样被拦停，绝不落 completed。
+      let actorAgentRole: string | null = null;
       if (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0) {
-        const agent = await db.select().from(agents).where(eq(agents.id, ctx.apiKeyAgentId)).then((r) => r[0]);
-        if (!agent || agent.role !== "admin") {
-          throw new Error("需要管理员权限");
-        }
+        const actorAgent = await db.select().from(agents).where(eq(agents.id, ctx.apiKeyAgentId)).then((r) => r[0]);
+        actorAgentRole = actorAgent?.role ?? null;
       }
+      const authz = canReviewTask(
+        { userRole: ctx.user?.role ?? null, userId: ctx.user?.id ?? null, apiKeyAgentId: ctx.apiKeyAgentId },
+        { agentId: task.agentId, reviewerId: task.reviewerId ?? null },
+        actorAgentRole
+      );
+      if (!authz.ok) {
+        return { success: false, error: authz.reason };
+      }
+      const actorLabel = authz.actorLabel;
 
       // 只能从 submitted 或 reviewing 进入 review
       if (!["submitted", "reviewing"].includes(task.lifecycleStatus ?? "")) {
@@ -451,8 +467,9 @@ export const a2aRouter = createRouter({
       await recordTaskEvent({
         taskId: input.taskId,
         eventType: input.approved ? "result" : "system",
-        content: input.note ?? (input.approved ? "Task reviewed and approved" : "Task under review"),
-        metadata: { approved: input.approved, previousStatus: task.lifecycleStatus, lifecycleStatus: nextStatus },
+        // 验收记录写明"谁验收的"：actorLabel 同时进内容（人可读）与 metadata（机器可查）。
+        content: `${input.note ?? (input.approved ? "Task reviewed and approved" : "Task under review")} [by ${actorLabel}]`,
+        metadata: { approved: input.approved, previousStatus: task.lifecycleStatus, lifecycleStatus: nextStatus, actorLabel },
       });
 
       if (input.approved) {

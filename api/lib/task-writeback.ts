@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
-import { tasks, taskArtifacts } from "@db/schema";
+import { tasks, taskArtifacts, agents } from "@db/schema";
 import { wsManager } from "../ws-manager";
 import { emitCollabSummaryForTask } from "./collaboration-events";
 import { checkCompletionGate, parkTaskForApproval, type Db } from "./execution-gate";
@@ -27,7 +27,7 @@ import { enqueueTaskFinalize } from "./finalize-actions";
 import { applyTaskTransition } from "./task-transition";
 import { recordExternalUsage } from "./external-usage";
 import { recordNotification } from "./notification";
-import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow } from "./task-authz";
+import { checkTaskWriteAuthorized, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrThrow, canWriteTaskStatus } from "./task-authz";
 
 /** progress 入参（taskboard.progress 与 MCP report_progress 共用，原 task-router updateProgress） */
 export const UpdateProgressInputSchema = z.object({
@@ -70,6 +70,11 @@ export type UpdateProgressInput = z.infer<typeof UpdateProgressInputSchema>;
 /** 调用方身份：tRPC 的 ctx.apiKeyAgentId（null=登录用户；-1=管理型 Key；>0=Key 绑定的 agent） */
 export interface ReportTaskProgressActor {
   apiKeyAgentId: number | null;
+  /**
+   * 登录用户（2026-11 状态写入越权修复新增）。缺省 = 无登录用户（纯 API Key 通道），
+   * 与 canWriteTaskStatus 的匿名保守判定一致。MCP report_progress 面不传本字段。
+   */
+  user?: { id: number; role: string } | null;
 }
 
 /**
@@ -110,6 +115,35 @@ export async function reportTaskProgress(
   if (taskRow && (input.usage !== undefined || input.artifacts !== undefined)) {
     // 越权封装（评审 minor ⑥）：拒绝时抛 FORBIDDEN TRPCError，放行无副作用
     assertTaskWriteAuthorizedOrThrow(checkTaskWriteAuthorized(actor.apiKeyAgentId, taskRow));
+  }
+
+  // 状态写入越权（2026-11 缺陷修复）：此前只有 usage/artifacts 做授权检查，任意持有
+  // 合法 Agent Key 的调用方都能把**别人**的任务写成 done/failed（真越权面）。
+  // 判定用 canWriteTaskStatus（task-authz.ts）：登录用户 / 管理型 Key / 执行者本人 /
+  // admin 角色 agent 放行——connector 正常回写（done/usage/artifacts）不受影响。
+  // ⚠️ 与 usage/artifacts 通道（checkTaskWriteAuthorized）有两处**有意差异**：
+  //   ①完全匿名（既无登录用户又无有效 Key，即 apiKeyAgentId=null 且无 user）在此**被拒**，
+  //     而旧通道只看 `>0 且 ≠认领人`，null 一路放行；
+  //   ②admin 角色的 agent Key 在此**放行**，旧通道不放行（它只认执行者）。
+  //   普通登录用户（有 user，任意角色）两通道均放行；判定细节见 task-authz.ts 的 canWriteTaskStatus。
+  if (taskRow && (input.status !== undefined || input.lifecycleStatus !== undefined)) {
+    let actorAgentRole: string | null = null;
+    if (actor.apiKeyAgentId !== null && actor.apiKeyAgentId > 0) {
+      const rows = await db
+        .select({ role: agents.role })
+        .from(agents)
+        .where(eq(agents.id, actor.apiKeyAgentId))
+        .then((r) => r[0]);
+      actorAgentRole = rows?.role ?? null;
+    }
+    const statusAuthz = canWriteTaskStatus(
+      { userRole: actor.user?.role ?? null, userId: actor.user?.id ?? null, apiKeyAgentId: actor.apiKeyAgentId },
+      { agentId: taskRow.agentId },
+      actorAgentRole
+    );
+    if (!statusAuthz.ok) {
+      return { success: false, error: statusAuthz.reason };
+    }
   }
 
   // 字节上限校验（评审 minor ③）：长产物通道逐条写 task_artifacts 前先整体校验，

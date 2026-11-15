@@ -204,9 +204,11 @@ export const taskboardRouter = createRouter({
   // 统一归档 / 广播 全量走共享 lib，避免"看板进度"与"回写进度"两份逻辑漂移。
   // 入参兼容两种形态：老 taskRouter 的 {id, status?, lifecycleStatus?, output?,
   // error?, usage?, artifacts?} 与看板 UI 的 {taskId, agentId?, progress, message?}
-  // —— taskId 是 id 的别名；agentId/message 为看板辅助字段（核心权限由
-  // apiKeyAgentId 决定，不做 agent 强制校验，保持与老 taskRouter.updateProgress
-  // 一致的宽松面）。
+  // —— taskId 是 id 的别名；agentId/message 为看板辅助字段（input.agentId **不参与鉴权**，
+  // 核心权限由 ctx.apiKeyAgentId / 登录用户决定；但状态写入并非"宽松面"——
+  // status/lifecycleStatus 在 task-writeback.ts 内受 canWriteTaskStatus 约束：
+  // 登录用户 / 管理型 Key / 执行者本人 / admin 角色 agent 放行，其余拒绝。
+  // 验收方 reviewerId 只扩 review 权限、不扩本处状态写入，见 task-authz.ts 契约注释）。
   progress: authedQuery
     .input(
       z
@@ -250,7 +252,7 @@ export const taskboardRouter = createRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const id = input.taskId ?? input.id!;
-      return reportTaskProgress(getDb(), { ...input, id }, { apiKeyAgentId: ctx.apiKeyAgentId });
+      return reportTaskProgress(getDb(), { ...input, id }, { apiKeyAgentId: ctx.apiKeyAgentId, user: ctx.user });
     }),
 
   submit: authedQuery

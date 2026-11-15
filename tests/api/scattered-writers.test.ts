@@ -266,7 +266,7 @@ describe("§3-3 切片 6：库层零散写入递增修订号", () => {
     const result = await reportTaskProgress(
       testDb.db as never,
       { id, progress: 100, status: "done", output: "完成产物" } as never,
-      { apiKeyAgentId: null } as never
+      { apiKeyAgentId: -1 } as never // 管理型 Key：对齐 api/mcp/server.ts 未绑定 Key→-1 的真实映射；旧匿名形状会被 canWriteTaskStatus 拒（本用例带 status:"done" 进闸，且 seed 无主任务——执行者匹配支永不成立，不可改用执行者身份）
     );
     expect(result.success).toBe(true);
 
@@ -281,6 +281,7 @@ describe("§3-3 切片 6：库层零散写入递增修订号", () => {
     const result = await reportTaskProgress(
       testDb.db as never,
       { id, progress: 60 } as never,
+      // 绊马索：故意用完全匿名 actor，且本用例不带 status（不进 canWriteTaskStatus 分支）；若授权面扩大到一切回写，此条应变红。
       { apiKeyAgentId: null } as never
     );
     expect(result.success).toBe(true);

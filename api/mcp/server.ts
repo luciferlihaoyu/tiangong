@@ -511,6 +511,14 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
 
       // State machine validation
       const allowed = statusTransitions[task.status] || [];
+      // t2-5 前置守卫：lifecycle 已是终态（failed/timeout/cancelled/completed）时，
+      // statusTransitions 的粗粒度映射表不再放行——否则 failed→queued 走"主更新"路径
+      // （只写 status、不带 lifecycleStatus），转移服务因不动生命周期而成功落库，
+      // **完全绕开**下方重试闸与状态机校验，retryCount 耗尽的任务被原样重派。
+      // 守卫后此类请求落进 failed→queued 分支：maxRetries 闸 + restart 转移计数。
+      if (allowed.includes(params.status) && isTerminalLifecycle(task.lifecycleStatus ?? "")) {
+        allowed.length = 0;
+      }
       if (!allowed.includes(params.status)) {
         // Auto-retry: failed → queued
         if (task.status === "failed" && params.status === "queued") {
@@ -529,15 +537,17 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
               ],
             };
           }
-          // 终态 failed → queued 是重试语义：显式开 restart（状态机"终态不可逆"的有意例外）。
+          // 终态 failed → queued 是重试语义：显式开 restart。
           // t2-5 修正原注释事实断言：本分支**可达**——statusTransitions 只查粗粒度 status，
           // lifecycleStatus 已是终态 failed 的行走主更新会被转移服务状态机拒绝、落进本分支；
           // 上方 maxRetries 闸在 retryCount 耗尽时封死重派（结构性失败不再原样重派）。
           const retryTransition = await applyTaskTransition(db, {
             taskId: params.taskId,
+            lifecycleStatus: "queued",
             status: "queued",
             at: new Date(),
             restart: true,
+            clearLease: true,
             expectedRevision: task.stateRevision,
             extra: { retryCount: retryCount + 1, error: null },
           });

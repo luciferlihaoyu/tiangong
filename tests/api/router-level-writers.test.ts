@@ -11,6 +11,9 @@
  * 在现网不可达——两处的 statusTransitions/validTransitions 映射表都把 failed→queued
  * 列为合法走向，请求永远走主更新路径。这两处仍随本切片一并转换（保持"全部写入走服务"
  * 的结构不变量），但不设独立用例。
+ * ⚠️ t2-5 勘误（原文保留作历史口径）："不可达"只对 lifecycle 非终态的行成立；
+ * lifecycleStatus=failed 的行此前确实走主更新、**绕开重试闸被原样重派**。t2-5 给两处
+ * 粗粒度映射表加终态前置守卫后该分支可达且受闸，独立用例见 two-stage-retry.test.ts。
  */
 import { eq } from "drizzle-orm";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

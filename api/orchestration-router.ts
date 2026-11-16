@@ -302,6 +302,12 @@ export const orchestrationRouter = createRouter({
       };
 
       const allowed = validTransitions[task.status] || [];
+      // t2-5 前置守卫（与 mcp/server.ts update_task_status 同一语义）：lifecycle 已是
+      // 终态时粗粒度映射表不再放行——否则 failed→queued 走主更新路径绕开重试闸，
+      // retryCount 耗尽的任务被原样重派。守卫后此类请求落进 failed→queued 分支受闸。
+      if (allowed.includes(input.status) && isTerminalLifecycle(task.lifecycleStatus ?? "")) {
+        allowed.length = 0;
+      }
       if (!allowed.includes(input.status)) {
         // Check auto-retry: failed → queued
         if (task.status === "failed" && input.status === "queued") {
@@ -316,9 +322,11 @@ export const orchestrationRouter = createRouter({
           // 上方 maxRetries 闸在 retryCount 耗尽时封死重派（结构性失败不再原样重派）。
           const retryTransition = await applyTaskTransition(db, {
             taskId: input.id,
+            lifecycleStatus: "queued",
             status: "queued",
             at: new Date(),
             restart: true,
+            clearLease: true,
             expectedRevision: task.stateRevision,
             extra: { retryCount: retryCount + 1, error: null },
           });

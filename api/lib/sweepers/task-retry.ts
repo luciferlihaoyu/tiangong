@@ -9,6 +9,13 @@
  * 任务自动回队列重试（status=queued, lifecycleStatus=queued, retryCount+1,
  * error=null），与 MCP update_task_status 的 failed→queued 自动重试同一套计数。
  *
+ * t2-5 排队公平性：候选按 failed_at **升序**（最旧先处理）取 limit(50)。
+ * 理由钉死在此：①退避计时从 failedAt 起算，最旧的必然最先满足退避窗口，FIFO 与
+ * 线性退避语义天然一致；②无 orderBy 时 SQLite 按 rowid（插入序）返回，失败持续
+ * 涌入时最新一条永远排在窗口外被饿死——v5 判据「51 条失败时最新一条仍被处理」
+ * 由 tests/api/two-stage-retry.test.ts 用真实 SQLite 钉住（假 DB 桩的 orderBy 是
+ * 空操作，防同形化必须真库）。desc「最新优先」会让存量旧失败永久垫底，弃。
+ *
  * 退避策略：线性退避 retryCount * RETRY_BACKOFF_BASE_MS（默认 5 分钟/次），
  * 避免上游持续故障时的紧密重试风暴。已触发 retry_storm 断路器的场景由
  * sweepTaskTimeouts 的审计覆盖，这里不重复。
@@ -20,7 +27,7 @@
  * 阈值：TIANGONG_TASK_RETRY_ENABLED（默认 true），
  *       TIANGONG_TASK_RETRY_BACKOFF_MS（默认 300000 = 5 分钟）。
  */
-import { and, eq, isNotNull, lt } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
 import { tasks, taskMessages } from "@db/schema";
 
 import { emitSweeperAudit } from "./notify";
@@ -40,6 +47,7 @@ export async function sweepTaskRetry(db: Db, now: Date): Promise<void> {
     .select()
     .from(tasks)
     .where(and(eq(tasks.status, "failed"), isNotNull(tasks.failedAt)))
+    .orderBy(asc(tasks.failedAt))
     .limit(50);
 
   let retried = 0;

@@ -52,7 +52,7 @@ import {
 import { eq, and, desc, inArray, gte, sql } from "drizzle-orm";
 import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-router";
 import { enqueueTaskFinalize } from "../lib/finalize-actions";
-import { applyTaskTransition } from "../lib/task-transition";
+import { applyTaskTransition, isTerminalLifecycle } from "../lib/task-transition";
 import { claimNextTask } from "../lib/task-claim";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
@@ -530,8 +530,9 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
             };
           }
           // 终态 failed → queued 是重试语义：显式开 restart（状态机"终态不可逆"的有意例外）。
-          // 注意：本工具的 statusTransitions 映射把 failed→queued 列为合法走向，此分支现网不可达，
-          // 仅随切片 7 一并转换以保持"全部写入走服务"的结构不变量。
+          // t2-5 修正原注释事实断言：本分支**可达**——statusTransitions 只查粗粒度 status，
+          // lifecycleStatus 已是终态 failed 的行走主更新会被转移服务状态机拒绝、落进本分支；
+          // 上方 maxRetries 闸在 retryCount 耗尽时封死重派（结构性失败不再原样重派）。
           const retryTransition = await applyTaskTransition(db, {
             taskId: params.taskId,
             status: "queued",
@@ -583,11 +584,22 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       if (params.output !== undefined) updates.output = params.output;
       if (params.error !== undefined) updates.error = params.error;
 
+      // ── t2-4 两段式（第一段，MCP update_task_status 面）──
+      // 与 reportTaskProgress / task-writeback 同一语义：status="done" 是**执行体自报完成**，
+      // 映射 lifecycleStatus=submitted 等验收；不映射的话 #198 形状换个工具照样直达
+      // done+归档、绕过验收。completed 只能由验收通道（a2a.review / taskboard.approve）推进。
+      // 分支条件收窄到 done-only：failed 族走转移服务的终态推导，其余走向不动生命周期。
+      const t2_4Lifecycle =
+        params.status === "done" && !isTerminalLifecycle(task.lifecycleStatus ?? "")
+          ? ({ lifecycleStatus: "submitted" } as const)
+          : {};
+
       // §3-3：主更新走转移服务（工具自身的 statusTransitions 映射仍是前置契约闸门；
-      // 服务层面生命周期不在此改动，status 单写不带漂移）
+      // 带 lifecycleStatus 时还接受状态机校验——消灭漂移写入）
       const mainTransition = await applyTaskTransition(db, {
         taskId: params.taskId,
         status: params.status,
+        ...t2_4Lifecycle,
         at: new Date(),
         expectedRevision: task.stateRevision,
         extra: {
@@ -608,8 +620,11 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         };
       }
 
-      // Auto-trigger downstream
-      if (params.status === "done") {
+      // Auto-trigger downstream（t2-4 口径修订：解锁判据从 status==="done" 改为
+      // **实际落库的 lifecycle 到达 submitted/completed**——done-only 谎报仍会解锁下游，
+      // 行为与改造前一致；但 working 态下被状态机拒绝的转移不再误触发。
+      // review approve 通道把任务推进到 completed 时其自身不解锁：已在此处随 submitted 解锁。）
+      if (params.status === "done" && ["submitted", "completed"].includes(mainTransition.to.lifecycleStatus ?? "")) {
         await triggerDownstream(params.taskId);
       }
 

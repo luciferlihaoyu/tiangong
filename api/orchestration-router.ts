@@ -3,7 +3,7 @@ import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { tasks, taskDependencies, agents } from "@db/schema";
 import { eq, and, inArray } from "drizzle-orm";
-import { applyTaskTransition } from "./lib/task-transition";
+import { applyTaskTransition, isTerminalLifecycle } from "./lib/task-transition";
 import { wsManager } from "./ws-manager";
 import { emitCollabSummaryForTask } from "./lib/collaboration-events";
 import { applyRequestedAgentToInput } from "./lib/task-metadata";
@@ -310,8 +310,10 @@ export const orchestrationRouter = createRouter({
           if (retryCount >= maxRetries) {
             return { success: false, error: `已达最大重试次数 (${maxRetries})` };
           }
-          // 终态 failed → queued 重试语义：restart 例外。现网不可达（映射表放行
-          // failed→queued 走主更新），仅随切片 7 转换保持结构不变量。
+          // 终态 failed → queued 重试语义：restart 例外。
+          // t2-5 修正原注释事实断言：本分支**可达**——validTransitions 只查粗粒度 status，
+          // lifecycleStatus 已是终态 failed 的行走主更新会被转移服务状态机拒绝、落进本分支；
+          // 上方 maxRetries 闸在 retryCount 耗尽时封死重派（结构性失败不再原样重派）。
           const retryTransition = await applyTaskTransition(db, {
             taskId: input.id,
             status: "queued",
@@ -370,13 +372,23 @@ export const orchestrationRouter = createRouter({
       if (input.output !== undefined) updates.output = input.output;
       if (input.error !== undefined) updates.error = input.error;
 
+      // ── t2-4 两段式（第一段，任务中心/首页 updateStatus 面）──
+      // 与 reportTaskProgress / MCP update_task_status 同一语义：status="done" 且未显式给
+      // lifecycleStatus → 映射 submitted 等验收；不映射的话 #198 形状换这条通道照样
+      // 直达 done、绕过验收。completed 只能由验收通道（a2a.review / taskboard.approve）推进。
+      // 分支条件收窄到 done-only：显式 lifecycleStatus 照旧透传过状态机；failed 族走终态推导。
+      const t2_4Lifecycle =
+        input.status === "done" && input.lifecycleStatus === undefined && !isTerminalLifecycle(task.lifecycleStatus ?? "")
+          ? ({ lifecycleStatus: "submitted" } as const)
+          : {};
+
       // §3-3：主更新走转移服务；带 lifecycleStatus 时还接受状态机校验（消灭漂移写入），
       // 工具自身的 validTransitions 映射仍是前置契约闸门
       const transition = await applyTaskTransition(db, {
         taskId: input.id,
         status: input.status,
         ...(projectedBoardStatus ? { boardStatus: projectedBoardStatus } : {}),
-        ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
+        ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : t2_4Lifecycle),
         at: new Date(),
         expectedRevision: task.stateRevision,
         extra: {
@@ -398,7 +410,10 @@ export const orchestrationRouter = createRouter({
       }
 
       // Auto-trigger downstream when task completes
-      if (input.status === "done") {
+      // t2-4 口径修订：解锁判据从 status==="done" 收紧为 **实际落库的 lifecycle 到达
+      // submitted/completed**——done-only 谎报仍会随 submitted 解锁下游（行为与改造前一致）；
+      // working 态下被状态机拒绝的转移不再误触发。
+      if (input.status === "done" && ["submitted", "completed"].includes(transition.to.lifecycleStatus ?? "")) {
         await triggerDownstream(input.id);
       }
       if (input.status === "done" || input.status === "failed") {

@@ -173,10 +173,19 @@ export async function reportTaskProgress(
   if (input.status || input.lifecycleStatus) {
     const at = new Date();
     let baseRevision = taskRow.stateRevision;
-    // 连接器的"完成"= 提交+复核通过（与内部执行器同构）：当前生命周期不能直达 completed
-    //（状态机规定 completed 只能从 submitted/reviewing 进入）时，先转 submitted 再转
-    // completed——两次转移、两次修订号递增。状态机不被绕开，外部连接器 API 也不变。
-    if (input.lifecycleStatus === "completed" && !["submitted", "reviewing"].includes(taskRow.lifecycleStatus ?? "")) {
+    // ── t2-4 两段式（第一段）：外部只报 status="done"、未显式给 lifecycleStatus ──
+    // 「执行完成 ≠ 归档完成」：谎报 done 不再直达 completed。落库映射为
+    // lifecycleStatus=submitted（粗粒度 status=done 由下方 applyTaskTransition 照写），
+    // 等 review approve / taskboard.approve 通道把它推进到 completed 才产生完成记录+归档。
+    // ⚠️ 分支条件收窄到此形态本身：显式 lifecycleStatus（含 "completed"）的回写**不进**
+    // 本映射——已按完整生命周期集成的调用方走 :179 区的既有闸（hop submitted / 放行 /
+    // 拒绝），语义不变。内部 Runner（task-runner auto-review）不经本函数，不在本语义范围。
+    const effectiveLifecycle =
+      input.lifecycleStatus ?? (input.status === "done" ? ("submitted" as const) : undefined);
+    if (effectiveLifecycle === "completed" && !["submitted", "reviewing"].includes(taskRow.lifecycleStatus ?? "")) {
+      // 兼容通道（t2-4 第 3 点保留原状）：显式 completed 但当前不在 submitted/reviewing →
+      // 先转 submitted 再转 completed——两次转移、两次修订号递增。状态机不被绕开，
+      // 外部连接器 API 也不变（§3-3 组合流原文）。
       const hop = await applyTaskTransition(db, {
         taskId: input.id,
         lifecycleStatus: "submitted",
@@ -191,7 +200,7 @@ export async function reportTaskProgress(
     const written = await applyTaskTransition(db, {
       taskId: input.id,
       ...(input.status ? { status: input.status } : {}),
-      ...(input.lifecycleStatus ? { lifecycleStatus: input.lifecycleStatus } : {}),
+      ...(effectiveLifecycle ? { lifecycleStatus: effectiveLifecycle } : {}),
       ...(input.error !== undefined ? { error: input.error } : {}),
       at,
       expectedRevision: baseRevision,
@@ -225,10 +234,17 @@ export async function reportTaskProgress(
     }
   }
 
-  // 完成任务（通过审批闸门后）→ 统一归档入口：写璇玑记忆 + 上传 AList 产物（尽力而为，失败不影响完成）
+  // ── t2-4 两段式（终态动作归属）──
+  // 外部回写 status="done"（未显式 lifecycleStatus）在第一段已映射为 submitted：**不再**
+  // enqueueTaskFinalize(completed)——#198 形状（执行体谎报 done 直接生成完成记录+归档）
+  // 就此封死。completed 归档的唯一责任通道是验收侧：a2a.review(approved)、
+  // taskboard.approve、以及本函数兼容通道放行后的 completed（见下）。
+  // 判别条件与第一段一致：只有**实际落库生命周期为 completed** 的回写才归档。
   if (taskRow && (input.status === "done" || input.lifecycleStatus === "completed")) {
-    // 外部用量记账（任务 1.4）：完成时把执行体上报的 token 用量折算入账
-    // （写 token_usage + 原子递增 agents.spentCents，尽力而为，失败不影响完成）
+    const landedCompleted = input.lifecycleStatus === "completed";
+    // 外部用量记账（任务 1.4）：在提交此刻入账，**不等验收**——token 已经花了，
+    // 验收只决定归档时机，不决定记账时机（花了的钱不等验收；碧霄 t2-4 裁决原文）。
+    // （尽力而为，失败不影响回写主流程；recordExternalUsage 各子步骤自带 catch。）
     if (input.usage) {
       await recordExternalUsage(db, {
         taskId: taskRow.id,
@@ -240,12 +256,15 @@ export async function reportTaskProgress(
         source: "external",
       });
     }
-    // §3-4 可靠投递：改为持久入队，由 finalize-actions sweeper 执行。
-    await enqueueTaskFinalize(db, {
-      taskId: taskRow.id,
-      taskPublicId: taskRow.taskId,
-      outcome: "completed",
-    });
+    // §3-4 可靠投递：持久入队，由 finalize-actions sweeper 执行。
+    // done-only（submitted 段）到此为止；显式 completed（兼容/验收方确认通道）才入队。
+    if (landedCompleted) {
+      await enqueueTaskFinalize(db, {
+        taskId: taskRow.id,
+        taskPublicId: taskRow.taskId,
+        outcome: "completed",
+      });
+    }
   }
   // 失败教训写璇玑（任务 3.1 质量反哺）：外部执行体回写 status=failed 即视为终态失败——
   // 重试由外部自主决定（failed→queued 的重派不经过天宫），天宫不代管重试轮次，

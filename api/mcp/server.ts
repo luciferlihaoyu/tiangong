@@ -54,8 +54,10 @@ import { HIGH_COST_THRESHOLD_CENTS, KNOWN_HIGH_COST_MODELS } from "../guard-rout
 import { enqueueTaskFinalize } from "../lib/finalize-actions";
 import { applyTaskTransition, isTerminalLifecycle } from "../lib/task-transition";
 import { claimNextTask } from "../lib/task-claim";
+import { reviewTask } from "../lib/task-review";
 import { reportTaskProgress, UpdateProgressInputSchema } from "../lib/task-writeback";
 import { checkTaskWriteAuthorized, getArtifactInsertabilityError, getArtifactContentTooLargeError, assertTaskWriteAuthorizedOrMcp } from "../lib/task-authz";
+import { computeAuditHash, type SafeAuditMetadata } from "../lib/audit-log";
 import { createTraceId, applyRequestedAgentToInput } from "../lib/task-metadata";
 import { isUniqueConstraintViolation } from "../lib/db-error";
 import {
@@ -160,6 +162,58 @@ function adminDeniedResult() {
   return failResult(
     "此 MCP Key 缺少 admin 权限。请管理员在 MCP 面板为该 Key 的 permissions 字段添加 \"admin\"（mcp.updateKey）。"
   );
+}
+
+/**
+ * p2.5-b：cancel_task 的 audit_events 留痕（await 直插，链式哈希）。
+ *
+ * 为何不走 writeAuditEvent 单例：模块级 fire-and-forget 队列跨测试实例泄漏、
+ * 且终态写成功与否应当同步可判——本函数 await 落库，取消回执返回前审计必已入账。
+ * 行形状与 api/lib/audit-log.ts 单例落的行**完全同构**（prev_hash/hash 链字段、
+ * createdAt 秒对齐——floorToSecond 同款算术；audit-integrity 校验器一视同仁），
+ * list_recent_events / events-router 可读。
+ *
+ * actorUserId 编码：agent Key 用 **-agentId**（负数域与 users.id 正数域天然不撞，
+ * 审计读侧据此区分"哪个 agent 取消的"）；env-only/管理位 Key 用 0（与 mcp.createKey
+ * 既有哨兵口径一致）。reason 截 200 字符入 metadata（工具入参已限 500，防 metadata 膨胀）。
+ */
+async function recordCancelAudit(
+  db: ReturnType<typeof getDb>,
+  input: { taskId: number; taskPublicId: string; reason: string; actorUserId: number }
+): Promise<void> {
+  const metadata: SafeAuditMetadata & { channel?: string; reason?: string } = {
+    taskId: input.taskPublicId,
+    channel: "mcp.cancel",
+    reason: input.reason.slice(0, 200),
+  };
+  const metadataJson = JSON.stringify(metadata);
+  // 与 audit-log 的 floorToSecond 同款：哈希串与落库值必须逐字节一致，否则链验证断裂
+  const now = new Date(Math.trunc(Date.now() / 1000) * 1000);
+  const tail = await db
+    .select({ id: auditEvents.id, hash: auditEvents.hash })
+    .from(auditEvents)
+    .orderBy(desc(auditEvents.id))
+    .limit(1)
+    .then((r) => r[0] ?? null);
+  const prevHash = tail?.hash ?? null;
+  const hash = computeAuditHash(prevHash, {
+    event: "task:cancelled",
+    actorUserId: input.actorUserId,
+    entityType: "task",
+    entityId: input.taskId,
+    metadataJson,
+    createdAt: now,
+  });
+  await db.insert(auditEvents).values({
+    event: "task:cancelled",
+    actorUserId: input.actorUserId,
+    entityType: "task",
+    entityId: input.taskId,
+    metadata: metadataJson,
+    createdAt: now,
+    prevHash,
+    hash,
+  });
 }
 
 // ─── AList 路径安全（read_alist，任务 2.2） ───
@@ -1447,6 +1501,16 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         return failResult(`任务状态已被其他写入推进（${transition.reason}），取消未生效`);
       }
 
+      // p2.5-b：取消是受控写操作，必须在平台审计账本留痕（此前只有 finalize 队列
+      // 与 task_messages 级回执，audit_events 对取消零记录）。放在转移成功之后、
+      // 入队归档之前——转移失败/重复取消不落痕（守卫在前，见拒绝分支）。
+      await recordCancelAudit(db, {
+        taskId: task.id,
+        taskPublicId: task.taskId,
+        reason,
+        actorUserId: ctx.agentId === null ? 0 : -ctx.agentId,
+      });
+
       // Phase B §3-2：取消也要走**统一终态动作**。原先这里只写 status=failed，
       // 于是取消的任务：教训不进记忆（检索不到）、产物不归档、协作父任务汇总永远
       // 不触发、也没有失败教训通知。终态写入在前，归档动作在后（archive 失败绝不影响
@@ -1652,6 +1716,41 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
         // TRPCError（越权 FORBIDDEN 等）转机器可判别的 errorResult（isError=true）；
         // 携带 TRPCError code 前缀，方便调用方按 FORBIDDEN/... 分支处理
         if (error instanceof TRPCError) return errorResult(`${error.code}: ${error.message}`);
+        throw error;
+      }
+    }
+  );
+
+  // Tool 24.5（p2.5-a）: 验收收尾——MCP 面的 completed 唯一入口
+  // 背景（#211 教材）：本文件口径注释写明「completed 只能由验收通道（a2a.review /
+  // taskboard.approve）推进」，但工具面此前没有 review 入口，外部验收方（L1 闸走
+  // MCP Key 接入）永远无法收尾 submitted 单。现把 a2a.review 过程体抽入共享 lib
+  // （api/lib/task-review.ts），两面同一事实源：鉴权复用同一 canReviewTask 判定
+  // （actor 映射与 report_progress 同口径：env/admin Key = -1 管理位、绑定 Key =
+  // agentId>0——key-binding 两级解析修复后 MCP 面的 bound agent 可信），高风险
+  // self-approve 防线 checkCompletionGate 原样生效，**零放宽**。
+  server.tool(
+    "review_task",
+    "[天宫] 验收收尾：submitted/reviewing→completed（归档 finalize 由此触发）；高风险未过闸任务拒绝 approve",
+    {
+      taskId: z.number().describe("任务 ID（数字）"),
+      approved: z.boolean().describe("true=验收通过落 completed；false=打回评审（reviewing）"),
+      note: z.string().max(2000).optional().describe("验收备注（进审计事件内容）"),
+    },
+    async (params) => {
+      // actor 映射对齐 tRPC 语义（与 report_progress 同款）：env/admin Key = -1
+      // （管理位），绑定 Key = ctx.agentId（>0）。userRole=null：MCP 面无登录用户，
+      // canReviewTask 对 null userRole 不拦截、按 Key 支判定——与 tRPC 纯 Key 请求逐字同判。
+      const apiKeyAgentId = ctx.agentId === null ? -1 : ctx.agentId;
+      try {
+        const result = await reviewTask(getDb(), { userRole: null, userId: null, apiKeyAgentId }, params);
+        // 业务失败（越权 FORBIDDEN / 生命周期前置检查 / 闸门拦停）统一 isError，
+        // 让调用方机器判别失败（与本文件执行面工具同口径）。
+        if (!result.success) return errorResult(result.error);
+        return textResult(result);
+      } catch (error) {
+        // "Task not found" 等过程体异常转 errorResult，不抛穿 MCP 协议层
+        if (error instanceof Error) return errorResult(error.message);
         throw error;
       }
     }

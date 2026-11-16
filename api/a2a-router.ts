@@ -4,9 +4,9 @@ import { getDb } from "./queries/connection";
 import { tasks, agents, taskMessages, taskArtifacts, taskThreads } from "@db/schema";
 import { eq, desc, asc, and } from "drizzle-orm";
 import { wsManager } from "./ws-manager";
-import { checkCompletionGate, parkTaskForApproval } from "./lib/execution-gate";
-import { canReviewTask } from "./lib/task-authz";
 import { enqueueTaskFinalize } from "./lib/finalize-actions";
+import { reviewTask } from "./lib/task-review";
+import { recordTaskEvent } from "./lib/task-events";
 import { LIFECYCLE_STATUSES, isValidLifecycleTransition, applyTaskTransition } from "./lib/task-transition";
 import { getInsertId } from "./lib/insert-id";
 
@@ -19,28 +19,6 @@ import { getInsertId } from "./lib/insert-id";
 
 
 const lifecycleStatusEnum = z.enum(LIFECYCLE_STATUSES);
-
-/** 记录 task_message 事件 */
-async function recordTaskEvent(
-  input: {
-    taskId: number;
-    fromAgentId?: number;
-    toAgentId?: number;
-    eventType: typeof taskMessages.$inferInsert["eventType"];
-    content?: string;
-    metadata?: Record<string, unknown>;
-  }
-) {
-  const db = getDb();
-  await db.insert(taskMessages).values({
-    taskId: input.taskId,
-    fromAgentId: input.fromAgentId ?? null,
-    toAgentId: input.toAgentId ?? null,
-    eventType: input.eventType,
-    content: input.content ?? null,
-    metadata: input.metadata ? JSON.stringify(input.metadata) : null,
-  });
-}
 
 /** 记录 task_artifact */
 async function recordArtifact(
@@ -404,91 +382,16 @@ export const a2aRouter = createRouter({
   review: authedQuery
     .input(z.object({ taskId: z.number(), approved: z.boolean(), note: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
+      // p2.5-a 抽壳：过程体逐字节搬入 api/lib/task-review.ts（reviewTask），
+      // 与 MCP 工具面 review_task 共享同一事实源——鉴权判定、高风险 self-approve
+      // 防线、转移、审计事件、completed 归档 finalize 触发全部同源，本薄壳零逻辑。
+      // actor 三字段语义与旧过程体内联判定完全一致（ctx.user?.role ?? null 等）。
       const db = getDb();
-      const task = await db.select().from(tasks).where(eq(tasks.id, input.taskId)).then((r) => r[0]);
-      if (!task) throw new Error("Task not found");
-
-      // 验收身份判定（2026-11 缺陷修复 + A2A 编排闭环补全）：此前挂 adminQuery，API Key 在中间件即 401，
-      // connector 自动收尾永远进不了过程体（"Task reviewed and approved" 审计长期缺失、
-      // 下方旧的 admin-agent 检查成为死代码）。现改 authedQuery + canReviewTask：
-      // admin 登录用户 / 管理型 Key / 任务执行者本人 / admin 角色 agent / **被指派的验收方
-      // （task.reviewerId，submit 时按父任务 agentId > dispatcherAgentId 落库）**可验收；
-      // 普通登录用户与非执行者且非验收方的 agent Key 拒绝。
-      // ⚠️ 高风险 self-approve 防线仍在下方 checkCompletionGate——本判定不放宽闸门，
-      //    reviewer 验收高风险任务同样被拦停，绝不落 completed。
-      let actorAgentRole: string | null = null;
-      if (ctx.apiKeyAgentId !== null && ctx.apiKeyAgentId > 0) {
-        const actorAgent = await db.select().from(agents).where(eq(agents.id, ctx.apiKeyAgentId)).then((r) => r[0]);
-        actorAgentRole = actorAgent?.role ?? null;
-      }
-      const authz = canReviewTask(
+      return reviewTask(
+        db,
         { userRole: ctx.user?.role ?? null, userId: ctx.user?.id ?? null, apiKeyAgentId: ctx.apiKeyAgentId },
-        { agentId: task.agentId, reviewerId: task.reviewerId ?? null },
-        actorAgentRole
+        input
       );
-      if (!authz.ok) {
-        return { success: false, error: authz.reason };
-      }
-      const actorLabel = authz.actorLabel;
-
-      // 只能从 submitted 或 reviewing 进入 review
-      if (!["submitted", "reviewing"].includes(task.lifecycleStatus ?? "")) {
-        return { success: false, error: `Cannot review task from status ${task.lifecycleStatus}. Must be submitted or reviewing.` };
-      }
-
-      // 执行审批闸门：高风险任务不得被无条件批准完成（connector 不得 self-approve）
-      if (input.approved) {
-        const gate = checkCompletionGate(task);
-        if (gate.status === "blocked") {
-          await parkTaskForApproval(db, task, { requiresApproval: true, riskTypes: gate.riskTypes });
-          return { success: false, error: gate.reason, lifecycleStatus: task.lifecycleStatus };
-        }
-      }
-
-      const nextStatus: (typeof LIFECYCLE_STATUSES)[number] = input.approved ? "completed" : "reviewing";
-      if (!isValidLifecycleTransition(task.lifecycleStatus ?? "created", nextStatus)) {
-        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
-      }
-
-      // completedAt 由服务在 approved 时按同一个 at 写入（非 approved 分支原先只是把
-      // task.completedAt 原值再写一遍，等价于不动，故不再显式传）。
-      const transition = await applyTaskTransition(db, {
-        taskId: input.taskId,
-        lifecycleStatus: nextStatus,
-        status: input.approved ? "done" : task.status,
-        at: new Date(),
-        expectedRevision: task.stateRevision,
-        extra: { progress: input.approved ? 100 : task.progress },
-      });
-      if (!transition.ok) {
-        return { success: false, error: `Invalid lifecycle transition: ${task.lifecycleStatus} → ${nextStatus}` };
-      }
-
-      await recordTaskEvent({
-        taskId: input.taskId,
-        eventType: input.approved ? "result" : "system",
-        // 验收记录写明"谁验收的"：actorLabel 同时进内容（人可读）与 metadata（机器可查）。
-        content: `${input.note ?? (input.approved ? "Task reviewed and approved" : "Task under review")} [by ${actorLabel}]`,
-        metadata: { approved: input.approved, previousStatus: task.lifecycleStatus, lifecycleStatus: nextStatus, actorLabel },
-      });
-
-      if (input.approved) {
-        // 审批通过 → 统一归档入口。§3-4 可靠投递：改为持久入队。
-        await enqueueTaskFinalize(db, {
-          taskId: task.id,
-          taskPublicId: task.taskId,
-          outcome: "completed",
-        });
-        wsManager.broadcastToDashboard({
-          type: "a2a_complete",
-          taskId: task.taskId,
-          taskDbId: input.taskId,
-          lifecycleStatus: nextStatus,
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      return { success: true, lifecycleStatus: nextStatus };
     }),
 
   fail: authedQuery

@@ -59,8 +59,87 @@ const MAX_TARGET = 500;
 const MAX_PREVIEW = 5000;
 
 /**
- * 从任务 input 中提取"可被审批策略评估的自然语言文本"。
- * input 可能是 { payload, metadata } envelope、纯 JSON，或纯文本。
+ * p2.5-e：从任务 input 中只提取**人类语义文本**，供风险分类器使用。
+ *
+ * 为什么必须收窄（生产实锤 #216/#217）：分类器原先吃的是"整个 input 的序列化文本"。
+ * 凡经 mjs / escalation 建的单，input 必带 metadata.origin.system:"mcp" 与
+ * payload.idempotencyKey —— camelCase 转小写后天然含 "key"，于是 approval-policy 的
+ * mcp_key_change 规则（要求同时命中 "mcp" 与 key/token/rotate/... 任一动作词）**必然误命中**，
+ * TaskRunner 每轮 tick 把这些普通文案单 park 成"待人工审批"，新单全卡。
+ * 同类形状对 storage_delete / newapi_write / webhook_call 等 containsAll 规则一样成立
+ * （结构字段名本身就是英文词根：idempotencyKey / apikey / token / channel / budget）。
+ *
+ * 本函数只取人写的自然语言：ticket.content.summary/detail、acceptance.checks、notes、
+ * 以及自由文本 payload；**metadata / routing / trace / origin / policies / refs /
+ * importance / idempotencyKey / deliverable.path / source.eventId / executor / initiator
+ * 等系统结构字段一律不进**。动词表本身一字未动——收紧词表是另一层决策，避免把真高危漏掉。
+ */
+export function extractRiskText(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return trimmed;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+  if (parsed === null || typeof parsed !== "object") return trimmed;
+  if (Array.isArray(parsed)) return null; // 数组无固定人类语义字段，宁可不喂
+
+  const record = parsed as Record<string, unknown>;
+  const parts: string[] = [];
+  const payload = record.payload;
+
+  if (typeof payload === "string") {
+    parts.push(payload);
+  } else if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    const payloadRecord = payload as Record<string, unknown>;
+    const ticket = payloadRecord.ticket;
+    if (ticket !== null && typeof ticket === "object" && !Array.isArray(ticket)) {
+      // ticket-v2（tg-create-task.mjs / escalation 建单）：只有 content / acceptance / notes 是人写的
+      const t = ticket as Record<string, unknown>;
+      const content = t.content;
+      if (content !== null && typeof content === "object" && !Array.isArray(content)) {
+        for (const key of ["summary", "detail"] as const) {
+          const value = (content as Record<string, unknown>)[key];
+          if (typeof value === "string") parts.push(value);
+        }
+      }
+      const acceptance = t.acceptance;
+      if (acceptance !== null && typeof acceptance === "object" && !Array.isArray(acceptance)) {
+        const checks = (acceptance as Record<string, unknown>).checks;
+        if (Array.isArray(checks)) {
+          for (const check of checks) if (typeof check === "string") parts.push(check);
+        }
+      }
+      if (typeof t.notes === "string") parts.push(t.notes);
+    } else {
+      // 通用对象 payload：只认明确的人写字段名，其余键（含 *Key/*Token 类结构字段）不猜
+      for (const key of ["prompt", "task", "text", "goal", "summary", "description", "content"] as const) {
+        const value = payloadRecord[key];
+        if (typeof value === "string") parts.push(value);
+      }
+    }
+  } else if (typeof record.input === "string") {
+    parts.push(record.input);
+  } else if (typeof record.task === "string") {
+    parts.push(record.task);
+  } else if (typeof record.prompt === "string") {
+    parts.push(record.prompt);
+  } else if (typeof record.description === "string") {
+    parts.push(record.description);
+  }
+
+  const joined = parts.join(" ").trim();
+  return joined.length > 0 ? joined : null;
+}
+
+/**
+ * 从任务 input 中提取"可展示/可存档的任务正文文本"（供人工审批预览与预审阅读）。
+ * ⚠️ 不得用于风险分类——那会重犯 p2.5-e 的全量文本误伤；分类请用 extractRiskText。
  */
 export function extractTaskPayload(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -97,16 +176,20 @@ export function getApprovalState(input: string | null | undefined): ApprovalStat
   };
 }
 
-/** 用既有审批策略评估任务是否要求人工审批 */
+/**
+ * 用既有审批策略评估任务是否要求人工审批。
+ *
+ * p2.5-e：喂给规则引擎的文本 = name + description（人写的）+ extractRiskText(input)
+ * （input 里的人类语义部分）。序列化后的整段 input / metadata / origin /
+ * idempotencyKey 等系统结构字段**不进分类器**（#216/#217 全卡事故根因）。
+ */
 export function evaluateTaskExecution(task: TaskLike): ExecutionDecision {
-  const payload = extractTaskPayload(task.input);
-  const targetText = (task.description ?? payload ?? "").slice(0, MAX_TARGET);
-  const previewText = (payload ?? task.description ?? task.name ?? "task").slice(0, MAX_PREVIEW);
-  const decision = evaluateApproval({
-    action: (task.name || task.description || task.taskId || "task").slice(0, MAX_ACTION),
-    ...(targetText.length > 0 ? { target: targetText } : {}),
-    ...(previewText.length > 0 ? { preview: previewText } : {}),
-  });
+  const riskText = extractRiskText(task.input);
+  const combinedAction = [task.name, task.description ?? "", riskText ?? ""]
+    .filter((part) => part.length > 0)
+    .join(" ")
+    .slice(0, MAX_ACTION);
+  const decision = evaluateApproval({ action: combinedAction || "task" });
   return { requiresApproval: decision.approvalRequired, riskTypes: decision.riskTypes };
 }
 
@@ -164,7 +247,10 @@ export function checkCompletionGate(task: TaskLike): GateCheck {
 
 /** 构造"待审批"的 TaskMetadata 补丁（decision = pending） */
 export function buildApprovalPatch(task: TaskLike, decision: ExecutionDecision): TaskMetadataPatch {
-  const payload = extractTaskPayload(task.input);
+  // p2.5-e：给人工审批看的 preview 优先用**人类语义文本**（分类同源、可读），
+  // 整段序列化 input 只作兜底——ticket envelope 原样塞进预览既不可读，也是旧误伤的来源形状。
+  const humanText = extractRiskText(task.input);
+  const payload = humanText ?? extractTaskPayload(task.input);
   const approval = createApprovalRequest({
     riskType: decision.riskTypes[0],
     requestedByTaskId: task.taskId,

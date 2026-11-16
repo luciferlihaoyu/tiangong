@@ -111,4 +111,38 @@ describe("tRPC API Key 身份解析：绑定 agent 不得塌成管理级", () =>
     const result = await createCaller(ctx).review({ taskId: 300, approved: true });
     expect(String((result as { error?: string }).error ?? "")).not.toContain("FORBIDDEN");
   });
+
+  // ── round-6 上线后生产实证补刀（2026-11-16）──────────────────────────────
+  // 现象：女娲的 `agents.mcp_token` 打真实进程仍得 `-1`（review 返回"Cannot review…"＝鉴权已过），
+  // 而库内 `SELECT id FROM agents WHERE mcp_token=?` 明明返回 id=1；一级查询对其它 8 家正常。
+  // 结论：FakeDb 只证伪了"逻辑分支写错"，证伪不了**驱动返回值形状**——drizzle 的投影查询
+  // `select({id: agents.id})` 在不同适配器下不保证给出 JS number。故以下三条把**形状**当被测面。
+  const KEY_SHAPE_STR_ID = "tg-shape-string-id-token";
+  const KEY_SHAPE_BIG_ID = "tg-shape-bigint-id-token";
+  const KEY_SHAPE_NO_FIELD = "tg-shape-keyrow-without-agentid";
+
+  it("二级解析容忍字符串形态的 agents.id（驱动返回文本即此形状）", async () => {
+    await db.insert(agents).values({ id: "31", name: "形状-字符串", role: "测试", mcpToken: KEY_SHAPE_STR_ID } as any);
+    _globalApiKeys.add(KEY_SHAPE_STR_ID);
+    const ctx = await ctxFor(KEY_SHAPE_STR_ID);
+    expect(ctx.apiKeyAgentId).toBe(31);
+  });
+
+  it("二级解析容忍 BigInt 形态的 agents.id", async () => {
+    await db.insert(agents).values({ id: 32n, name: "形状-BigInt", role: "测试", mcpToken: KEY_SHAPE_BIG_ID } as any);
+    _globalApiKeys.add(KEY_SHAPE_BIG_ID);
+    const ctx = await ctxFor(KEY_SHAPE_BIG_ID);
+    expect(ctx.apiKeyAgentId).toBe(32);
+  });
+
+  it("一级命中行但行内没有 agentId 字段时，必须继续走二级兜底", async () => {
+    // 模拟映射异常/列名失配：key 表有这把 Key，却没有可用的 agentId。
+    // 早前的写法 `if (row) return null;` 会在这里当场判定"孤儿 Key"，
+    // 直接跳到 -1，**把二级兜底整条跳过**——这正是生产上女娲那条路径的形状。
+    await db.insert(mcpApiKeys).values({ id: 900, key: KEY_SHAPE_NO_FIELD, name: "映射异常行", active: "true" } as any);
+    await db.insert(agents).values({ id: 33, name: "形状-兜底", role: "测试", mcpToken: KEY_SHAPE_NO_FIELD } as any);
+    _globalApiKeys.add(KEY_SHAPE_NO_FIELD);
+    const ctx = await ctxFor(KEY_SHAPE_NO_FIELD);
+    expect(ctx.apiKeyAgentId).toBe(33);
+  });
 });

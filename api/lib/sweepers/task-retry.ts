@@ -56,8 +56,22 @@ export async function sweepTaskRetry(db: Db, now: Date): Promise<void> {
     const maxRetries = task.maxRetries ?? DEFAULT_MAX_RETRIES;
     if (retryCount >= maxRetries) continue;
 
-    // 用户在任务板明确放弃（cancelled）的不复活
-    if (task.boardStatus === "cancelled" || task.boardStatus === "done") continue;
+    // 已明确放弃的不复活。**两面都要看**（F6，2026-11-16 生产实证，任务 #210）：
+    // 本闸原先只读 boardStatus，而 boardStatus 只覆盖"人在任务板上点了取消"这一条路。
+    // 事实是 `cancel_task`（api/mcp/server.ts:1431-1446）经单一转移服务如实写齐
+    // `lifecycleStatus='cancelled'` + `status='failed'`（status 由 cancelled 推导）——
+    // 而本函数的候选查询正是按 `status='failed'` 捞，于是**取消动作会被撤销**：
+    // 生产序列 02:33:08 cancel_task 即销 → 02:38:37 本清扫器复活成 queued →
+    // 因 agent_id IS NULL 被内建 Runner 以 503 打死 → 再次 failed → 再复活，直到 3 次预算耗尽，
+    // 并把"1 个非终态任务 agent_id 为 NULL"的哨兵告警长期挂着。
+    // 刻意**不**去解析 error 文案里的 `[cancelled]` 前缀：字符串不是事实源，状态列才是。
+    if (
+      task.boardStatus === "cancelled" ||
+      task.boardStatus === "done" ||
+      task.lifecycleStatus === "cancelled"
+    ) {
+      continue;
+    }
 
     // 线性退避：第 n 次重试等 n * base
     const backoffMs = RETRY_BACKOFF_BASE_MS * (retryCount + 1);

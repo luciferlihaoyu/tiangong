@@ -220,3 +220,50 @@ describe("t2-5 第二段：retryCount 耗尽后重派通道全部关闭", () => 
     expect((await taskRow(id)).status).toBe("failed");
   });
 });
+
+// ── F6（2026-11-16 生产实证，任务 #210）───────────────────────────────────────
+// 事实（已逐条开码核对，api/mcp/server.ts:1431-1446）：`cancel_task` 走单一转移服务，
+// 如实写齐 `lifecycle_status='cancelled'` + `status='failed'`（后者由前者推导）+ error `[cancelled] …`。
+// 缺陷在清扫器这一侧：候选按 `status='failed'` 捞，而防复活闸**只读 boardStatus**——
+// 任务板取消能挡住，MCP 取消挡不住，于是**取消动作被清扫器原样撤销**。
+// 生产序列（#210 线程实测）：02:32:36 建单 → 02:33:08 cancel_task 即销 →
+// 02:38:37 被复活成 queued（`auto_retry 第 1/3 次`）→ 因 agent_id IS NULL 会被内建 Runner
+// 以 503 打死再 failed，直到 3 次预算耗尽；期间"1 个非终态任务 agent_id 为 NULL"的哨兵告警长期挂着。
+// 修法只加一条状态列判据 `lifecycleStatus === 'cancelled'`；**不**去解析 error 文案——
+// 字符串前缀不是事实源，状态列才是（解析它等于把同一个缺陷换个地方再种一遍）。
+describe("F6：已取消的任务不得被重试清扫器复活", () => {
+  it("lifecycle_status=cancelled 而 board_status 未同步（#210 的真实形状）→ 不重派", async () => {
+    const id = await seedTask({
+      failedAt: BACKOFF_PAST,
+      retryCount: 0,
+      maxRetries: 3,
+      lifecycleStatus: "cancelled",
+      boardStatus: "triage",
+      error: "[cancelled] 幂等验证完成，按纪律即建即销",
+    });
+    const before = await taskRow(id);
+    await sweepTaskRetry(testDb.db as never, NOW);
+    const row = await taskRow(id);
+    expect(row.status).toBe("failed");
+    expect(row.lifecycleStatus).toBe("cancelled");
+    expect(row.retryCount).toBe(0);
+    // 零写入证据：状态版本没被推进，说明压根没走 applyTaskTransition
+    expect(row.stateRevision).toBe(before.stateRevision);
+  });
+
+  it("既有闸不得被写宽：board_status=cancelled 仍不重派（防只改 lifecycle 把老保护顶掉）", async () => {
+    const id = await seedTask({ failedAt: BACKOFF_PAST, boardStatus: "cancelled", lifecycleStatus: "failed" });
+    await sweepTaskRetry(testDb.db as never, NOW);
+    const row = await taskRow(id);
+    expect(row.status).toBe("failed");
+    expect(row.retryCount).toBe(0);
+  });
+
+  it("反面必须守住：lifecycle_status=failed 的普通失败仍要正常重派（闸不能误伤真重试）", async () => {
+    const id = await seedTask({ failedAt: BACKOFF_PAST, lifecycleStatus: "failed", boardStatus: "failed" });
+    await sweepTaskRetry(testDb.db as never, NOW);
+    const row = await taskRow(id);
+    expect(row.status).toBe("queued");
+    expect(row.retryCount).toBe(1);
+  });
+});

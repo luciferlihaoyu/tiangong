@@ -13,6 +13,7 @@ import {
   ORIGIN_SYSTEM_TIANGONG,
   assertDeclaredExecutor,
   findTaskByIdempotencyKey,
+  resolveReviewerAgentRef,
   toReusedTaskResult,
 } from "./lib/create-task-gate";
 
@@ -150,6 +151,13 @@ export const orchestrationRouter = createRouter({
       // t2-2：幂等键。同 (origin_system='tiangong', key) 重复建单不报错，
       // 返回已存在任务（reused:true）。列与唯一索引早已存在，本次只是开放使用。
       idempotencyKey: z.string().min(1).max(191).optional(),
+      // p2.5-c：验收方标注。agents.agentId 字符串（如 "dsh"）或正整数 db id——
+      // 解析风格与 requestedAgentId 同款（trim 空白=未提供），但本参数**必须查有此人**：
+      // 解析失败 = 业务拒绝（fail-closed），绝不静默丢标注落 null。
+      // ⚠️ 优先级契约：显式参数 > taskboard submit 的 parent/dispatcher 推断——
+      // 本处直接落 tasks.reviewerId；submit 路径的推断逻辑一字不动（它只在该列为空时补位，
+      // 两条路径并存时以本显式值为准，见 tests/api/create-task-reviewer-annotation.test.ts d 组）。
+      reviewerAgentId: z.union([z.string().min(1).max(100), z.number().int().positive()]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
@@ -158,7 +166,11 @@ export const orchestrationRouter = createRouter({
       // agent_id=NULL 抢单并必然失败（历史 #61/#62/#198），入口直接拒。
       assertDeclaredExecutor(input);
 
-      const { dependsOn, requestedAgentId, idempotencyKey, ...taskData } = input;
+      const { dependsOn, requestedAgentId, idempotencyKey, reviewerAgentId, ...taskData } = input;
+      // ── p2.5-c 验收方标注解析（fail-closed：查无此人即业务拒绝，绝不静默落 null）──
+      const reviewerRef = await resolveReviewerAgentRef(db, reviewerAgentId);
+      if (reviewerRef.error) return { success: false, error: reviewerRef.error };
+      const explicitReviewerId = reviewerRef.reviewerId ?? null;
       // 归属声明：requestedAgentId 是期望执行者的 agentId 字符串（如 "dsh"），
       // 写入 input metadata routing.selectedAgentId，认领侧据此阻止其他 agent 抢单。
       const routedInput = applyRequestedAgentToInput(taskData.input, requestedAgentId);
@@ -189,6 +201,9 @@ export const orchestrationRouter = createRouter({
             maxRetries: taskData.maxRetries ?? 3,
             timeoutMs: taskData.timeoutMs ?? 300000,
             parentTaskId: taskData.parentTaskId ?? null,
+            // p2.5-c：显式验收方标注（null = 未提供，与今日逐字一致；taskboard submit
+            // 的推断逻辑不动，并存时显式优先——见 createTask input 注释）
+            reviewerId: explicitReviewerId,
             createdByAgentId,
             originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
             idempotencyKey: normalizedKey,
@@ -247,6 +262,8 @@ export const orchestrationRouter = createRouter({
           maxRetries: taskData.maxRetries ?? 3,
           timeoutMs: taskData.timeoutMs ?? 300000,
           parentTaskId: taskData.parentTaskId ?? null,
+          // p2.5-c：显式验收方标注（与上方依赖分支同口径；null = 未提供，行为逐字不变）
+          reviewerId: explicitReviewerId,
           createdByAgentId,
           originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,
           idempotencyKey: normalizedKey,

@@ -14,7 +14,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
-import { tasks } from "../../db/schema";
+import { agents, tasks } from "../../db/schema";
 import type { Db } from "./execution-gate";
 
 /** 天宫内部建单（orch.createTask / MCP create_task）的来源系统标识 */
@@ -90,4 +90,71 @@ export function toReusedTaskResult(row: typeof tasks.$inferSelect): ReusedTaskRe
     status: row.status,
     reused: true,
   };
+}
+
+// ─── p2.5-c：验收方（acceptor）标注解析 ──────────────────────────────
+//
+// 背景（#211 实证）：tasks.reviewerId 此前只能由 taskboard submit 路径按
+// 「父任务 agentId > dispatcherAgentId」推断；外部派单（MCP 直建、无 parent/
+// dispatcher）落库 reviewerId=null → 收尾只剩 executor 自审。本切片只开**标注
+// 通道**：createTask / create_task 接受可选 reviewerAgentId，解析成功落
+// tasks.reviewerId。**零鉴权语义变化**——canReviewTask 现状（executor/reviewer
+// 都可验收）逐字节不动，「指定 reviewer 后禁止 executor 自审」是后续编排层决策，另票。
+
+/** 解析失败文案的唯一事实源：tRPC / MCP 两处调用点必须逐字一致，防止漂移 */
+export function reviewerAnnotationRejectedMessage(raw: string | number): string {
+  return (
+    `reviewerAgentId "${raw}" 已被拒绝：按 agents.agentId 字符串与正整数 db id 双口径解析均不存在该 Agent。` +
+    "验收方标注 fail-closed——不静默降级为 null（静默丢失标注会让派单方误以为独立验收已挂名，实际回落到 executor 自审）"
+  );
+}
+
+/**
+ * 把 reviewerAgentId（agents.agentId 字符串 或 正整数 agents.id）解析成数字 db id。
+ * 返回 undefined = 未提供/空白串（等同未标注，走缺省）；
+ * 返回 { error } = 提供了但查无此 agent —— **调用方必须拒绝建单**（fail-closed），
+ * 绝不允许把解析失败当"没标"继续插入。
+ * 解析风格对齐 requestedAgentId（trim 后空白视为未提供）；双口径先字符串后数字：
+ * 纯数字串同样先按 agentId 字符串试（agentId 是 TEXT 列，理论上可存 "17"），
+ * 未命中再按 db id 查——两口径都查不到才判不存在。
+ */
+export async function resolveReviewerAgentRef(
+  db: Db,
+  raw: unknown,
+): Promise<{ reviewerId?: undefined; error?: undefined } | { reviewerId: number; error?: undefined } | { reviewerId?: undefined; error: string }> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === "number") {
+    if (!Number.isInteger(raw) || raw <= 0) return { error: reviewerAnnotationRejectedMessage(raw) };
+    const byId = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.id, raw))
+      .then((r) => r[0]);
+    if (!byId) return { error: reviewerAnnotationRejectedMessage(raw) };
+    return { reviewerId: byId.id };
+  }
+  if (typeof raw === "string") {
+    const normalized = raw.trim();
+    if (!normalized) return {}; // 空白 = 未提供（hasDeclaredExecutor 同款 trim 口径）
+    const byStr = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.agentId, normalized))
+      .then((r) => r[0]);
+    if (byStr) return { reviewerId: byStr.id };
+    // 数字形态的字符串（如 "17"）：退化为 db id 再查一发
+    if (/^\d+$/.test(normalized)) {
+      const asNum = Number(normalized);
+      if (Number.isSafeInteger(asNum) && asNum > 0) {
+        const byId = await db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.id, asNum))
+          .then((r) => r[0]);
+        if (byId) return { reviewerId: byId.id };
+      }
+    }
+    return { error: reviewerAnnotationRejectedMessage(raw) };
+  }
+  return { error: reviewerAnnotationRejectedMessage(String(raw)) };
 }

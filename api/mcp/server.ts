@@ -65,6 +65,7 @@ import {
   EXECUTOR_REQUIRED_MESSAGE,
   hasDeclaredExecutor,
   findTaskByIdempotencyKey,
+  resolveReviewerAgentRef,
 } from "../lib/create-task-gate";
 import { resolveAlistConfig, alistList, alistDownloadUrl } from "../connectors/alist";
 import { createXuanjiClient } from "../connectors/xuanji/service";
@@ -445,7 +446,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
   // Tool 1: 创建任务
   server.tool(
     "create_task",
-    "[天宫] 创建新任务，支持依赖其他任务。执行人必须指定：requestedAgentId（指名归属）或数字 agentId（直派）至少给一个——两者皆缺的通用单已被服务端拒绝（t2-2，历史 #61/#62/#198：agent_id=NULL 的任务会被内建 Runner 抢走并以失败收场）。可选 idempotencyKey：同 key 重复建单不报错，返回已存在任务（reused:true）。",
+    "[天宫] 创建新任务，支持依赖其他任务。执行人必须指定：requestedAgentId（指名归属）或数字 agentId（直派）至少给一个——两者皆缺的通用单已被服务端拒绝（t2-2，历史 #61/#62/#198：agent_id=NULL 的任务会被内建 Runner 抢走并以失败收场）。可选 idempotencyKey：同 key 重复建单不报错，返回已存在任务（reused:true）。可选 reviewerAgentId（p2.5-c）：验收方标注，落 tasks.reviewerId；查无此人即拒绝建单（fail-closed），只开标注通道、不改鉴权语义。",
     {
       name: z.string().describe("任务名称"),
       agentId: z.number().optional().describe("分配给的 Agent ID"),
@@ -455,6 +456,7 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       input: z.string().optional().describe("输入数据 (JSON 字符串)"),
       requestedAgentId: z.string().min(1).max(100).optional().describe("期望执行 Agent 的 agentId（如 \"dsh\"）。指定后此任务只允许该 agent 认领，防止被其他空闲 agent 抢走。**必须**与 agentId 至少给一个：不给任何执行人的通用单会被服务端直接拒绝（t2-2，原「不指定 = 通用任务」语义已作废）。"),
       idempotencyKey: z.string().min(1).max(191).optional().describe("幂等键（t2-2）：同一 key 重复建单返回同一个任务号，不会重复派活。"),
+      reviewerAgentId: z.union([z.string().min(1).max(100), z.number().int().positive()]).optional().describe("验收方标注（p2.5-c）：agents.agentId 字符串（如 \"dsh\"）或正整数 db id。解析成功落 tasks.reviewerId，供 review_task 以 (reviewer) 身份收尾；查无此人 → 拒绝建单（fail-closed，绝不静默降级为 null）。本参数只开标注通道，不改变任何鉴权语义——executor 现状仍可自审，收紧另票。与 taskboard submit 的父任务推断并存时显式值优先。"),
       maxRetries: z.number().min(0).max(10).optional().default(3).describe("最大重试次数"),
       timeoutMs: z.number().min(1000).max(3600000).optional().default(1800000).describe("超时毫秒（上限 3600000=60 分钟）。按任务类型参考：连通性/问答 300000(5min)；文本写作/翻译/分析 900000(15min)；代码/数据处理/图像生成(≤5张) 1800000(30min)；图像批量+自检/复杂多步骤 3600000(60min)。openclaw 侧执行链路全局窗口 57 分钟，超过 60 分钟的任务需先与碧霄确认异步方案。默认 1800000(30min)。"),
     },
@@ -462,6 +464,12 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
       const db = getDb();
       // ── t2-2 执行人闸门（与 orch.createTask 共用 create-task-gate 事实源）──
       if (!hasDeclaredExecutor(params)) return failResult(EXECUTOR_REQUIRED_MESSAGE);
+
+      // ── p2.5-c 验收方标注解析（fail-closed：查无此人即拒绝，绝不静默落 null；
+      //    与 orch.createTask 共用 resolveReviewerAgentRef 同一文案事实源）──
+      const reviewerRef = await resolveReviewerAgentRef(db, params.reviewerAgentId);
+      if (reviewerRef.error) return errorResult(reviewerRef.error);
+      const explicitReviewerId = reviewerRef.reviewerId ?? null;
 
       // ── t2-2 幂等前置查重（并发竞态另由下方唯一冲突兜底）──
       const normalizedKey = params.idempotencyKey?.trim() || null;
@@ -481,6 +489,8 @@ export function getMcpServer(ctx: McpToolContext = EMPTY_CONTEXT): McpServer {
           input: routedInput,
           maxRetries: params.maxRetries ?? 3,
           timeoutMs: params.timeoutMs ?? 1800000,
+          // p2.5-c：显式验收方标注（null = 未提供，与今日逐字一致）
+          reviewerId: explicitReviewerId,
           // t2-3：建单者 = MCP Key 绑定的 Agent；env-only Key（agentId=null）留 NULL，绝不抛错
           createdByAgentId: ctx.agentId ?? null,
           originSystem: normalizedKey ? ORIGIN_SYSTEM_TIANGONG : null,

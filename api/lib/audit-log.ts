@@ -52,6 +52,8 @@ export const AUDIT_EVENT_NAMES = [
   // ── Server-side sweeper events ──
   "task:timeout",
   "task:retry_storm",
+  // p2.5-b：MCP cancel_task 受控写留痕（平台审计账本此前对取消零记录）
+  "task:cancelled",
   "agent:heartbeat_timeout",
   "task:approval_stale",
   "task:dispatch_requeued",

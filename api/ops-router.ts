@@ -326,19 +326,26 @@ export const opsRouter = createRouter({
    * 所以这里直接调 runBackupJob，不走 sweeper 的间隔判断。
    */
   backupRun: authedQuery.mutation(async () => {
-    const { backupDir, createBackupUploader } = await import("./lib/sweepers/db-backup");
+    const { backupDir, createBackupUploader, noteBackupRun } = await import("./lib/sweepers/db-backup");
     const { resolveDbPath } = await import("./queries/connection");
     const { runBackupJob } = await import("./lib/db-backup");
 
     // 上传一律走 createBackupUploader（本地时区落点 + AES-256-GCM）——
     // 这里原本硬编码着第二份「/tiangong/db-backups + 明文」实现：路径在 AList
     // 上不存在，且绕开了加密。手动端点绝不能比自动端点更少防护。
+    const now = new Date();
     const report = await runBackupJob({
       dbPath: resolveDbPath(env.databaseUrl ?? ""),
       destDir: backupDir(),
       keep: sweeperConfig.dbBackupKeep,
+      now,
       upload: await createBackupUploader(),
     });
+
+    // C-2（2026-11-16）：手动跑完必须回写进程内状态，否则 `backupStatus` 面板继续显示
+    // `lastRunAt: null`——手动备份成功了但运维看不见，与"备份到底行不行"的判据脱钩。
+    // 走单一入口 noteBackupRun，与定时 sweeper 同一条写状态的路。
+    noteBackupRun(now, report);
 
     return report;
   }),

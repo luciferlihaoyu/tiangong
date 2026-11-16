@@ -106,6 +106,21 @@ export function backupSweepState(): BackupSweepState & { snapshots: SnapshotInfo
   return { ...state, snapshots: listSnapshots(backupDir()) };
 }
 
+/**
+ * 把"这一轮确实跑过一次备份"记进模块级 state——面板 `lastRunAt/lastReport` 的唯一来源。
+ *
+ * 为什么要单独导出（C-2，2026-11-16）：`ops.backupRun`（手动"立即备份"）**有意绕开** sweeper 的
+ * 节流判断直调 `runBackupJob`，但当时只 `return report`、从不回写 state，于是手动备份成功之后
+ * `backupStatus` 仍显示 `lastRunAt: null`（AGENTS.md 记的"运维面板空白"即此）。
+ * 面板与真实行为脱钩比没有面板更坏——人会以为从没备过，进而重复触发或误判链条已断。
+ * 现在定时 sweeper 与手动端点**都只经这一个入口**写状态，杜绝再次漂移。
+ */
+export function noteBackupRun(now: Date, report: BackupJobReport): void {
+  state.lastRunAt = now.toISOString();
+  state.lastReport = report;
+  state.skippedReason = null;
+}
+
 export function backupDir(): string {
   return path.join(env.artifactRoot ?? "/app/data/tiangong-artifacts", "backups");
 }
@@ -145,8 +160,7 @@ export async function sweepDbBackup(_db: unknown, now: Date): Promise<void> {
     upload: await createBackupUploader(),
   });
 
-  state.lastRunAt = now.toISOString();
-  state.lastReport = report;
+  noteBackupRun(now, report);
 
   if (report.ok) {
     const bits = [report.detail];

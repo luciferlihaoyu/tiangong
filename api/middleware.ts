@@ -3,6 +3,8 @@ import { verifyToken } from "./local-auth-router";
 import { readFileSync } from "node:fs";
 import { verifyMcpKey } from "./mcp/auth";
 import { verifyServiceKey, type ServicePrincipal } from "./lib/beidou-service-keys";
+import { getDb } from "./queries/connection";
+import { resolveBoundAgentId } from "./lib/key-binding";
 
 // ─── API Key validation ───
 // Global token set populated by boot.ts on startup
@@ -51,8 +53,17 @@ async function verifyApiKey(headerValue: string | null): Promise<ApiKeyResolutio
   // Check env-based keys
   if (!_envKeys) _envKeys = loadEnvKeys();
   if (_envKeys.has(val)) return { valid: true, boundAgentId: null };
-  // Check DB-based keys (populated by boot.ts)
-  if (_globalApiKeys.has(val)) return { valid: true, boundAgentId: null };
+  // Check DB-based keys (populated by boot.ts from agents.mcp_token)
+  if (_globalApiKeys.has(val)) {
+    // 2026-11-16 修复：此处原本直接 `return { valid: true, boundAgentId: null }`，而本文件
+    // createContext 写的是 `apiKeyAgentId = boundAgentId ?? -1` —— 于是 boot 装载的 12 把
+    // agent 现役凭证（`agents.mcp_token`）**全部**以"未绑定管理级"身份进来，
+    // canReviewTask / canWriteTaskStatus / agent-router 的 "Key 与目标 Agent 不匹配" 一起空转。
+    // 生产铁证：task_messages id=991 `content` 尾部 `[by key:unbound]`，而那把 Key 绑着 agent 14。
+    // 现在按两级解析拿回真实绑定；解析不到（真管理级凭证 / DB 故障）仍归 -1，语义与从前一致。
+    const bound = await resolveBoundAgentId(getDb(), val);
+    return { valid: true, boundAgentId: bound ?? null };
+  }
 
   const mcpAuth = await verifyMcpKey(val);
   if (!mcpAuth.valid) return { valid: false, boundAgentId: null };

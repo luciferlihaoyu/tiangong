@@ -131,7 +131,11 @@ describe("Connector authentication with issued MCP keys", () => {
     // Given
     _globalApiKeys.add(GLOBAL_KEY);
     const agent2: DbRow = { id: 2, name: "CodeMaster", orgId: null };
-    dbMocks.queueSelectResults([[agent2], [], [queuedTask], [], [queuedTask]]); // 空 [] = task-claim.ts `const inflight` 单飞闸查询（口径见本文件首个认领用例注释）；末行供转移服务重读
+    // 最前两个 [] = createContext 的绑定解析两次查询（先 `mcp_api_keys.key`，查不到再退
+    // `agents.mcp_token`；定位用 grep 'resolveBoundAgentId'）。GLOBAL_KEY **故意**两张表都不塞，
+    // 这样它才归"未绑定管理级 -1"、才有"可为任意 agent 认领"的语义——本用例测的就是这把管理级通道。
+    // 后面的空 [] = task-claim.ts `const inflight` 单飞闸查询；末行供转移服务重读。
+    dbMocks.queueSelectResults([[], [], [agent2], [], [queuedTask], [], [queuedTask]]);
     const caller = await callerForKey(GLOBAL_KEY);
 
     // When
